@@ -41,6 +41,9 @@ pub struct FileTree {
     // Uncommitted-changes status vs HEAD, refreshed alongside the tree.
     // Empty whenever the workspace isn't a git repo.
     git_statuses: Rc<RefCell<HashMap<PathBuf, GitFileStatus>>>,
+    // Absolute paths git ignores (one per ignored dir). A row whose path
+    // is, or is under, one of these is greyed goldenrod (`.file-ignored`).
+    ignored: Rc<RefCell<HashSet<PathBuf>>>,
     // Decoded once and shared as *paintable data*, not as widgets: a GTK
     // widget can only ever have one parent, so reusing the same Image
     // widget instance across rows silently reparents it away from whichever
@@ -119,6 +122,7 @@ impl FileTree {
             collapsed: Rc::new(RefCell::new(HashSet::new())),
             clipboard: Rc::new(RefCell::new(None)),
             git_statuses: Rc::new(RefCell::new(HashMap::new())),
+            ignored: Rc::new(RefCell::new(HashSet::new())),
             folder_icon: crate::app::icons::paintable("folder"),
             file_icon: crate::app::icons::paintable("file"),
             json_icon: crate::app::icons::paintable("json"),
@@ -178,11 +182,13 @@ impl FileTree {
             return;
         };
 
-        let mut git_statuses = if root.join(".git").is_dir() {
-            crate::git::ops::GitController::new(&root).file_statuses()
+        let (mut git_statuses, ignored) = if root.join(".git").is_dir() {
+            let git = crate::git::ops::GitController::new(&root);
+            (git.file_statuses(), git.ignored_paths())
         } else {
-            HashMap::new()
+            (HashMap::new(), HashSet::new())
         };
+        self.ignored.replace(ignored);
 
         // Propagate each file's status up to every ancestor folder (and the
         // root itself), keeping the highest-priority one where several
@@ -224,6 +230,27 @@ impl FileTree {
                 self.entries.borrow_mut().push((path, is_dir));
             }
         }
+    }
+
+    /// Whether `path` is git-ignored, directly or via an ignored ancestor
+    /// directory (git reports one entry per ignored dir, not its contents).
+    fn is_ignored(&self, path: &Path) -> bool {
+        let ignored = self.ignored.borrow();
+        if ignored.is_empty() {
+            return false;
+        }
+        let root = self.root_path.borrow().clone();
+        let mut cur = Some(path);
+        while let Some(p) = cur {
+            if ignored.contains(p) {
+                return true;
+            }
+            if root.as_deref() == Some(p) {
+                break;
+            }
+            cur = p.parent();
+        }
+        false
     }
 
     /// Highlight the row backing `path`, if it is currently shown.
@@ -351,6 +378,12 @@ impl FileTree {
             hbox.append(&label);
             label
         };
+
+        // Git-ignored entries (and anything under an ignored dir) go
+        // goldenrod, JetBrains-style — but not the workspace root itself.
+        if !is_root && self.is_ignored(path) {
+            name_label.add_css_class("file-ignored");
+        }
 
         if is_root && let Some(path_str) = path.to_str() {
             let path_label = Label::new(Some(path_str));

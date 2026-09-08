@@ -1,5 +1,5 @@
 use git2::Repository;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 /// A file's status relative to HEAD, simplified to the categories the file
@@ -195,6 +195,31 @@ impl GitController {
         }
 
         result
+    }
+
+    /// Absolute paths of entries git ignores (one entry per ignored
+    /// directory — the contents aren't enumerated). Empty when the path
+    /// isn't a repo. Used to grey ignored rows in the file tree.
+    pub fn ignored_paths(&self) -> HashSet<PathBuf> {
+        let mut set = HashSet::new();
+        let Ok(repo) = Repository::open(&self.repo_path) else {
+            return set;
+        };
+        let mut opts = git2::StatusOptions::new();
+        opts.include_ignored(true)
+            .recurse_ignored_dirs(false)
+            .include_untracked(false);
+        let Ok(statuses) = repo.statuses(Some(&mut opts)) else {
+            return set;
+        };
+        for entry in statuses.iter() {
+            if entry.status().is_ignored()
+                && let Ok(path) = entry.path()
+            {
+                set.insert(self.repo_path.join(path.trim_end_matches('/')));
+            }
+        }
+        set
     }
 
     /// The checked-out branch's short name (e.g. `"main"`), or `None` on a

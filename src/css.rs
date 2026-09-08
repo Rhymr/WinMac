@@ -48,6 +48,9 @@ const PALETTE: &[(&str, &str, &str)] = &[
     ("text-modified", "#d19a66", "#a85f1d"),
     ("text-new", "#6fbf73", "#1f8a3d"),
     ("text-renamed", "#61afef", "#1568c9"),
+    // Git-ignored entries and read-only external-source trees — the muted
+    // goldenrod JetBrains uses for ignored / excluded nodes.
+    ("text-ignored", "#9e8b63", "#8a7a4a"),
     // VCS gutter change bars (JetBrains convention: green add / blue modify).
     ("vcs-added", "#59a869", "#4a8f3c"),
     ("vcs-modified", "#4a88c7", "#3573b8"),

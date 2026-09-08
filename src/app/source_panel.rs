@@ -379,15 +379,11 @@ impl SourcePanel {
             icon.set_css_classes(&["file-icon"]);
             hbox.append(&icon);
         }
-        let label = Label::new(Some(source.label()));
-        label.set_css_classes(&["dir-label"]);
+        // "Apple Notes  [read only]" reads as one bold phrase — every
+        // external source is read-only.
+        let label = Label::new(Some(&format!("{}  [read only]", source.label())));
+        label.set_css_classes(&["dir-label", "file-ignored"]);
         hbox.append(&label);
-
-        // "[read only]" hint — every external source is read-only.
-        let ro = Label::new(Some("[read only]"));
-        ro.set_css_classes(&["source-readonly-tag"]);
-        ro.set_margin_start(6);
-        hbox.append(&ro);
 
         let panel = self.clone();
         let key = key.to_string();
@@ -427,7 +423,7 @@ impl SourcePanel {
             hbox.append(&img);
         }
         let label = Label::new(Some(name));
-        label.set_css_classes(&["dir-label"]);
+        label.set_css_classes(&["dir-label", "file-ignored"]);
         hbox.append(&label);
 
         let panel = self.clone();
@@ -453,6 +449,7 @@ impl SourcePanel {
             hbox.append(&img);
         }
         let label = Label::new(Some(title));
+        label.set_css_classes(&["file-ignored"]);
         hbox.append(&label);
 
         let panel = self.clone();

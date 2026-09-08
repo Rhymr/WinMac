@@ -165,9 +165,8 @@
     background-color: var(--bg-mid);
 }
 
-.source-readonly-tag {
-    color: var(--text-muted);
-    font-size: 10px;
-    font-weight: bold;
-    background-color: inherit;
+/* Git-ignored entries and read-only external-source trees — muted
+   goldenrod, JetBrains-style. */
+.file-ignored {
+    color: var(--text-ignored);
 }
