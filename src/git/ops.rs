@@ -13,6 +13,93 @@ pub enum GitFileStatus {
     Modified,
 }
 
+/// Per-line change status of a file's current text vs the version in HEAD,
+/// for the editor's VCS gutter bars. `Deleted` marks the surviving line at
+/// the seam where one or more lines were removed.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum LineChange {
+    Added,
+    Modified,
+    Deleted,
+}
+
+/// Change type keyed by 0-based line number of `current_text`. Empty when
+/// `file_abs` isn't inside `repo_root`'s repo, there's no HEAD, or nothing
+/// changed. A file with no blob in HEAD (brand new / untracked) reports
+/// every line `Added`. Granularity is per hunk (the whole changed hunk gets
+/// one color), matching how JetBrains paints the gutter.
+pub fn line_changes(
+    repo_root: &Path,
+    file_abs: &Path,
+    current_text: &str,
+) -> HashMap<usize, LineChange> {
+    let mut out = HashMap::new();
+
+    let Ok(repo) = Repository::open(repo_root) else {
+        return out;
+    };
+    let Ok(rel) = file_abs.strip_prefix(repo_root) else {
+        return out;
+    };
+
+    let head_blob = repo
+        .head()
+        .ok()
+        .and_then(|head| head.peel_to_tree().ok())
+        .and_then(|tree| tree.get_path(rel).ok())
+        .and_then(|entry| repo.find_blob(entry.id()).ok());
+
+    let Some(head_blob) = head_blob else {
+        // Untracked / newly added — the whole file is new.
+        for line in 0..current_text.lines().count() {
+            out.insert(line, LineChange::Added);
+        }
+        return out;
+    };
+
+    let mut opts = git2::DiffOptions::new();
+    opts.context_lines(0);
+
+    let patch = match git2::Patch::from_blob_and_buffer(
+        &head_blob,
+        Some(rel),
+        current_text.as_bytes(),
+        Some(rel),
+        Some(&mut opts),
+    ) {
+        Ok(patch) => patch,
+        Err(_) => return out,
+    };
+
+    for h in 0..patch.num_hunks() {
+        let Ok((hunk, _)) = patch.hunk(h) else {
+            continue;
+        };
+        let new_start = hunk.new_start();
+        let new_lines = hunk.new_lines();
+        let old_lines = hunk.old_lines();
+
+        if new_lines == 0 {
+            // Pure deletion — flag the line just after the removed block.
+            out.entry(new_start.saturating_sub(1) as usize)
+                .or_insert(LineChange::Deleted);
+            continue;
+        }
+
+        let kind = if old_lines == 0 {
+            LineChange::Added
+        } else {
+            LineChange::Modified
+        };
+        let start = new_start.saturating_sub(1) as usize;
+        for line in start..start + new_lines as usize {
+            out.insert(line, kind);
+        }
+    }
+
+    out
+}
+
 pub struct GitController {
     repo_path: std::path::PathBuf,
 }

@@ -1,0 +1,159 @@
+name: Release
+
+# Builds Rhymr for macOS and Windows and publishes the binaries to a GitHub
+# Release. The version string is derived from git history by Build/version.sh
+# (see CLAUDE.md § Versioning) — nothing here is hand-bumped.
+
+on:
+  push:
+    branches: [release]
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Build only, don't publish a Release"
+        type: boolean
+        default: false
+
+permissions:
+  contents: write   # create the Release and upload assets
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  version:
+    runs-on: ubuntu-latest
+    outputs:
+      core: ${{ steps.v.outputs.core }}
+      full: ${{ steps.v.outputs.full }}
+      tag: ${{ steps.v.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0          # full history — version.sh counts commits
+          fetch-tags: true
+      - id: v
+        run: |
+          chmod +x Build/version.sh
+          core=$(Build/version.sh)
+          full=$(Build/version.sh --full)
+          echo "core=$core"           >> "$GITHUB_OUTPUT"
+          echo "full=$full"           >> "$GITHUB_OUTPUT"
+          echo "tag=v$core"           >> "$GITHUB_OUTPUT"
+          echo "### Rhymr \`$full\`" >> "$GITHUB_STEP_SUMMARY"
+
+  build:
+    needs: version
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-14
+            target: aarch64-apple-darwin
+            artifact: rhymr-macos-arm64
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            artifact: rhymr-windows-x64
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - uses: Swatinem/rust-cache@v2
+
+      # --- native GTK4 / libadwaita / GtkSourceView deps -----------------
+      # These are the parts most likely to need tuning per runner image.
+      - name: Install GTK (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          brew update
+          brew install gtk4 libadwaita gtksourceview5 pkg-config
+          echo "PKG_CONFIG_PATH=$(brew --prefix)/lib/pkgconfig" >> "$GITHUB_ENV"
+
+      - name: Install GTK (Windows, MSYS2)
+        if: runner.os == 'Windows'
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: UCRT64
+          update: true
+          install: >-
+            mingw-w64-ucrt-x86_64-gtk4
+            mingw-w64-ucrt-x86_64-libadwaita
+            mingw-w64-ucrt-x86_64-gtksourceview5
+            mingw-w64-ucrt-x86_64-pkgconf
+      - name: Put MSYS2 on PATH (Windows)
+        if: runner.os == 'Windows'
+        run: |
+          echo "D:/a/_temp/msys64/ucrt64/bin" >> "$env:GITHUB_PATH"
+          echo "PKG_CONFIG=D:/a/_temp/msys64/ucrt64/bin/pkgconf.exe" >> "$env:GITHUB_ENV"
+
+      - name: Build
+        run: cargo build --release --locked --target ${{ matrix.target }}
+        env:
+          RHYMR_VERSION_FULL: ${{ needs.version.outputs.full }}
+
+      # --- package -------------------------------------------------------
+      - name: Package (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          mkdir -p dist/rhymr
+          cp "target/${{ matrix.target }}/release/rhymr-rs" dist/rhymr/
+          cp -R assets dist/rhymr/
+          tar -C dist -czf "${{ matrix.artifact }}-${{ needs.version.outputs.core }}.tar.gz" rhymr
+
+      - name: Package (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force dist/rhymr | Out-Null
+          Copy-Item "target/${{ matrix.target }}/release/rhymr-rs.exe" dist/rhymr/
+          Copy-Item -Recurse assets dist/rhymr/
+          Compress-Archive -Path dist/rhymr/* -DestinationPath "${{ matrix.artifact }}-${{ needs.version.outputs.core }}.zip"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: |
+            *.tar.gz
+            *.zip
+          if-no-files-found: error
+
+  publish:
+    needs: [version, build]
+    if: github.event_name == 'push' || inputs.dry_run == false
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+      - name: Tag ${{ needs.version.outputs.tag }}
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          if git rev-parse "${{ needs.version.outputs.tag }}" >/dev/null 2>&1; then
+            echo "tag exists, skipping"
+          else
+            git tag -a "${{ needs.version.outputs.tag }}" -m "Rhymr ${{ needs.version.outputs.full }}"
+            git push origin "${{ needs.version.outputs.tag }}"
+          fi
+      - name: Publish Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.version.outputs.tag }}
+          name: Rhymr ${{ needs.version.outputs.core }}
+          body: |
+            Automated build of `${{ needs.version.outputs.full }}` from `${{ github.sha }}`.
+          files: artifacts/**/*
+          fail_on_unmatched_files: true

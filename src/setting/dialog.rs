@@ -164,12 +164,16 @@ pub fn show_settings_dialog(app: &Application, controller: Option<Rc<WorkspaceCo
         .margin_end(24)
         .build();
     appearance_page.append(&field_row("Theme:", &theme_dropdown));
-    appearance_page.append(&field_row("Font:", &font_button));
+    appearance_page.append(&field_row("Editor font:", &font_button));
     stack.add_named(&appearance_page, Some("appearance"));
 
     let gutter_toggle = CheckButton::builder()
         .label("Show syllable count in the gutter")
         .active(settings.show_syllable_gutter)
+        .build();
+    let vcs_gutter_toggle = CheckButton::builder()
+        .label("Show VCS change markers in the gutter")
+        .active(settings.show_vcs_gutter)
         .build();
     let auto_indent_toggle = CheckButton::builder()
         .label("Auto-indent new lines")
@@ -187,6 +191,7 @@ pub fn show_settings_dialog(app: &Application, controller: Option<Rc<WorkspaceCo
     tab_width_row.append(&tab_width_spin);
 
     let editor_page = page(&gutter_toggle, None);
+    editor_page.append(&vcs_gutter_toggle);
     editor_page.append(&auto_indent_toggle);
     editor_page.append(&tab_width_row);
     stack.add_named(&editor_page, Some("editor"));
@@ -294,6 +299,7 @@ pub fn show_settings_dialog(app: &Application, controller: Option<Rc<WorkspaceCo
     // one place that knows how to turn widgets into a `Settings`.
     let read_current: Rc<dyn Fn() -> Settings> = Rc::new({
         let gutter_toggle = gutter_toggle.clone();
+        let vcs_gutter_toggle = vcs_gutter_toggle.clone();
         let auto_indent_toggle = auto_indent_toggle.clone();
         let tab_width_spin = tab_width_spin.clone();
         let rhyme_toggle = rhyme_toggle.clone();
@@ -317,6 +323,7 @@ pub fn show_settings_dialog(app: &Application, controller: Option<Rc<WorkspaceCo
             };
             Settings {
                 show_syllable_gutter: gutter_toggle.is_active(),
+                show_vcs_gutter: vcs_gutter_toggle.is_active(),
                 rhyme_highlighting: rhyme_toggle.is_active(),
                 rhyme_stop_at_blank_line: rhyme_stop_at_blank_line_toggle.is_active(),
                 word_completion: completion_toggle.is_active(),
@@ -351,6 +358,7 @@ pub fn show_settings_dialog(app: &Application, controller: Option<Rc<WorkspaceCo
 
     for toggle in [
         &gutter_toggle,
+        &vcs_gutter_toggle,
         &auto_indent_toggle,
         &rhyme_toggle,
         &rhyme_stop_at_blank_line_toggle,

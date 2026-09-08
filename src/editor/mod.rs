@@ -1,5 +1,6 @@
 pub mod completion;
 pub mod stat;
+pub mod vcs_gutter;
 
 use crate::app::context_menu::{ContextMenu, hint};
 use crate::rhyme::highlight::RhymeHighlight;
@@ -18,6 +19,10 @@ use std::rc::Rc;
 /// How long to wait after the last keystroke before writing to disk.
 const AUTOSAVE_DEBOUNCE: std::time::Duration = std::time::Duration::from_millis(600);
 
+/// How long to wait after the last keystroke before recomputing the VCS
+/// gutter's per-line diff vs HEAD.
+const VCS_DEBOUNCE: std::time::Duration = std::time::Duration::from_millis(400);
+
 pub struct TextEditor {
     frame: Frame,
     source_view: SourceView,
@@ -30,6 +35,7 @@ pub struct TextEditor {
     modified: Rc<Cell<bool>>,
     gutter: Gutter,
     syllable_renderer: RefCell<Option<GutterRendererText>>,
+    vcs_renderer: Rc<RefCell<Option<vcs_gutter::VcsGutterRenderer>>>,
     completion: Completion,
     word_provider: RefCell<Option<WordCompletionProvider>>,
     rhyme_highlight: RefCell<Option<RhymeHighlight>>,
@@ -75,6 +81,8 @@ impl TextEditor {
         // actually land.
         let save_generation = Rc::new(Cell::new(0u64));
         let modified = Rc::new(Cell::new(false));
+        let vcs_renderer: Rc<RefCell<Option<vcs_gutter::VcsGutterRenderer>>> =
+            Rc::new(RefCell::new(None));
 
         let buffer_clone = buffer.clone();
         let path_ref = current_path.clone();
@@ -111,6 +119,35 @@ impl TextEditor {
                 }
             });
         });
+
+        // VCS gutter: recompute the per-line diff vs HEAD on its own short
+        // debounce after edits (independent of the autosave one above). The
+        // handler is a no-op whenever the renderer isn't attached (the
+        // "Show VCS gutter" setting is off).
+        {
+            let buffer_for_vcs = buffer.clone();
+            let path_for_vcs = current_path.clone();
+            let renderer_for_vcs = vcs_renderer.clone();
+            let vcs_generation = Rc::new(Cell::new(0u64));
+            buffer.connect_changed(move |_| {
+                if renderer_for_vcs.borrow().is_none() {
+                    return;
+                }
+                let this_generation = vcs_generation.get() + 1;
+                vcs_generation.set(this_generation);
+
+                let buffer_for_vcs = buffer_for_vcs.clone();
+                let path_for_vcs = path_for_vcs.clone();
+                let renderer_for_vcs = renderer_for_vcs.clone();
+                let vcs_generation = vcs_generation.clone();
+                glib::timeout_add_local_once(VCS_DEBOUNCE, move || {
+                    if vcs_generation.get() != this_generation {
+                        return;
+                    }
+                    recompute_vcs(&buffer_for_vcs, &path_for_vcs, &renderer_for_vcs);
+                });
+            });
+        }
 
         // Disable bracket matching
         buffer.set_highlight_matching_brackets(false);
@@ -151,6 +188,7 @@ impl TextEditor {
             modified,
             gutter,
             syllable_renderer: RefCell::new(None),
+            vcs_renderer,
             completion,
             word_provider: RefCell::new(None),
             rhyme_highlight: RefCell::new(None),
@@ -266,6 +304,33 @@ impl TextEditor {
         }
         drop(renderer_slot);
 
+        // VCS gutter — same add/remove-live pattern as the syllable renderer,
+        // plus a colour refresh so the bars follow a live theme switch.
+        let vcs_colors = vcs_colors(settings.theme);
+        let mut vcs_slot = self.vcs_renderer.borrow_mut();
+        match (vcs_slot.is_some(), settings.show_vcs_gutter) {
+            (false, true) => {
+                let renderer = vcs_gutter::VcsGutterRenderer::new();
+                renderer.set_colors(vcs_colors.0, vcs_colors.1, vcs_colors.2);
+                // Left of the line numbers (-30) and the syllable count (-20).
+                self.gutter.insert(&renderer, -40);
+                *vcs_slot = Some(renderer);
+            }
+            (true, false) => {
+                if let Some(renderer) = vcs_slot.take() {
+                    self.gutter.remove(&renderer);
+                }
+            }
+            (true, true) => {
+                if let Some(renderer) = vcs_slot.as_ref() {
+                    renderer.set_colors(vcs_colors.0, vcs_colors.1, vcs_colors.2);
+                }
+            }
+            _ => {}
+        }
+        drop(vcs_slot);
+        recompute_vcs(&self.buffer, &self.current_path, &self.vcs_renderer);
+
         let mut provider_slot = self.word_provider.borrow_mut();
         match (provider_slot.is_some(), settings.word_completion) {
             (false, true) => {
@@ -312,6 +377,7 @@ impl TextEditor {
     /// tab's initial content never triggers a spurious save.
     pub fn set_path(&self, path: PathBuf) {
         self.current_path.replace(Some(path));
+        recompute_vcs(&self.buffer, &self.current_path, &self.vcs_renderer);
     }
 
     pub fn get_widget(&self) -> &Frame {
@@ -329,6 +395,12 @@ impl TextEditor {
     /// word-count listener, independent of the autosave debounce above.
     pub fn connect_changed(&self, f: impl Fn() + 'static) {
         self.buffer.connect_changed(move |_| f());
+    }
+
+    /// Notify `f` whenever the caret moves — the status bar's line:col
+    /// readout.
+    pub fn connect_cursor_notify(&self, f: impl Fn() + 'static) {
+        self.buffer.connect_cursor_position_notify(move |_| f());
     }
 }
 
@@ -395,4 +467,43 @@ fn find_git_root(file_path: &std::path::Path) -> Option<PathBuf> {
         dir = current.parent();
     }
     None
+}
+
+/// Recompute the VCS gutter's per-line diff from the buffer's current text
+/// and hand it to the renderer, if one is attached. Clears it when there's
+/// no path or no repo.
+fn recompute_vcs(
+    buffer: &SourceBuffer,
+    path: &Rc<RefCell<Option<PathBuf>>>,
+    renderer: &Rc<RefCell<Option<vcs_gutter::VcsGutterRenderer>>>,
+) {
+    let Some(renderer) = renderer.borrow().clone() else {
+        return;
+    };
+    let Some(path) = path.borrow().clone() else {
+        renderer.set_changes(std::collections::HashMap::new());
+        return;
+    };
+    let Some(root) = find_git_root(&path) else {
+        renderer.set_changes(std::collections::HashMap::new());
+        return;
+    };
+    let text = buffer
+        .text(&buffer.start_iter(), &buffer.end_iter(), false)
+        .to_string();
+    renderer.set_changes(crate::git::ops::line_changes(&root, &path, &text));
+}
+
+/// The (added, modified, deleted) colour triple for the VCS gutter bars,
+/// matching the `--vcs-*` / `--destructive` palette rows in `crate::css`.
+fn vcs_colors(theme: crate::setting::Theme) -> (gdk::RGBA, gdk::RGBA, gdk::RGBA) {
+    let (added, modified, deleted) = match theme {
+        crate::setting::Theme::Dark => ("#59a869", "#4a88c7", "#c75450"),
+        crate::setting::Theme::Light => ("#4a8f3c", "#3573b8", "#c0392b"),
+    };
+    let parse = |hex: &str| {
+        hex.parse::<gdk::RGBA>()
+            .unwrap_or_else(|_| gdk::RGBA::new(0.5, 0.5, 0.5, 1.0))
+    };
+    (parse(added), parse(modified), parse(deleted))
 }

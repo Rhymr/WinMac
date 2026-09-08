@@ -1,8 +1,9 @@
-/* Source view styling. Font family/size come from the app-wide `* {}` rule
-   in base.scss, but `SourceView::monospace(true)` (see editor/mod.rs) adds
-   GTK's built-in `.monospace` class, whose bundled theme rule pins
-   `font-family: Monospace` at the same selector specificity as `* {}` —
-   restated explicitly here so the app's own font setting always wins. */
+/* Source view styling. base.scss's `* {}` now sets the OS *UI* font on every
+   widget; the editor is the one place that must stay on the monospace font
+   from Settings, so `--app-font-*` is re-pinned here (and on the gutter
+   renderers below). This also beats GTK's bundled `.monospace` theme rule,
+   which `SourceView::monospace(true)` adds and which pins `font-family:
+   Monospace` at `* {}` specificity. */
 sourceview {
     background-color: var(--bg-darkest);
     color: var(--text-dim);
@@ -33,16 +34,17 @@ sourceview {
     }
 }
 
-/* Gutter styling */
+/* Gutter styling — classic IDE: the gutter shares the editor's background
+   rather than sitting on a lighter strip. */
 .rhyme-editor-gutter {
     padding: 0;
     margin: 0;
     color: var(--text-muted);
     font-family: "Georgia", serif;
-    background-color: var(--bg-mid);
+    background-color: var(--bg-darkest);
 
     &:selected {
-        background-color: rgba(43, 82, 120, 0.4);
+        background-color: var(--bg-light);
     }
 }
 
@@ -52,26 +54,26 @@ sourceview {
     padding: 0;
     margin-left: 6px;
     margin-right: 8px;
-    background-color: var(--bg-mid);
-    font-family: monospace;
+    background-color: var(--bg-darkest);
+    font-family: var(--app-font-family);
     text-align: center;
 
     &:selected {
-        background-color: rgba(43, 82, 120, 0.4);
+        background-color: var(--bg-light);
     }
 }
 
 .line-numbers {
-    background-color: var(--bg-mid);
+    background-color: var(--bg-darkest);
     color: var(--text-number);
-    border-right: 1px solid var(--bg-darkest);
+    border-right: 1px solid var(--border-dark);
     padding: 0;
     margin: 0;
-    font-family: monospace;
+    font-family: var(--app-font-family);
     text-align: center;
 
     &:selected {
-        background-color: rgba(43, 82, 120, 0.4);
+        background-color: var(--bg-light);
     }
 
     & + .syllable-count {
@@ -80,8 +82,21 @@ sourceview {
 }
 
 .rhyme-editor {
-    line-height: 1.6;
-    border: 1px solid var(--border-dark);
+    line-height: 1.5;
+    // No inner border — the panel divider (.editor-container / paned
+    // separator) is what separates the editor from the file tree, classic
+    // IDE style.
+    border: none;
+}
+
+/* VCS change bar column — a thin strip left of the line numbers. The bars
+   themselves are painted in Rust (src/editor/vcs_gutter.rs); this only
+   reserves the width. */
+.vcs-gutter {
+    padding: 0;
+    margin: 0;
+    min-width: 4px;
+    background-color: var(--bg-darkest);
 }
 
 /* base.scss's `scrolledwindow`/`frame` rules already zero out

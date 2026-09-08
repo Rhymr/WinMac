@@ -4,8 +4,9 @@ use gtk::{CssProvider, gdk};
 use std::cell::RefCell;
 use std::fs;
 
-const CSS_FILES: [&str; 12] = [
+const CSS_FILES: [&str; 14] = [
     "assets/{1}/base.{1}",
+    "assets/{1}/chrome.{1}",
     "assets/{1}/context_menu.{1}",
     "assets/{1}/dialog.{1}",
     "assets/{1}/editor.{1}",
@@ -15,6 +16,7 @@ const CSS_FILES: [&str; 12] = [
     "assets/{1}/notebook.{1}",
     "assets/{1}/rhyme_search.{1}",
     "assets/{1}/settings.{1}",
+    "assets/{1}/splash.{1}",
     "assets/{1}/status_bar.{1}",
     "assets/{1}/welcome.{1}",
 ];
@@ -24,52 +26,65 @@ const CSS_FILES: [&str; 12] = [
 /// the only place that reads this, so base.scss carries no hardcoded
 /// `:root` colors of its own to drift out of sync with a second copy here.
 const PALETTE: &[(&str, &str, &str)] = &[
-    ("bg-darkest", "#1e1e1e", "#ffffff"),
-    ("bg-dark", "#2e2e2e", "#f3f3f3"),
-    ("bg-mid", "#3e3e3e", "#ececec"),
-    ("bg-light", "#4e4e4e", "#dcdcdc"),
-    ("bg-hover", "#404040", "#e6e6e6"),
-    ("text-bright", "#ffffff", "#1a1a1a"),
-    ("text-dim", "#e1e1e1", "#2b2b2b"),
-    ("text-not-so-dim", "#bababa", "#4a4a4a"),
-    ("text-muted", "#888888", "#767676"),
-    ("text-number", "#666666", "#9a9a9a"),
-    ("text-green", "#00ff00", "#1a7f37"),
+    // Dark column = classic Darcula; light column = classic "IntelliJ Light".
+    ("bg-darkest", "#2b2b2b", "#ffffff"),
+    ("bg-dark", "#3c3f41", "#ececec"),
+    ("bg-mid", "#45494a", "#ffffff"),
+    ("bg-light", "#4e5254", "#d9d9d9"),
+    ("bg-hover", "#4b4f51", "#ededed"),
+    ("text-bright", "#bbbbbb", "#1d1d1d"),
+    ("text-dim", "#a9b7c6", "#2b2b2b"),
+    ("text-not-so-dim", "#a0a0a0", "#4a4a4a"),
+    ("text-muted", "#808080", "#8c8c8c"),
+    ("text-number", "#606366", "#9a9a9a"),
+    ("text-green", "#6a8759", "#4a8f3c"),
     ("text-modified", "#d19a66", "#a85f1d"),
     ("text-new", "#6fbf73", "#1f8a3d"),
     ("text-renamed", "#61afef", "#1568c9"),
-    ("border-dark", "#000000", "#d0d0d0"),
-    ("border-light", "#5e5e5e", "#c7c7c7"),
-    ("border-hover", "#cfcfcf", "#8a8a8a"),
-    ("border-active", "#8e8e8e", "#6e6e6e"),
-    ("button-hover", "#707070", "#dcdcdc"),
-    ("button-active", "#484848", "#cacaca"),
-    ("button-disabled", "#2c2c2c", "#f0f0f0"),
-    ("selection-bg", "#2b5278", "#3a6ea5"),
-    ("selection-hover", "#366391", "#4a80b8"),
-    ("selection-active", "#1e4271", "#2c5680"),
+    // VCS gutter change bars (JetBrains convention: green add / blue modify).
+    ("vcs-added", "#59a869", "#4a8f3c"),
+    ("vcs-modified", "#4a88c7", "#3573b8"),
+    ("border-dark", "#2b2b2b", "#c0c0c0"),
+    ("border-light", "#4c4c4c", "#c0c0c0"),
+    ("border-hover", "#5e6060", "#a6a6a6"),
+    ("border-active", "#6b6b6b", "#6e6e6e"),
+    ("button-hover", "#4c5052", "#e0e0e0"),
+    ("button-active", "#5a5d5f", "#d0d0d0"),
+    ("button-disabled", "#3a3d3f", "#f0f0f0"),
+    ("selection-bg", "#2f65ca", "#2675bf"),
+    ("selection-hover", "#365880", "#4080c0"),
+    ("selection-active", "#1f4a7a", "#1c5a9e"),
     // Elevated surface for popovers/context menus — a shade off the panel
     // background so the menu reads as floating above it.
-    ("popover-bg-color", "#34373c", "#ffffff"),
-    ("popover-fg-color", "#ffffff", "#1a1a1a"),
+    ("popover-bg-color", "#3c3f41", "#ffffff"),
+    ("popover-fg-color", "#bbbbbb", "#1d1d1d"),
     // Text/icon color for anything painted on top of an accent/destructive
     // surface (selected rows, suggested/destructive buttons) — always
     // light, independent of `--text-bright`, which flips per theme.
     ("selection-fg", "#ffffff", "#ffffff"),
-    ("destructive", "#b23b3b", "#c53030"),
-    ("destructive-hover", "#c94444", "#d64545"),
-    ("destructive-active", "#942f2f", "#a52a2a"),
+    ("destructive", "#c75450", "#c0392b"),
+    ("destructive-hover", "#d16460", "#d0473a"),
+    ("destructive-active", "#a5423f", "#a32f24"),
     ("destructive-text", "#e57474", "#b3261e"),
 ];
 
 /// Theme-invariant spacing/radius/motion tokens, applied consistently
 /// across every custom widget for a cohesive, modern feel.
 const TOKENS: &str = r#":root {
-    --radius-sm: 4px;
-    --radius-md: 6px;
-    --radius-lg: 9px;
-    --transition-fast: 100ms ease-out;
-    --transition-normal: 150ms ease-out;
+    /* Boxy classic look — everything is square. `--radius-*` are kept as
+       named hooks (rather than deleting them from every stylesheet) but all
+       resolve to 0. */
+    --radius-sm: 0;
+    --radius-md: 0;
+    --radius-lg: 0;
+    --transition-fast: 60ms linear;
+    --transition-normal: 90ms linear;
+    /* Chrome (everything outside the editor) uses the OS UI font, classic-IDE
+       style; the editor + its gutter keep the monospace `--app-font-*` set
+       from Settings (see editor.scss). Pango picks the first installed
+       family from the list; unknown names are skipped. */
+    --ui-font-family: "SF Pro Text", "Helvetica Neue", "Segoe UI", Cantarell, "Ubuntu", "Noto Sans", sans-serif;
+    --ui-font-size: 12px;
 }
 "#;
 
@@ -108,9 +123,9 @@ fn theme_css(settings: &Settings) -> String {
     // Mirror the accent/destructive roles onto libadwaita's own named
     // colors so native Adwaita chrome (the header bar, its buttons) reads
     // as part of the same system rather than stock GNOME blue/red.
-    let selection_bg = if is_dark { "#2b5278" } else { "#3a6ea5" };
-    let selection_hover = if is_dark { "#366391" } else { "#4a80b8" };
-    let destructive = if is_dark { "#b23b3b" } else { "#c53030" };
+    let selection_bg = if is_dark { "#2f65ca" } else { "#2675bf" };
+    let selection_hover = if is_dark { "#365880" } else { "#4080c0" };
+    let destructive = if is_dark { "#c75450" } else { "#c0392b" };
     vars.push_str(&format!(
         "    --accent-bg-color: {selection_bg};\n    --accent-color: {selection_hover};\n    --accent-fg-color: #ffffff;\n"
     ));

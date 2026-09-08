@@ -5,12 +5,20 @@
     background: var(--bg-mid);
     padding: 0;
 
-    @include list-row-hover-select(var(--bg-hover), var(--bg-light));
+    // Classic tool-window tree: full-bleed flat accent-blue selection bar
+    // (no rounded pill), light text on it — but git-status labels keep their
+    // own color.
+    @include list-row-hover-select(
+        var(--bg-hover),
+        var(--selection-bg),
+        $radius: none,
+        $fg-except-status: true
+    );
 
     & > row {
         padding: 0;
         margin: 0;
-        min-height: 16px;
+        min-height: 20px;
         background-color: var(--bg-mid);
     }
 
@@ -53,12 +61,13 @@
 .file-tree-header {
     background: var(--bg-dark);
     color: var(--text-bright);
-    padding: 4px 5px;
+    padding: 2px 6px;
 }
 
 .file-tree-panel-header {
-    background-color: var(--bg-darkest);
-    padding: 8px;
+    background-color: var(--bg-dark);
+    padding: 3px 6px;
+    border-bottom: 1px solid var(--border-dark);
 }
 
 .file-tree-panel-title {
@@ -73,9 +82,9 @@
 }
 
 .file-list-row {
-    padding: 2px 5px;
+    padding: 1px 6px;
     margin: 0;
-    min-height: 16px;
+    min-height: 20px;
     background-color: inherit;
 }
 
@@ -132,7 +141,7 @@
 
 .drop-target-active {
     background-color: var(--selection-bg);
-    border-radius: 4px;
+    border-radius: 0;
 }
 
 .drop-target-active * {
