@@ -7,7 +7,11 @@
     padding: 1px 4px;
     min-height: 24px;
 
-    & button {
+    /* Direct-child only: a MenuButton's popover CSS node is nested under
+       its trigger, so an unscoped `.main-toolbar button` used to reach the
+       dropdown's own menu items and restyle them. `.context-menu-item`
+       (context_menu.scss) now owns that look for every dropdown. */
+    & > button {
         background: none;
         border: none;
         border-radius: 0;
@@ -41,13 +45,13 @@
     }
 
     & > menubutton > button,
-    & .app-dropdown > button {
+    & > .app-dropdown > button {
         padding: 0;
         min-width: 22px;
         min-height: 22px;
     }
 
-    & separator {
+    & > separator {
         background-color: var(--border-dark);
         min-width: 1px;
         margin: 4px 3px;

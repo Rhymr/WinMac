@@ -34,16 +34,20 @@ popover {
         border: none;
         box-shadow: none;
         border-radius: 0;
+        /* text-friendly trigger padding (labelled Configure/Help/Theme…);
+           the icon-only toolbar gear is squared to 22×22 by chrome.scss */
         padding: 2px 6px;
-        min-height: 0;
+        min-height: 22px;
         min-width: 0;
         color: var(--text-not-so-dim);
         transition: background-color var(--transition-fast);
     }
 
     /* the universal `box { background }` reset paints the button's content
-       box otherwise; it also carries an intrinsic min-height that would
-       bubble through */
+       box otherwise, and every box node down the trigger (MenuButton wraps
+       its child in one, sometimes two) carries an intrinsic min-height
+       that would bubble the trigger taller than 22px */
+    & > button box,
     & > button > box {
         background: none;
         min-height: 0;
@@ -59,7 +63,6 @@ popover {
     & > button:hover,
     & > button:checked {
         background-color: var(--bg-hover);
-        color: var(--text-bright);
     }
 }
 
@@ -74,9 +77,12 @@ popover {
 }
 
 /* Compact, uniform rows — every item is the same height whether or not it
-   carries an icon, a shortcut hint or a submenu arrow (JetBrains menus). */
+   carries an icon, a shortcut hint or a submenu arrow (JetBrains menus).
+   Row height is driven by `min-height`, hover is a flat grey wash (never
+   the accent blue) — the same affordance as the toolbar dropdown, so
+   every dropdown and right-click menu in the app reads identically. */
 .context-menu-item {
-    padding: 3px 12px 3px 8px;
+    padding: 3px 8px;
     margin: 0;
     border-radius: 0;
     background-color: transparent;
@@ -111,15 +117,15 @@ popover {
     &:hover,
     &:hover box,
     &:hover label {
-        background-color: var(--selection-bg);
-        color: var(--selection-fg);
+        background-color: var(--bg-hover);
+        color: inherit;
     }
 
     &:active,
     &:active box,
     &:active label {
-        background-color: var(--selection-active);
-        color: var(--selection-fg);
+        background-color: var(--bg-light);
+        color: inherit;
     }
 
     /* Overrides base.scss's generic `button:disabled` (a filled gray box)
@@ -145,7 +151,7 @@ popover {
 }
 
 .context-menu-item:hover .menu-shortcut {
-    color: var(--selection-fg);
+    color: var(--text-muted);
 }
 
 .context-menu separator {
