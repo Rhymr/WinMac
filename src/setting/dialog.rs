@@ -1,4 +1,4 @@
-use super::{IconTheme, Settings, Theme};
+use super::{IconTheme, NotesCacheScope, Settings, Theme};
 use crate::app::context_menu::ContextMenu;
 use crate::workspace::controller::WorkspaceController;
 use gtk::prelude::*;
@@ -14,12 +14,13 @@ use std::rc::Rc;
 /// group is shown before the label in the content header, JetBrains-style
 /// ("Appearance & Behavior › Appearance"). An empty parent shows just the
 /// label.
-const CATEGORIES: [(&str, &str, &str); 5] = [
+const CATEGORIES: [(&str, &str, &str); 6] = [
     ("appearance", "Appearance", "Appearance & Behavior"),
     ("editor", "Editor", ""),
     ("rhyme", "Rhyme Highlighting", "Editor"),
     ("completion", "Completions", "Editor"),
     ("git", "Git", "Version Control"),
+    ("sources", "Sources", ""),
 ];
 
 /// A category page: a tight vertical stack of section headers and form
@@ -295,6 +296,33 @@ pub fn show_settings_dialog(app: &Application, controller: Option<Rc<WorkspaceCo
     git_page.append(&git_grid);
     stack.add_named(&git_page, Some("git"));
 
+    // External text sources (Apple Notes today).
+    let (notes_cache_dropdown, notes_cache_selected) = ContextMenu::select_dropdown(
+        &["This workspace", "All workspaces"],
+        if settings.notes_cache_scope == NotesCacheScope::User {
+            1
+        } else {
+            0
+        },
+        {
+            let mark_dirty = mark_dirty.clone();
+            move |_| (mark_dirty.borrow())()
+        },
+    );
+    let sources_page = settings_page();
+    let sources_grid = form_grid();
+    grid_field(
+        &sources_grid,
+        0,
+        "Apple Notes cache:",
+        &notes_cache_dropdown,
+    );
+    sources_page.append(&sources_grid);
+    sources_page.append(&description_label(
+        "Where the Apple Notes snapshot is stored. \"All workspaces\" keeps one shared copy under your user config dir instead of per-project .rhymr/.",
+    ));
+    stack.add_named(&sources_page, Some("sources"));
+
     content.append(&stack);
 
     let main_split = GtkBox::new(Orientation::Horizontal, 0);
@@ -377,6 +405,7 @@ pub fn show_settings_dialog(app: &Application, controller: Option<Rc<WorkspaceCo
         let git_toggle = git_toggle.clone();
         let theme_selected = theme_selected.clone();
         let icon_theme_selected = icon_theme_selected.clone();
+        let notes_cache_selected = notes_cache_selected.clone();
         let font_button = font_button.clone();
         move || {
             let font_desc = font_button.font_desc().unwrap_or_else(|| {
@@ -400,6 +429,11 @@ pub fn show_settings_dialog(app: &Application, controller: Option<Rc<WorkspaceCo
                 auto_indent: auto_indent_toggle.is_active(),
                 tab_width: tab_width_spin.value() as u32,
                 git_autostage: git_toggle.is_active(),
+                notes_cache_scope: if notes_cache_selected.get() == 1 {
+                    NotesCacheScope::User
+                } else {
+                    NotesCacheScope::Workspace
+                },
                 theme: if theme_selected.get() == 0 {
                     Theme::Dark
                 } else {

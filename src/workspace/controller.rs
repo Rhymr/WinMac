@@ -15,6 +15,7 @@ type BranchListener = RefCell<Option<Box<dyn Fn(Option<String>)>>>;
 type NavListener = RefCell<Option<Box<dyn Fn(Vec<String>)>>>;
 type GitListener = RefCell<Option<Box<dyn Fn(GitAvailability)>>>;
 type RootListener = RefCell<Option<Box<dyn Fn(Option<PathBuf>)>>>;
+type SelectionListener = RefCell<Option<Box<dyn Fn(Option<String>)>>>;
 
 /// What git actions the loaded workspace supports — drives the toolbar's
 /// Git group (see `crate::app::chrome::main_toolbar`).
@@ -37,6 +38,7 @@ pub struct WorkspaceController {
     nav_listener: NavListener,
     git_listener: GitListener,
     root_listener: RootListener,
+    selection_listener: SelectionListener,
 }
 
 impl Default for WorkspaceController {
@@ -56,6 +58,7 @@ impl WorkspaceController {
             nav_listener: RefCell::new(None),
             git_listener: RefCell::new(None),
             root_listener: RefCell::new(None),
+            selection_listener: RefCell::new(None),
         }
     }
 
@@ -84,6 +87,19 @@ impl WorkspaceController {
     /// Subscribe to the active tab's caret position (1-based line, column).
     pub fn set_cursor_listener(&self, listener: impl Fn(i32, i32) + 'static) {
         self.cursor_listener.replace(Some(Box::new(listener)));
+    }
+
+    /// Subscribe to the active tab's selection — `Some(word)` when exactly
+    /// one word is selected. Wired to the Rhyme Search box.
+    pub fn set_selection_listener(&self, listener: impl Fn(Option<String>) + 'static) {
+        self.selection_listener.replace(Some(Box::new(listener)));
+    }
+
+    /// Forward a selection change from the active tab to the listener.
+    pub fn notify_selection(&self, word: Option<String>) {
+        if let Some(listener) = self.selection_listener.borrow().as_ref() {
+            listener(word);
+        }
     }
 
     /// Recompute the active tab's caret position and notify the listener.
@@ -202,6 +218,11 @@ impl WorkspaceController {
     pub fn apply_settings(&self, settings: &crate::setting::Settings) {
         if let Some(workspace) = self.get_workspace() {
             workspace.apply_settings_to_open_tabs(settings);
+        }
+        // Re-notify the root listener so the external-sources panel picks
+        // up a changed Apple Notes cache scope (workspace vs user).
+        if let Some(listener) = self.root_listener.borrow().as_ref() {
+            listener(self.root_path.borrow().clone());
         }
     }
 

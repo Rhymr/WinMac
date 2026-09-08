@@ -55,6 +55,34 @@ impl IconTheme {
     }
 }
 
+/// Where the Apple Notes snapshot cache is stored (see
+/// `crate::source::apple_notes`).
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum NotesCacheScope {
+    /// `<workspace>/.rhymr/apple-notes.json` — per project.
+    Workspace,
+    /// `<config dir>/rhymr/apple-notes.json` — one copy shared by every
+    /// workspace.
+    User,
+}
+
+impl NotesCacheScope {
+    fn as_str(self) -> &'static str {
+        match self {
+            NotesCacheScope::Workspace => "workspace",
+            NotesCacheScope::User => "user",
+        }
+    }
+
+    fn parse(s: &str) -> Option<Self> {
+        match s {
+            "workspace" => Some(NotesCacheScope::Workspace),
+            "user" => Some(NotesCacheScope::User),
+            _ => None,
+        }
+    }
+}
+
 /// User-configurable app behavior, persisted across launches. New
 /// `TextEditor`s read this at construction time — changing a setting takes
 /// effect for tabs opened afterward, not ones already open.
@@ -73,6 +101,7 @@ pub struct Settings {
     pub auto_indent: bool,
     pub tab_width: u32,
     pub git_autostage: bool,
+    pub notes_cache_scope: NotesCacheScope,
     pub theme: Theme,
     pub icon_theme: IconTheme,
     pub font_family: String,
@@ -93,6 +122,7 @@ impl Default for Settings {
             auto_indent: true,
             tab_width: 4,
             git_autostage: true,
+            notes_cache_scope: NotesCacheScope::Workspace,
             theme: Theme::Dark,
             icon_theme: IconTheme::Color,
             // JetBrains Mono, 13px — matches the JetBrains IDE look the
@@ -138,6 +168,10 @@ impl Settings {
                 "auto_indent" => settings.auto_indent = value == "true",
                 "tab_width" => settings.tab_width = value.parse().unwrap_or(settings.tab_width),
                 "git_autostage" => settings.git_autostage = value == "true",
+                "notes_cache_scope" => {
+                    settings.notes_cache_scope =
+                        NotesCacheScope::parse(value).unwrap_or(settings.notes_cache_scope)
+                }
                 "theme" => settings.theme = Theme::parse(value).unwrap_or(settings.theme),
                 "icon_theme" => {
                     settings.icon_theme = IconTheme::parse(value).unwrap_or(settings.icon_theme)
@@ -159,7 +193,7 @@ impl Settings {
         // free-text field so a pasted font name can't corrupt the file.
         let font_family = self.font_family.replace(['\n', '\r'], "");
         let contents = format!(
-            "show_syllable_gutter={}\nshow_vcs_gutter={}\nrhyme_highlighting={}\nrhyme_stop_at_blank_line={}\nword_completion={}\nauto_indent={}\ntab_width={}\ngit_autostage={}\ntheme={}\nicon_theme={}\nfont_family={}\nfont_size={}\n",
+            "show_syllable_gutter={}\nshow_vcs_gutter={}\nrhyme_highlighting={}\nrhyme_stop_at_blank_line={}\nword_completion={}\nauto_indent={}\ntab_width={}\ngit_autostage={}\nnotes_cache_scope={}\ntheme={}\nicon_theme={}\nfont_family={}\nfont_size={}\n",
             self.show_syllable_gutter,
             self.show_vcs_gutter,
             self.rhyme_highlighting,
@@ -168,6 +202,7 @@ impl Settings {
             self.auto_indent,
             self.tab_width,
             self.git_autostage,
+            self.notes_cache_scope.as_str(),
             self.theme.as_str(),
             self.icon_theme.as_str(),
             font_family,

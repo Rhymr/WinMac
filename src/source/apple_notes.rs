@@ -49,11 +49,12 @@ impl AppleNotesSource {
     }
 
     fn cache_path(&self) -> Option<PathBuf> {
+        let scope = crate::setting::Settings::load().notes_cache_scope;
         let guard = self
             .workspace
             .lock()
             .unwrap_or_else(PoisonError::into_inner);
-        crate::config::apple_notes_cache(guard.as_deref())
+        crate::config::apple_notes_cache(guard.as_deref(), scope)
     }
 
     /// Turn flat `(folder, title, body)` rows into a one-level tree,
