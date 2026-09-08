@@ -1,8 +1,11 @@
 @use "mixins" as *;
 
-/* File tree styling */
+/* File tree styling. The tree body sits on the *editor* background
+   (--bg-darkest), not a lighter panel slab, so the left column and the
+   editor read as one continuous surface — only ignored / read-only rows
+   (goldenrod) and the section headers stand out. */
 .file-list {
-    background: var(--bg-mid);
+    background: var(--bg-darkest);
     padding: 0;
 
     // Classic tool-window tree: full-bleed flat accent-blue selection bar
@@ -19,13 +22,13 @@
         padding: 0;
         margin: 0;
         min-height: 20px;
-        background-color: var(--bg-mid);
+        background-color: var(--bg-darkest);
     }
 
     & box {
         margin: 0;
         padding: 0;
-        background-color: var(--bg-mid);
+        background-color: var(--bg-darkest);
     }
 
     & label {
@@ -56,7 +59,7 @@
 
 .file-tree-inner {
     margin: 0;
-    background-color: var(--bg-mid);
+    background-color: var(--bg-darkest);
 }
 
 .file-tree-header {
@@ -157,7 +160,7 @@
    source's header row reuses `.file-tree-header`. */
 .source-panel,
 .source-list {
-    background-color: var(--bg-mid);
+    background-color: var(--bg-darkest);
 }
 
 /* The whole left panel (project tree + source trees) scrolls as one; a
