@@ -6,7 +6,7 @@ use gtk::prelude::*;
 use hypher::Lang;
 use rphonetic::{DoubleMetaphone, Encoder};
 use sourceview5::Buffer as SourceBuffer;
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 use std::str::FromStr;
@@ -637,7 +637,35 @@ fn apply_group(buffer: &SourceBuffer, tag: &TextTag, members: &[(usize, usize)])
     }
 }
 
-fn recompute(buffer: &SourceBuffer, tags: &[TextTag]) {
+/// One rhyme group as the legend sees it: which palette slot colors it,
+/// that color's hex (for `theme`), and a representative word.
+#[derive(Clone, Debug)]
+pub struct RhymeGroup {
+    pub color_index: usize,
+    pub color: String,
+    pub label: String,
+}
+
+/// The word `offset` falls inside, lower-cased — for the legend label. A
+/// group's stored spans start mid-word (onset consonants are trimmed by
+/// `orthographic_syllables`), so widen out to the surrounding word.
+fn word_at(buffer: &SourceBuffer, offset: usize) -> String {
+    let mut start = buffer.iter_at_offset(offset as i32);
+    if !start.starts_word() {
+        start.backward_word_start();
+    }
+    let mut end = start;
+    if !end.ends_word() {
+        end.forward_word_end();
+    }
+    buffer.text(&start, &end, false).trim().to_lowercase()
+}
+
+/// Recompute rhyme groups for `buffer`, repaint `tags`, and return the
+/// groups (color slot + hex for `theme` + a representative word) in the
+/// same order the colors were assigned — so the legend and the buffer
+/// agree on which group is which color.
+fn recompute(buffer: &SourceBuffer, tags: &[TextTag], theme: Theme) -> Vec<RhymeGroup> {
     let start_iter = buffer.start_iter();
     let end_iter = buffer.end_iter();
     for tag in tags {
@@ -684,10 +712,22 @@ fn recompute(buffer: &SourceBuffer, tags: &[TextTag]) {
         .iter()
         .filter(|m| m.len() >= 2)
         .chain(scored_groups.iter().filter(|m| m.len() >= 2));
+    let palette = rhyme_palette(theme);
+    let mut groups = Vec::new();
     for (color_cursor, members) in all_groups.enumerate() {
-        apply_group(buffer, &tags[color_cursor % tags.len()], members);
+        let color_index = color_cursor % tags.len();
+        apply_group(buffer, &tags[color_index], members);
+        let anchor = members.iter().map(|&(s, _)| s).min().unwrap_or(0);
+        groups.push(RhymeGroup {
+            color_index,
+            color: palette[color_index].to_string(),
+            label: word_at(buffer, anchor),
+        });
     }
+    groups
 }
+
+type GroupsCallback = Box<dyn Fn(&[RhymeGroup])>;
 
 /// A live `attach()` — dropping/`detach()`-ing this stops recoloring the
 /// buffer and clears whatever rhyme-group colors are currently applied, so
@@ -698,7 +738,13 @@ pub struct RhymeHighlight {
     /// The theme the `tags` are currently colored for — see [`set_theme`].
     ///
     /// [`set_theme`]: RhymeHighlight::set_theme
-    theme: Cell<Theme>,
+    theme: Rc<Cell<Theme>>,
+    /// The groups from the last `recompute`, in color-assignment order —
+    /// what the legend renders and what a live theme switch re-colors.
+    groups: Rc<RefCell<Vec<RhymeGroup>>>,
+    /// Notified with the current groups after every recompute / theme
+    /// change, and with an empty slice on `detach`.
+    on_groups: Rc<RefCell<Option<GroupsCallback>>>,
     handler_id: Option<glib::SignalHandlerId>,
 }
 
@@ -712,11 +758,16 @@ impl RhymeHighlight {
         for tag in &self.tags {
             self.buffer.remove_tag(tag, &start, &end);
         }
+        self.groups.borrow_mut().clear();
+        if let Some(cb) = self.on_groups.borrow().as_ref() {
+            cb(&[]);
+        }
     }
 
     /// Re-point every rhyme tag at `theme`'s palette. A `GtkTextTag`'s
     /// `foreground` recolors every range it's already applied to, so a live
-    /// theme switch (Settings → Appearance) needs no recompute — just this.
+    /// theme switch (Settings → Appearance) needs no recompute — just this
+    /// plus refreshing the legend's stored hex colors.
     pub fn set_theme(&self, theme: Theme) {
         if self.theme.replace(theme) == theme {
             return;
@@ -725,18 +776,41 @@ impl RhymeHighlight {
         for (i, tag) in self.tags.iter().enumerate() {
             tag.set_foreground(Some(palette[i % palette.len()]));
         }
+        for group in self.groups.borrow_mut().iter_mut() {
+            group.color = palette[group.color_index].to_string();
+        }
+        self.notify_groups();
+    }
+
+    /// Register `f` to receive the active rhyme groups whenever they
+    /// change; fires once immediately with the current set.
+    pub fn connect_groups_changed(&self, f: impl Fn(&[RhymeGroup]) + 'static) {
+        *self.on_groups.borrow_mut() = Some(Box::new(f));
+        self.notify_groups();
+    }
+
+    fn notify_groups(&self) {
+        if let Some(cb) = self.on_groups.borrow().as_ref() {
+            cb(&self.groups.borrow());
+        }
     }
 }
 
 /// Recolors words in `buffer` by rhyme group, recomputing (debounced) on
 /// every edit. `theme` picks the foreground palette; keep it current with
-/// [`RhymeHighlight::set_theme`].
+/// [`RhymeHighlight::set_theme`]. Subscribe to the active-group list with
+/// [`RhymeHighlight::connect_groups_changed`].
 pub fn attach(buffer: &SourceBuffer, theme: Theme) -> RhymeHighlight {
     let tags = create_tags(buffer, theme);
-    recompute(buffer, &tags);
+    let theme = Rc::new(Cell::new(theme));
+    let groups = Rc::new(RefCell::new(recompute(buffer, &tags, theme.get())));
+    let on_groups: Rc<RefCell<Option<GroupsCallback>>> = Rc::new(RefCell::new(None));
 
     let generation = Rc::new(Cell::new(0u64));
     let tags_for_signal = tags.clone();
+    let theme_for_signal = theme.clone();
+    let groups_for_signal = groups.clone();
+    let on_groups_for_signal = on_groups.clone();
     let handler_id = buffer.connect_changed(move |buf| {
         let this_generation = generation.get() + 1;
         generation.set(this_generation);
@@ -744,18 +818,27 @@ pub fn attach(buffer: &SourceBuffer, theme: Theme) -> RhymeHighlight {
         let generation_for_timeout = generation.clone();
         let buf_owned = buf.clone();
         let tags_for_timeout = tags_for_signal.clone();
+        let theme_for_timeout = theme_for_signal.clone();
+        let groups_for_timeout = groups_for_signal.clone();
+        let on_groups_for_timeout = on_groups_for_signal.clone();
         glib::timeout_add_local_once(RHYME_DEBOUNCE, move || {
             if generation_for_timeout.get() != this_generation {
                 return;
             }
-            recompute(&buf_owned, &tags_for_timeout);
+            let fresh = recompute(&buf_owned, &tags_for_timeout, theme_for_timeout.get());
+            groups_for_timeout.replace(fresh);
+            if let Some(cb) = on_groups_for_timeout.borrow().as_ref() {
+                cb(&groups_for_timeout.borrow());
+            }
         });
     });
 
     RhymeHighlight {
         buffer: buffer.clone(),
         tags,
-        theme: Cell::new(theme),
+        theme,
+        groups,
+        on_groups,
         handler_id: Some(handler_id),
     }
 }

@@ -9,8 +9,8 @@ use completion::WordCompletionProvider;
 use gtk::gdk;
 use gtk::prelude::*;
 use gtk::{
-    Align, Box as GtkBox, EventSequenceState, Frame, GestureClick, Label, Orientation, Overlay,
-    PropagationPhase, ScrolledWindow,
+    Align, Box as GtkBox, DrawingArea, EventSequenceState, Frame, GestureClick, Label, Orientation,
+    Overlay, PropagationPhase, ScrolledWindow,
 };
 use sourceview5::GutterRendererText;
 use sourceview5::prelude::{BufferExt, GutterRendererExt, GutterRendererTextExt, ViewExt};
@@ -47,6 +47,10 @@ pub struct TextEditor {
     completion: Completion,
     word_provider: RefCell<Option<WordCompletionProvider>>,
     rhyme_highlight: RefCell<Option<RhymeHighlight>>,
+    // Strip under the editor listing the active rhyme groups (swatch +
+    // representative word); hidden when highlighting is off or there are
+    // no groups. Rebuilt from `RhymeHighlight::connect_groups_changed`.
+    rhyme_legend: GtkBox,
 }
 
 impl Default for TextEditor {
@@ -217,10 +221,23 @@ impl TextEditor {
         let overlay = Overlay::new();
         overlay.set_child(Some(&scroll));
         overlay.add_overlay(&sticky_row);
+        overlay.set_vexpand(true);
         setup_sticky_line(&scroll, &source_view, &buffer, &sticky, &sticky_row);
 
+        // Active rhyme-group legend, docked under the text area.
+        let rhyme_legend = GtkBox::builder()
+            .orientation(Orientation::Horizontal)
+            .css_classes(["rhyme-legend"])
+            .spacing(12)
+            .build();
+        rhyme_legend.set_visible(false);
+
+        let editor_box = GtkBox::new(Orientation::Vertical, 0);
+        editor_box.append(&overlay);
+        editor_box.append(&rhyme_legend);
+
         let frame = Frame::builder()
-            .child(&overlay)
+            .child(&editor_box)
             .css_classes(vec!["rhyme-editor-frame"])
             .build();
 
@@ -238,6 +255,7 @@ impl TextEditor {
             completion,
             word_provider: RefCell::new(None),
             rhyme_highlight: RefCell::new(None),
+            rhyme_legend,
         };
 
         editor.setup_context_menu();
@@ -431,19 +449,20 @@ impl TextEditor {
         match (rhyme_slot.is_some(), settings.rhyme_highlighting) {
             (false, true) => {
                 log::debug!("rhyme highlight: attaching");
-                *rhyme_slot = Some(crate::rhyme::highlight::attach(
-                    &self.buffer,
-                    settings.theme,
-                ));
+                let handle = crate::rhyme::highlight::attach(&self.buffer, settings.theme);
+                let legend = self.rhyme_legend.clone();
+                handle.connect_groups_changed(move |groups| rebuild_legend(&legend, groups));
+                *rhyme_slot = Some(handle);
             }
             (true, false) => {
                 if let Some(handle) = rhyme_slot.take() {
                     log::debug!("rhyme highlight: detaching");
-                    handle.detach();
+                    handle.detach(); // fires groups_changed(&[]) -> legend hides
                 }
             }
             // Already attached and staying on — push a live theme switch
-            // through so the rhyme colors follow light/dark.
+            // through so the rhyme colors (and legend swatches) follow
+            // light/dark.
             (true, true) => {
                 if let Some(handle) = rhyme_slot.as_ref() {
                     handle.set_theme(settings.theme);
@@ -536,6 +555,47 @@ impl TextEditor {
         }
         self.buffer.connect_changed(move |_| f(selected_word()));
     }
+}
+
+/// Repaint the rhyme-group legend strip: a colored swatch + representative
+/// word per active group, left to right in color-assignment order. Hidden
+/// when there are no groups (highlighting off, or nothing rhymes yet).
+fn rebuild_legend(row: &GtkBox, groups: &[crate::rhyme::highlight::RhymeGroup]) {
+    while let Some(child) = row.first_child() {
+        row.remove(&child);
+    }
+    for group in groups {
+        let item = GtkBox::new(Orientation::Horizontal, 5);
+        item.set_css_classes(&["rhyme-legend-item"]);
+
+        let swatch = DrawingArea::new();
+        swatch.set_content_width(10);
+        swatch.set_content_height(10);
+        swatch.set_valign(Align::Center);
+        swatch.add_css_class("rhyme-legend-swatch");
+        let rgba = group
+            .color
+            .parse::<gdk::RGBA>()
+            .unwrap_or_else(|_| gdk::RGBA::new(0.5, 0.5, 0.5, 1.0));
+        swatch.set_draw_func(move |_, cr, w, h| {
+            cr.set_source_rgba(
+                rgba.red() as f64,
+                rgba.green() as f64,
+                rgba.blue() as f64,
+                rgba.alpha() as f64,
+            );
+            cr.rectangle(0.0, 0.0, w as f64, h as f64);
+            let _ = cr.fill();
+        });
+        item.append(&swatch);
+
+        let label = Label::new(Some(&group.label));
+        label.set_css_classes(&["rhyme-legend-label"]);
+        item.append(&label);
+
+        row.append(&item);
+    }
+    row.set_visible(!groups.is_empty());
 }
 
 /// The GtkSourceView style scheme id (see assets/styles/*.xml) matching
