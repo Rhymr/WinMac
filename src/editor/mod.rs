@@ -124,6 +124,7 @@ impl TextEditor {
                     log::error!("auto-save failed for {path:?}: {e}");
                     return;
                 }
+                log::debug!("auto-saved {path:?}");
                 modified_for_timeout.set(false);
                 if crate::setting::Settings::load().git_autostage
                     && let Some(root) = find_git_root(&path)
@@ -429,10 +430,12 @@ impl TextEditor {
         let mut rhyme_slot = self.rhyme_highlight.borrow_mut();
         match (rhyme_slot.is_some(), settings.rhyme_highlighting) {
             (false, true) => {
+                log::debug!("rhyme highlight: attaching");
                 *rhyme_slot = Some(crate::rhyme::highlight::attach(&self.buffer));
             }
             (true, false) => {
                 if let Some(handle) = rhyme_slot.take() {
+                    log::debug!("rhyme highlight: detaching");
                     handle.detach();
                 }
             }

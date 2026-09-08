@@ -125,8 +125,12 @@ impl Workspace {
             return;
         }
 
-        if let Ok(content) = fs::read_to_string(&path) {
-            self.add_new_tab(&path, &content);
+        match fs::read_to_string(&path) {
+            Ok(content) => {
+                log::debug!("opening tab for {path:?}");
+                self.add_new_tab(&path, &content);
+            }
+            Err(e) => log::warn!("could not open {path:?}: {e}"),
         }
     }
 

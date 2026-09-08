@@ -23,10 +23,15 @@ impl FileOps {
 
                 if let Ok(file) = dialog.open_future(parent_window.as_ref()).await
                     && let Some(path) = file.path()
-                    && let Ok(content) = fs::read_to_string(&path)
                 {
-                    let _ = sender.lock().unwrap().try_send(Some((path, content)));
-                    return;
+                    match fs::read_to_string(&path) {
+                        Ok(content) => {
+                            log::debug!("open dialog: reading {path:?}");
+                            let _ = sender.lock().unwrap().try_send(Some((path, content)));
+                            return;
+                        }
+                        Err(e) => log::warn!("open dialog: could not read {path:?}: {e}"),
+                    }
                 }
                 let _ = sender.lock().unwrap().try_send(None);
             }
@@ -41,10 +46,14 @@ impl FileOps {
         path: Option<PathBuf>,
         parent_window: Option<Window>,
     ) -> Option<PathBuf> {
-        if let Some(path) = path
-            && fs::write(&path, &content).is_ok()
-        {
-            return Some(path);
+        if let Some(path) = path {
+            match fs::write(&path, &content) {
+                Ok(()) => {
+                    log::debug!("saved {path:?}");
+                    return Some(path);
+                }
+                Err(e) => log::warn!("save to {path:?} failed, prompting for a location: {e}"),
+            }
         }
 
         let context = MainContext::default();
@@ -60,10 +69,15 @@ impl FileOps {
 
                 if let Ok(file) = dialog.save_future(parent_window.as_ref()).await
                     && let Some(path) = file.path()
-                    && fs::write(&path, &content).is_ok()
                 {
-                    let _ = sender.lock().unwrap().try_send(Some(path));
-                    return;
+                    match fs::write(&path, &content) {
+                        Ok(()) => {
+                            log::debug!("save dialog: wrote {path:?}");
+                            let _ = sender.lock().unwrap().try_send(Some(path));
+                            return;
+                        }
+                        Err(e) => log::warn!("save dialog: could not write {path:?}: {e}"),
+                    }
                 }
                 let _ = sender.lock().unwrap().try_send(None);
             }
