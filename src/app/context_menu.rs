@@ -9,6 +9,8 @@ use gtk::prelude::*;
 use gtk::{
     Align, Box as GtkBox, Button, Image, Label, MenuButton, Orientation, Popover, Separator, Widget,
 };
+use std::cell::Cell;
+use std::rc::Rc;
 
 /// Shortcut hints shown next to a menu item's label — ⌘ on macOS, "Ctrl+"
 /// elsewhere, so the menu never shows a Mac-only symbol on Windows/Linux
@@ -146,6 +148,36 @@ impl ContextMenu {
             parent: button.clone().upcast(),
         };
         (button, menu)
+    }
+
+    /// A simple value picker built on the same styled `.context-menu`
+    /// popover as every other dropdown (rather than a `gtk::DropDown`):
+    /// `options` become menu items, choosing one relabels the button,
+    /// stores its index in the returned cell and calls `on_change`.
+    pub fn select_dropdown(
+        options: &[&str],
+        initial: usize,
+        on_change: impl Fn(usize) + 'static,
+    ) -> (MenuButton, Rc<Cell<usize>>) {
+        let (button, menu) = Self::dropdown(None, options.get(initial).copied());
+        button.set_always_show_arrow(true);
+
+        let selected = Rc::new(Cell::new(initial));
+        let on_change = Rc::new(on_change);
+        for (index, option) in options.iter().enumerate() {
+            let button = button.clone();
+            let selected = selected.clone();
+            let on_change = on_change.clone();
+            let label = (*option).to_string();
+            menu.add_item(None, option, None, None, move || {
+                button.set_label(&label);
+                if selected.replace(index) != index {
+                    on_change(index);
+                }
+            });
+        }
+
+        (button, selected)
     }
 
     pub fn popdown(&self) {

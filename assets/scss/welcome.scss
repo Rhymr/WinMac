@@ -28,22 +28,32 @@
     background: none;
 }
 
-.welcome-sidebar-menu {
+/* Just the label + a bare chevron — no button box around the text. The
+   grey fill would otherwise come from the universal `box { background }`
+   reset painting the MenuButton's inner content box. */
+.welcome-sidebar-footer menubutton,
+.welcome-sidebar-footer menubutton > button,
+.welcome-sidebar-footer menubutton box,
+.welcome-sidebar-footer menubutton label {
     background: none;
+    background-image: none;
     border: none;
+    box-shadow: none;
+    outline: none;
     border-radius: 0;
-    padding: 3px 8px;
+    min-height: 0;
     color: var(--text-not-so-dim);
+}
 
-    &:hover {
-        background-color: var(--bg-hover);
-        color: var(--text-bright);
-    }
+.welcome-sidebar-footer menubutton > button {
+    padding: 2px 4px;
+}
 
-    &:checked {
-        background-color: var(--bg-light);
-        color: var(--text-bright);
-    }
+.welcome-sidebar-footer menubutton > button:hover,
+.welcome-sidebar-footer menubutton > button:checked {
+    background: none;
+    box-shadow: none;
+    color: var(--text-bright);
 }
 
 .brand-box {

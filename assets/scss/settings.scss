@@ -33,10 +33,31 @@
 
 .settings-content {
     background: var(--bg-darkest);
+
+    /* the universal `box { background }` reset would otherwise tint the
+       form grids a shade lighter than the page */
+    & grid {
+        background: none;
+    }
 }
 
+/* Breadcrumb path, not a big title — JetBrains "Group › Category". */
 .settings-header-title {
-    font-size: 16px;
+    font-size: 13px;
+    color: var(--text-not-so-dim);
+    background: none;
+}
+
+/* Small bold muted group sub-header inside a page. */
+.settings-section {
+    font-size: 11px;
     font-weight: bold;
+    color: var(--text-muted);
+    background: none;
+}
+
+/* Right-aligned label in the 2-column form grid. */
+.settings-field-label {
+    color: var(--text-bright);
     background: none;
 }

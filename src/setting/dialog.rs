@@ -1,60 +1,91 @@
 use super::{IconTheme, Settings, Theme};
+use crate::app::context_menu::ContextMenu;
 use crate::workspace::controller::WorkspaceController;
 use gtk::prelude::*;
 use gtk::{
-    Align, Box as GtkBox, Button, CheckButton, DropDown, FontDialog, FontDialogButton, Label,
-    ListBox, ListBoxRow, Orientation, SearchEntry, Separator, SpinButton, Stack, Window, pango,
+    Align, Box as GtkBox, Button, CheckButton, FontDialog, FontDialogButton, Grid, Label, ListBox,
+    ListBoxRow, Orientation, SearchEntry, Separator, SpinButton, Stack, Window, pango,
 };
 use libadwaita::Application;
 use std::cell::RefCell;
 use std::rc::Rc;
 
-const CATEGORIES: [(&str, &str); 5] = [
-    ("appearance", "Appearance"),
-    ("editor", "Editor"),
-    ("rhyme", "Rhyme Highlighting"),
-    ("completion", "Completions"),
-    ("git", "Git"),
+/// `(stack name, sidebar label, breadcrumb parent group)` — the parent
+/// group is shown before the label in the content header, JetBrains-style
+/// ("Appearance & Behavior › Appearance"). An empty parent shows just the
+/// label.
+const CATEGORIES: [(&str, &str, &str); 5] = [
+    ("appearance", "Appearance", "Appearance & Behavior"),
+    ("editor", "Editor", ""),
+    ("rhyme", "Rhyme Highlighting", "Editor"),
+    ("completion", "Completions", "Editor"),
+    ("git", "Git", "Version Control"),
 ];
 
-/// The two widgets `page()` doesn't cover: a field row (label + control)
-/// used by the Appearance category, styled like the rest of the dialog's
-/// left-aligned, margin-matched form rows.
-fn field_row(label_text: &str, control: &impl IsA<gtk::Widget>) -> GtkBox {
-    let row = GtkBox::new(Orientation::Horizontal, 10);
-    row.append(
-        &Label::builder()
-            .label(label_text)
-            .halign(Align::Start)
-            .width_chars(12)
-            .build(),
-    );
-    row.append(control);
-    row
+/// A category page: a tight vertical stack of section headers and form
+/// grids, with the dialog's standard content margins.
+fn settings_page() -> GtkBox {
+    GtkBox::builder()
+        .orientation(Orientation::Vertical)
+        .spacing(4)
+        .margin_top(14)
+        .margin_start(20)
+        .margin_end(20)
+        .build()
 }
 
-/// A category page: a checkbox toggle plus an optional description label
-/// underneath it, both left-aligned with the same margins.
-fn page(toggle: &CheckButton, description: Option<&str>) -> GtkBox {
-    let page = GtkBox::builder()
-        .orientation(Orientation::Vertical)
-        .spacing(10)
-        .margin_top(20)
-        .margin_start(24)
-        .margin_end(24)
-        .build();
-    page.append(toggle);
-    if let Some(text) = description {
-        let desc = Label::builder()
-            .label(text)
-            .halign(Align::Start)
-            .wrap(true)
-            .max_width_chars(60)
-            .css_classes(vec!["dim-label", "caption"])
-            .build();
-        page.append(&desc);
-    }
-    page
+/// A small bold muted sub-header above a group of rows.
+fn section_header(text: &str) -> Label {
+    Label::builder()
+        .label(text)
+        .halign(Align::Start)
+        .margin_top(8)
+        .margin_bottom(2)
+        .css_classes(["settings-section"])
+        .build()
+}
+
+/// A 2-column form grid: right-aligned labels in column 0, left-aligned
+/// controls in column 1.
+fn form_grid() -> Grid {
+    Grid::builder()
+        .row_spacing(6)
+        .column_spacing(12)
+        .margin_start(4)
+        .build()
+}
+
+/// Attach a `label:` / control pair at `row` of `grid`.
+fn grid_field(grid: &Grid, row: i32, label_text: &str, control: &impl IsA<gtk::Widget>) {
+    grid.attach(
+        &Label::builder()
+            .label(label_text)
+            .halign(Align::End)
+            .css_classes(["settings-field-label"])
+            .build(),
+        0,
+        row,
+        1,
+        1,
+    );
+    grid.attach(control, 1, row, 1, 1);
+}
+
+/// Attach a full-width checkbox (it carries its own label) at `row`.
+fn grid_check(grid: &Grid, row: i32, check: &CheckButton) {
+    grid.attach(check, 0, row, 2, 1);
+}
+
+/// A wrapped, dimmed explanatory paragraph under a group.
+fn description_label(text: &str) -> Label {
+    Label::builder()
+        .label(text)
+        .halign(Align::Start)
+        .wrap(true)
+        .max_width_chars(60)
+        .margin_top(4)
+        .css_classes(["dim-label", "caption"])
+        .build()
 }
 
 /// `controller` is `None` when opened from the welcome screen (no
@@ -100,7 +131,7 @@ pub fn show_settings_dialog(app: &Application, controller: Option<Rc<WorkspaceCo
         .css_classes(vec!["settings-category-list"])
         .build();
 
-    for (_, label) in CATEGORIES {
+    for (_, label, _) in CATEGORIES {
         let row = ListBoxRow::new();
         let row_label = Label::builder()
             .label(label)
@@ -126,10 +157,11 @@ pub fn show_settings_dialog(app: &Application, controller: Option<Rc<WorkspaceCo
         .css_classes(vec!["settings-content"])
         .build();
 
+    // Breadcrumb-style header ("Appearance & Behavior › Appearance").
     let header_label = Label::builder()
         .halign(Align::Start)
-        .margin_top(16)
-        .margin_bottom(12)
+        .margin_top(14)
+        .margin_bottom(10)
         .margin_start(20)
         .css_classes(vec!["settings-header-title"])
         .build();
@@ -143,17 +175,34 @@ pub fn show_settings_dialog(app: &Application, controller: Option<Rc<WorkspaceCo
     // Appearance: theme + app-wide font (the font dialog button covers both
     // family and size in one native picker)
     // ==========================================
-    let theme_dropdown = DropDown::from_strings(&["Dark", "Light"]);
-    theme_dropdown.set_selected(if settings.theme == Theme::Dark { 0 } else { 1 });
+    // Late-bound "widgets changed" hook — the dropdowns are built before
+    // `update_apply_sensitivity` exists, so their `on_change` calls through
+    // this slot, which is filled in once that closure is defined.
+    let mark_dirty: Rc<RefCell<Box<dyn Fn()>>> = Rc::new(RefCell::new(Box::new(|| {})));
+
+    let (theme_dropdown, theme_selected) = ContextMenu::select_dropdown(
+        &["Dark", "Light"],
+        if settings.theme == Theme::Dark { 0 } else { 1 },
+        {
+            let mark_dirty = mark_dirty.clone();
+            move |_| (mark_dirty.borrow())()
+        },
+    );
 
     // Icon set: "Color" is the JetBrains NetIcons colour glyphs; "Monochrome"
     // is the flat grey set, which then follows the light/dark theme.
-    let icon_theme_dropdown = DropDown::from_strings(&["Color", "Monochrome"]);
-    icon_theme_dropdown.set_selected(if settings.icon_theme == IconTheme::Color {
-        0
-    } else {
-        1
-    });
+    let (icon_theme_dropdown, icon_theme_selected) = ContextMenu::select_dropdown(
+        &["Color", "Monochrome"],
+        if settings.icon_theme == IconTheme::Color {
+            0
+        } else {
+            1
+        },
+        {
+            let mark_dirty = mark_dirty.clone();
+            move |_| (mark_dirty.borrow())()
+        },
+    );
 
     let font_button = FontDialogButton::builder()
         .dialog(&FontDialog::builder().title("Font").build())
@@ -165,16 +214,13 @@ pub fn show_settings_dialog(app: &Application, controller: Option<Rc<WorkspaceCo
         settings.font_family, settings.font_size
     )));
 
-    let appearance_page = GtkBox::builder()
-        .orientation(Orientation::Vertical)
-        .spacing(14)
-        .margin_top(20)
-        .margin_start(24)
-        .margin_end(24)
-        .build();
-    appearance_page.append(&field_row("Theme:", &theme_dropdown));
-    appearance_page.append(&field_row("Icons:", &icon_theme_dropdown));
-    appearance_page.append(&field_row("Editor font:", &font_button));
+    let appearance_page = settings_page();
+    appearance_page.append(&section_header("Appearance"));
+    let appearance_grid = form_grid();
+    grid_field(&appearance_grid, 0, "Theme:", &theme_dropdown);
+    grid_field(&appearance_grid, 1, "Icons:", &icon_theme_dropdown);
+    grid_field(&appearance_grid, 2, "Editor font:", &font_button);
+    appearance_page.append(&appearance_grid);
     stack.add_named(&appearance_page, Some("appearance"));
 
     let gutter_toggle = CheckButton::builder()
@@ -189,21 +235,20 @@ pub fn show_settings_dialog(app: &Application, controller: Option<Rc<WorkspaceCo
         .label("Auto-indent new lines")
         .active(settings.auto_indent)
         .build();
-    let tab_width_row = GtkBox::new(Orientation::Horizontal, 10);
     let tab_width_spin = SpinButton::with_range(1.0, 8.0, 1.0);
     tab_width_spin.set_value(settings.tab_width as f64);
-    tab_width_row.append(
-        &Label::builder()
-            .label("Tab width:")
-            .halign(Align::Start)
-            .build(),
-    );
-    tab_width_row.append(&tab_width_spin);
 
-    let editor_page = page(&gutter_toggle, None);
-    editor_page.append(&vcs_gutter_toggle);
-    editor_page.append(&auto_indent_toggle);
-    editor_page.append(&tab_width_row);
+    let editor_page = settings_page();
+    editor_page.append(&section_header("Gutter"));
+    let gutter_grid = form_grid();
+    grid_check(&gutter_grid, 0, &gutter_toggle);
+    grid_check(&gutter_grid, 1, &vcs_gutter_toggle);
+    editor_page.append(&gutter_grid);
+    editor_page.append(&section_header("Indentation"));
+    let indent_grid = form_grid();
+    grid_check(&indent_grid, 0, &auto_indent_toggle);
+    grid_field(&indent_grid, 1, "Tab width:", &tab_width_spin);
+    editor_page.append(&indent_grid);
     stack.add_named(&editor_page, Some("editor"));
 
     let rhyme_toggle = CheckButton::builder()
@@ -214,32 +259,41 @@ pub fn show_settings_dialog(app: &Application, controller: Option<Rc<WorkspaceCo
         .label("Don't match rhymes across a blank line")
         .active(settings.rhyme_stop_at_blank_line)
         .build();
-    let rhyme_page = page(
-        &rhyme_toggle,
-        Some(
-            "Colors the background of syllables that rhyme with another word elsewhere in the document.",
-        ),
-    );
-    rhyme_page.append(&rhyme_stop_at_blank_line_toggle);
+    let rhyme_page = settings_page();
+    rhyme_page.append(&section_header("Rhyme Highlighting"));
+    let rhyme_grid = form_grid();
+    grid_check(&rhyme_grid, 0, &rhyme_toggle);
+    grid_check(&rhyme_grid, 1, &rhyme_stop_at_blank_line_toggle);
+    rhyme_page.append(&rhyme_grid);
+    rhyme_page.append(&description_label(
+        "Colors the background of syllables that rhyme with another word elsewhere in the document.",
+    ));
     stack.add_named(&rhyme_page, Some("rhyme"));
 
     let completion_toggle = CheckButton::builder()
         .label("Enable dictionary word completion")
         .active(settings.word_completion)
         .build();
-    stack.add_named(
-        &page(
-            &completion_toggle,
-            Some("Suggests words from the bundled dictionary as you type. Tab or Enter accepts a suggestion."),
-        ),
-        Some("completion"),
-    );
+    let completion_page = settings_page();
+    completion_page.append(&section_header("Completions"));
+    let completion_grid = form_grid();
+    grid_check(&completion_grid, 0, &completion_toggle);
+    completion_page.append(&completion_grid);
+    completion_page.append(&description_label(
+        "Suggests words from the bundled dictionary as you type. Tab or Enter accepts a suggestion.",
+    ));
+    stack.add_named(&completion_page, Some("completion"));
 
     let git_toggle = CheckButton::builder()
         .label("Automatically stage changes when saving")
         .active(settings.git_autostage)
         .build();
-    stack.add_named(&page(&git_toggle, None), Some("git"));
+    let git_page = settings_page();
+    git_page.append(&section_header("Git"));
+    let git_grid = form_grid();
+    grid_check(&git_grid, 0, &git_toggle);
+    git_page.append(&git_grid);
+    stack.add_named(&git_page, Some("git"));
 
     content.append(&stack);
 
@@ -281,9 +335,14 @@ pub fn show_settings_dialog(app: &Application, controller: Option<Rc<WorkspaceCo
     let header_for_select = header_label.clone();
     category_list.connect_row_selected(move |_, row| {
         if let Some(row) = row {
-            let (name, label) = CATEGORIES[row.index() as usize];
+            let (name, label, parent) = CATEGORIES[row.index() as usize];
             stack_for_select.set_visible_child_name(name);
-            header_for_select.set_text(label);
+            let header = if parent.is_empty() {
+                label.to_string()
+            } else {
+                format!("{parent}  \u{203a}  {label}")
+            };
+            header_for_select.set_text(&header);
         }
     });
     category_list.select_row(category_list.row_at_index(0).as_ref());
@@ -293,7 +352,7 @@ pub fn show_settings_dialog(app: &Application, controller: Option<Rc<WorkspaceCo
         let query = entry.text().to_lowercase();
         let mut index = 0;
         while let Some(row) = category_list_for_search.row_at_index(index) {
-            let (_, label) = CATEGORIES[index as usize];
+            let (_, label, _) = CATEGORIES[index as usize];
             row.set_visible(query.is_empty() || label.to_lowercase().contains(&query));
             index += 1;
         }
@@ -316,8 +375,8 @@ pub fn show_settings_dialog(app: &Application, controller: Option<Rc<WorkspaceCo
         let rhyme_stop_at_blank_line_toggle = rhyme_stop_at_blank_line_toggle.clone();
         let completion_toggle = completion_toggle.clone();
         let git_toggle = git_toggle.clone();
-        let theme_dropdown = theme_dropdown.clone();
-        let icon_theme_dropdown = icon_theme_dropdown.clone();
+        let theme_selected = theme_selected.clone();
+        let icon_theme_selected = icon_theme_selected.clone();
         let font_button = font_button.clone();
         move || {
             let font_desc = font_button.font_desc().unwrap_or_else(|| {
@@ -341,12 +400,12 @@ pub fn show_settings_dialog(app: &Application, controller: Option<Rc<WorkspaceCo
                 auto_indent: auto_indent_toggle.is_active(),
                 tab_width: tab_width_spin.value() as u32,
                 git_autostage: git_toggle.is_active(),
-                theme: if theme_dropdown.selected() == 0 {
+                theme: if theme_selected.get() == 0 {
                     Theme::Dark
                 } else {
                     Theme::Light
                 },
-                icon_theme: if icon_theme_dropdown.selected() == 0 {
+                icon_theme: if icon_theme_selected.get() == 0 {
                     IconTheme::Color
                 } else {
                     IconTheme::Monochrome
@@ -387,11 +446,13 @@ pub fn show_settings_dialog(app: &Application, controller: Option<Rc<WorkspaceCo
     let f = update_apply_sensitivity.clone();
     tab_width_spin.connect_value_changed(move |_| f());
     let f = update_apply_sensitivity.clone();
-    theme_dropdown.connect_selected_notify(move |_| f());
-    let f = update_apply_sensitivity.clone();
-    icon_theme_dropdown.connect_selected_notify(move |_| f());
-    let f = update_apply_sensitivity.clone();
     font_button.connect_font_desc_notify(move |_| f());
+    // Now that `update_apply_sensitivity` exists, point the dropdowns'
+    // late-bound change hook at it.
+    *mark_dirty.borrow_mut() = Box::new({
+        let f = update_apply_sensitivity.clone();
+        move || f()
+    });
 
     let apply: Rc<dyn Fn()> = Rc::new({
         let read_current = read_current.clone();
