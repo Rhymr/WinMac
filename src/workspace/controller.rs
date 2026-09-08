@@ -13,6 +13,19 @@ type WordCountListener = RefCell<Option<Box<dyn Fn(u32)>>>;
 type CursorListener = RefCell<Option<Box<dyn Fn(i32, i32)>>>;
 type BranchListener = RefCell<Option<Box<dyn Fn(Option<String>)>>>;
 type NavListener = RefCell<Option<Box<dyn Fn(Vec<String>)>>>;
+type GitListener = RefCell<Option<Box<dyn Fn(GitAvailability)>>>;
+
+/// What git actions the loaded workspace supports — drives the toolbar's
+/// Git group (see `crate::app::chrome::main_toolbar`).
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum GitAvailability {
+    /// Not a git repository — no git actions.
+    None,
+    /// A repository with no `origin` remote — local actions only (commit).
+    LocalOnly,
+    /// A repository with an `origin` remote — every git action.
+    Full,
+}
 
 pub struct WorkspaceController {
     pub(crate) workspace: RefCell<Option<Rc<Workspace>>>,
@@ -21,6 +34,7 @@ pub struct WorkspaceController {
     cursor_listener: CursorListener,
     branch_listener: BranchListener,
     nav_listener: NavListener,
+    git_listener: GitListener,
 }
 
 impl Default for WorkspaceController {
@@ -38,6 +52,7 @@ impl WorkspaceController {
             cursor_listener: RefCell::new(None),
             branch_listener: RefCell::new(None),
             nav_listener: RefCell::new(None),
+            git_listener: RefCell::new(None),
         }
     }
 
@@ -105,38 +120,72 @@ impl WorkspaceController {
         }
     }
 
+    /// Subscribe to whether the workspace supports git actions — notified
+    /// on every `set_root_path`.
+    pub fn set_git_listener(&self, listener: impl Fn(GitAvailability) + 'static) {
+        self.git_listener.replace(Some(Box::new(listener)));
+    }
+
+    /// Re-derive git availability from the workspace root and notify the
+    /// listener.
+    pub fn refresh_git_availability(&self) {
+        let availability = match self.root_path.borrow().as_ref() {
+            Some(root) if root.join(".git").is_dir() => {
+                if crate::git::ops::GitController::new(root).has_remote("origin") {
+                    GitAvailability::Full
+                } else {
+                    GitAvailability::LocalOnly
+                }
+            }
+            _ => GitAvailability::None,
+        };
+
+        if let Some(listener) = self.git_listener.borrow().as_ref() {
+            listener(availability);
+        }
+    }
+
     /// Subscribe to the active tab's location as breadcrumb segments
     /// (`["src", "app", "main.rs"]`) — empty when no file is open.
     pub fn set_nav_listener(&self, listener: impl Fn(Vec<String>) + 'static) {
         self.nav_listener.replace(Some(Box::new(listener)));
     }
 
-    /// Recompute the active tab's breadcrumb and notify the listener.
+    /// Recompute the active tab's breadcrumb and notify the listener. The
+    /// workspace folder is always the first segment (when a workspace is
+    /// loaded); the rest are the active file's path relative to it.
     pub fn refresh_nav(&self) {
-        let segments = self
+        let mut segments: Vec<String> = self
+            .root_path
+            .borrow()
+            .as_ref()
+            .and_then(|root| root.file_name().map(|n| n.to_string_lossy().into_owned()))
+            .into_iter()
+            .collect();
+
+        if let Some(path) = self
             .get_workspace()
             .and_then(|w| w.get_current_buffer())
             .and_then(|(_, path)| path)
-            .map(|path| {
-                let rel = self
-                    .root_path
-                    .borrow()
-                    .as_ref()
-                    .and_then(|root| path.strip_prefix(root).ok().map(PathBuf::from))
-                    .unwrap_or_else(|| path.clone());
-                let mut segs: Vec<String> = rel
-                    .components()
-                    .map(|c| c.as_os_str().to_string_lossy().into_owned())
-                    .collect();
-                // Match the tab label — hide the implied `.txt`.
-                if let Some(last) = segs.last_mut()
-                    && let Some(stripped) = last.strip_suffix(".txt")
-                {
-                    *last = stripped.to_string();
-                }
-                segs
-            })
-            .unwrap_or_default();
+        {
+            let rel = self
+                .root_path
+                .borrow()
+                .as_ref()
+                .and_then(|root| path.strip_prefix(root).ok().map(PathBuf::from))
+                .unwrap_or_else(|| path.clone());
+            let mut segs: Vec<String> = rel
+                .components()
+                .map(|c| c.as_os_str().to_string_lossy().into_owned())
+                .collect();
+            // Match the tab label — hide the implied `.txt`.
+            if let Some(last) = segs.last_mut()
+                && let Some(stripped) = last.strip_suffix(".txt")
+            {
+                *last = stripped.to_string();
+            }
+            segments.extend(segs);
+        }
 
         if let Some(listener) = self.nav_listener.borrow().as_ref() {
             listener(segments);
@@ -168,6 +217,7 @@ impl WorkspaceController {
             file_tree.set_root_path(path);
         }
         self.refresh_branch();
+        self.refresh_git_availability();
     }
 
     pub fn get_root_path(&self) -> Option<PathBuf> {

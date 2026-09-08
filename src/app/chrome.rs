@@ -64,21 +64,52 @@ pub fn main_toolbar(controller: &Rc<WorkspaceController>) -> GtkBox {
     let bar = GtkBox::builder()
         .orientation(Orientation::Horizontal)
         .css_classes(["main-toolbar"])
-        .spacing(2)
+        .spacing(4)
         .build();
 
-    // Left: breadcrumb showing where the active tab lives.
-    let breadcrumb = Label::builder()
+    // Left: breadcrumb showing where the active tab lives — the workspace
+    // folder as the first segment, then each directory, then the file. A
+    // folder icon per segment, a file icon on the leaf.
+    let breadcrumb = GtkBox::builder()
         .css_classes(["nav-breadcrumb"])
+        .orientation(Orientation::Horizontal)
         .halign(Align::Start)
         .hexpand(true)
-        .xalign(0.0)
-        .ellipsize(pango::EllipsizeMode::Start)
+        .spacing(2)
         .build();
     {
         let breadcrumb = breadcrumb.clone();
         controller.set_nav_listener(move |segments| {
-            breadcrumb.set_text(&segments.join("  \u{203a}  "));
+            while let Some(child) = breadcrumb.first_child() {
+                breadcrumb.remove(&child);
+            }
+            let last = segments.len().saturating_sub(1);
+            // A leaf file only exists once there's more than the root.
+            let leaf_is_file = segments.len() > 1;
+            for (i, segment) in segments.iter().enumerate() {
+                if i > 0 {
+                    breadcrumb.append(
+                        &Label::builder()
+                            .label("\u{203a}")
+                            .css_classes(["nav-sep"])
+                            .build(),
+                    );
+                }
+                let icon = if i == last && leaf_is_file {
+                    img("file", 12)
+                } else {
+                    img("directory", 12)
+                };
+                breadcrumb.append(&icon);
+
+                let label = Label::builder().label(segment).build();
+                if i == last {
+                    label.set_ellipsize(pango::EllipsizeMode::End);
+                    label.set_hexpand(true);
+                    label.set_xalign(0.0);
+                }
+                breadcrumb.append(&label);
+            }
         });
     }
     controller.refresh_nav();
@@ -104,39 +135,53 @@ pub fn main_toolbar(controller: &Rc<WorkspaceController>) -> GtkBox {
         "run-action",
     ));
 
-    bar.append(&Separator::new(Orientation::Vertical));
+    // Git: <pull> <commit> <push> <fetch>. The whole group hides when the
+    // workspace isn't a repo; pull/push/fetch grey out when it has no
+    // `origin` remote (commit still works). Driven by the controller's
+    // git-availability listener, refreshed on every `set_root_path`.
+    let git_separator = Separator::new(Orientation::Vertical);
+    bar.append(&git_separator);
 
-    // Git: <pull> <commit> <push> <fetch>
-    bar.append(
-        &Label::builder()
-            .label("Git:")
-            .css_classes(["toolbar-group-label"])
-            .build(),
-    );
-    bar.append(&tool_button(
-        "git-pull",
-        "app.git-pull",
-        "Pull\u{2026}",
-        "git-pull",
-    ));
-    bar.append(&tool_button(
-        "git-commit",
+    let git_label = Label::builder()
+        .label("Git:")
+        .css_classes(["toolbar-group-label"])
+        .build();
+    bar.append(&git_label);
+
+    let git_commit = tool_button(
+        "add-file-storage",
         "app.git-commit",
         "Commit\u{2026}",
         "git-commit",
-    ));
-    bar.append(&tool_button(
-        "git-push",
-        "app.git-push",
-        "Push\u{2026}",
-        "git-push",
-    ));
-    bar.append(&tool_button(
-        "git-fetch",
-        "app.git-fetch",
-        "Fetch",
-        "git-fetch",
-    ));
+    );
+    let git_pull = tool_button("git-pull", "app.git-pull", "Pull\u{2026}", "git-pull");
+    let git_push = tool_button("git-push", "app.git-push", "Push\u{2026}", "git-push");
+    let git_fetch = tool_button("git-fetch", "app.git-fetch", "Fetch", "git-fetch");
+    bar.append(&git_commit);
+    bar.append(&git_pull);
+    bar.append(&git_push);
+    bar.append(&git_fetch);
+
+    {
+        use crate::workspace::controller::GitAvailability;
+        let git_separator = git_separator.clone();
+        let git_label = git_label.clone();
+        let git_commit = git_commit.clone();
+        let remote_buttons = [git_pull.clone(), git_push.clone(), git_fetch.clone()];
+        controller.set_git_listener(move |availability| {
+            let has_repo = availability != GitAvailability::None;
+            let has_remote = availability == GitAvailability::Full;
+            git_separator.set_visible(has_repo);
+            git_label.set_visible(has_repo);
+            git_commit.set_visible(has_repo);
+            git_commit.set_sensitive(has_repo);
+            for button in &remote_buttons {
+                button.set_visible(has_repo);
+                button.set_sensitive(has_remote);
+            }
+        });
+    }
+    controller.refresh_git_availability();
 
     bar.append(&Separator::new(Orientation::Vertical));
     bar.append(&settings_button());
@@ -155,7 +200,7 @@ pub fn left_stripe<F: Fn(bool) + 'static>(project_visible: bool, on_toggle: F) -
 
     let content = GtkBox::new(Orientation::Vertical, 3);
     content.set_halign(Align::Center);
-    content.append(&img("directory", 13));
+    content.append(&img("directory", 16));
     content.append(&VerticalLabel::new("Project"));
 
     let btn = ToggleButton::builder()
@@ -181,7 +226,7 @@ pub fn bottom_stripe<F: Fn(bool) + 'static>(rhyme_visible: bool, on_toggle: F) -
         .build();
 
     let content = GtkBox::new(Orientation::Horizontal, 4);
-    content.append(&img("search", 13));
+    content.append(&img("search", 16));
     content.append(&Label::new(Some("Rhyme Search")));
 
     let btn = ToggleButton::builder()
