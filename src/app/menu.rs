@@ -1,7 +1,8 @@
 use crate::workspace::controller::WorkspaceController;
 use gio::Menu;
+use gtk::gio;
 use gtk::prelude::*;
-use gtk::{Application, gio};
+use libadwaita::Application;
 use std::path::PathBuf;
 use std::rc::Rc;
 
@@ -22,7 +23,13 @@ fn accel(extra_mods: &str, key: &str) -> String {
     format!("{PRIMARY_MOD}{extra_mods}{key}")
 }
 
-pub fn setup_menu(app: &Application, workspace_controller: Rc<WorkspaceController>) {
+/// Builds the File/Git/Help menu model and wires up every action it
+/// invokes. Returns the model so callers can also feed it to an in-window
+/// `MenuButton` — `set_menubar` alone only surfaces it via native shell
+/// integration (e.g. macOS's menu bar), which doesn't exist on
+/// Windows/Linux, so the header bar's hamburger menu is the only way
+/// those platforms can reach File/Git/Help at all.
+pub fn setup_menu(app: &Application, workspace_controller: Rc<WorkspaceController>) -> Menu {
     let file = file(app, workspace_controller.clone());
     // edit(app, workspace_controller);
     let git = git(app, workspace_controller.clone());
@@ -36,6 +43,8 @@ pub fn setup_menu(app: &Application, workspace_controller: Rc<WorkspaceControlle
 
     // Set menu bar in app
     app.set_menubar(Some(&menu_bar));
+
+    menu_bar
 }
 
 fn git(app: &Application, workspace_controller: Rc<WorkspaceController>) -> Menu {

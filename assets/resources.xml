@@ -2,6 +2,7 @@
 <gresources>
   <gresource prefix="/org/gtk_rs/rhymr">
     <file>styles/rhymr.xml</file>
+    <file>styles/rhymr-light.xml</file>
     <file compressed="true" preprocess="xml-stripblanks">icons/text_dark.svg</file>
     <file compressed="true" preprocess="xml-stripblanks">icons/folder.svg</file>
     <file compressed="true" preprocess="xml-stripblanks">icons/note-active.svg</file>

@@ -1,6 +1,8 @@
 use gio::Resource;
 use gtk::prelude::*;
 use gtk::{gio, glib};
+use libadwaita as adw;
+use rhymr_rs::setting::Settings;
 use rhymr_rs::{app, css};
 
 pub const APP_ID: &str = "org.gtk_rs.Rhymr";
@@ -21,18 +23,21 @@ fn main() -> glib::ExitCode {
         panic!("{e}");
     }
 
-    // Build the application
-    let app = gtk::Application::builder()
+    // adw::Application initializes both GTK and libadwaita on startup.
+    let app = adw::Application::builder()
         .application_id(APP_ID)
         .flags(gio::ApplicationFlags::HANDLES_OPEN)
         .build();
 
     // Connect activate signal
     app.connect_activate(|app| {
-        // Load CSS once, up front — the welcome window is shown before the
-        // main layout is ever built, so it needs the theme applied here too.
-        let css_provider = css::load_css();
+        // Load CSS + theme once, up front — the welcome window is shown
+        // before the main layout is ever built, so it needs both applied
+        // here too.
+        let settings = Settings::load();
+        let css_provider = css::init(&settings);
         css::apply_css_to_app(&css_provider);
+        css::sync_style_manager(&settings);
 
         let app_for_workspace = app.clone();
 

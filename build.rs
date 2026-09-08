@@ -2,8 +2,13 @@ use grass::Options;
 use std::fs;
 use std::path::Path;
 
-const CSS_FILES: [&str; 9] = [
+// Kept in sync with `CSS_FILES` in src/css.rs — build.rs precompiles these
+// to assets/css/*.css (unused by the app itself, which recompiles from
+// source at runtime, but kept so the compiled output isn't stale).
+const CSS_FILES: [&str; 12] = [
     "assets/{1}/base.{1}",
+    "assets/{1}/context_menu.{1}",
+    "assets/{1}/dialog.{1}",
     "assets/{1}/editor.{1}",
     "assets/{1}/empty_state.{1}",
     "assets/{1}/file_tree.{1}",
@@ -12,6 +17,7 @@ const CSS_FILES: [&str; 9] = [
     "assets/{1}/rhyme_search.{1}",
     "assets/{1}/settings.{1}",
     "assets/{1}/status_bar.{1}",
+    "assets/{1}/welcome.{1}",
 ];
 
 fn main() {

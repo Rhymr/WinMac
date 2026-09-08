@@ -1,0 +1,51 @@
+/* Shared partial (leading `_`, not compiled on its own — see CSS_FILES in
+   src/css.rs/build.rs, neither of which lists it directly). */
+
+/* The hover/selected pattern repeated across every row-based list in the
+   app (file tree rows, sidebar nav, recent-projects list, settings
+   category list): plain hover, selected, and — since the app-wide
+   `box { background: ... }` reset would otherwise show through any
+   unclassed Box nested in the row (icon+label wrappers etc.) — the same
+   backgrounds re-applied to descendants. `:hover` and `:selected` have
+   equal specificity and are deliberately declared in that order, so a row
+   that's both (hovered while already selected) resolves to `$selected` via
+   plain cascade order, with no `:hover:not(:selected)` escape hatch
+   needed.
+   - `$hover`/`$selected`: the two background colors.
+   - `$radius`: rounds every row, not just on hover/selected (`none` skips
+     it — the file tree's rows sit flush edge-to-edge).
+   - `$force-fg`: forces light text on selected descendants. Needed
+     wherever `$selected` is the saturated accent blue (`--selection-bg`),
+     since regular text color (`--text-bright`) flips dark in light theme
+     and would be unreadable on it. Left off where `$selected` is a neutral
+     gray tint instead (the file tree), so status-colored labels (modified/
+     new/renamed) keep their own color through selection.
+*/
+@mixin list-row-hover-select($hover, $selected, $radius: none, $force-fg: false) {
+    & > row {
+        transition: background-color var(--transition-fast);
+
+        @if $radius != none {
+            border-radius: $radius;
+        }
+
+        &:hover {
+            background-color: $hover;
+        }
+
+        &:hover * {
+            background-color: $hover;
+        }
+
+        &:selected {
+            background-color: $selected;
+        }
+
+        &:selected * {
+            background-color: $selected;
+            @if $force-fg {
+                color: var(--selection-fg);
+            }
+        }
+    }
+}

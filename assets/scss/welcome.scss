@@ -1,3 +1,5 @@
+@use "mixins" as *;
+
 /* Welcome / project picker theming */
 .welcome-sidebar {
     background-color: var(--bg-darkest);
@@ -43,24 +45,7 @@
 .sidebar-nav {
     background-color: transparent;
 
-    & > row {
-        padding: 0;
-        margin: 2px 8px;
-        border-radius: 6px;
-
-        &:hover {
-            background-color: var(--bg-hover);
-        }
-
-        &:selected {
-            background-color: var(--selection-bg);
-        }
-
-        &:selected label {
-            background-color: var(--selection-bg);
-            color: var(--text-bright);
-        }
-    }
+    @include list-row-hover-select(var(--bg-hover), var(--selection-bg), var(--radius-md), $force-fg: true);
 
     & label {
         background-color: inherit;
@@ -70,38 +55,16 @@
 .recent-projects-list {
     background-color: transparent;
 
+    @include list-row-hover-select(var(--bg-light), var(--selection-bg), 8px, $force-fg: true);
+
     & > row {
         background-color: var(--bg-mid);
         margin-bottom: 6px;
-        border-radius: 8px;
-
-        &:hover {
-            background-color: var(--bg-light);
-        }
-
-        &:hover * {
-            background-color: var(--bg-light);
-        }
-
-        &:selected {
-            background-color: var(--selection-bg);
-        }
-
-        &:selected * {
-            background-color: var(--selection-bg);
-        }
     }
 
     & box {
         background-color: inherit;
     }
-}
-
-.welcome-content button,
-.welcome-content entry,
-.new-project-content button,
-.new-project-content entry {
-    border-radius: 6px;
 }
 
 /* GTK's global reset (border:none/background:none on `*`) otherwise leaves
@@ -117,7 +80,7 @@ checkbutton {
         &:checked {
             background-color: var(--selection-bg);
             border-color: var(--selection-bg);
-            color: var(--text-bright);
+            color: var(--selection-fg);
         }
     }
 
@@ -148,47 +111,14 @@ checkbutton {
 
 .project-avatar {
     background-color: var(--selection-bg);
-    color: var(--text-bright);
+    color: var(--selection-fg);
     border-radius: 6px;
     font-weight: bold;
 }
 
-.title-3 {
-    font-size: 16px;
-}
-
-.bold {
-    font-weight: bold;
-}
-
-.caption {
-    font-size: 11px;
-}
-
-.dim-label {
-    color: var(--text-muted);
-}
-
-.suggested-action {
-    background-color: var(--selection-bg);
-    color: var(--text-bright);
-    border: 1px solid var(--selection-bg);
-
-    &:hover {
-        background-color: var(--selection-hover);
-        border-color: var(--selection-hover);
-    }
-
-    &:active {
-        background-color: var(--selection-active);
-        border-color: var(--selection-active);
-    }
-}
-
-.field-label {
-    color: var(--text-not-so-dim);
-    font-weight: bold;
-}
+/* Typography/button-variant utilities (.title-3/.bold/.caption/.dim-label/
+   .field-label/.suggested-action) moved to base.scss — they're used by the
+   settings dialog and git dialogs too, not just this screen. */
 
 .project-preview {
     color: var(--text-muted);

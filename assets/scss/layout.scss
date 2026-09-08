@@ -38,4 +38,14 @@
 
 .horizontal-split {
     background-color: var(--bg-dark);
-} 
+}
+
+/* The compact title bar added on macOS/Windows (see app/layout.rs) exists
+   purely for window-drag on macOS, plus (Windows only) a hamburger menu —
+   libadwaita's default HeaderBar height is sized for a row of buttons,
+   taller than this app needs when all it's actually showing is a centered
+   title, so it's trimmed down to just wrap that text. */
+headerbar {
+    min-height: 0;
+    padding: 4px 8px;
+}

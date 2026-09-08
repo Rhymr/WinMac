@@ -3,12 +3,13 @@
 //! separate from tree.rs (which owns the tree's rendering/data model) since
 //! this is the half of `FileTree` that keeps growing.
 use super::tree::FileTree;
+use crate::app::context_menu::{ContextMenu, hint};
 use gtk::gdk;
 use gtk::glib;
 use gtk::prelude::*;
 use gtk::{
     Align, Box as GtkBox, Button, Entry, EventControllerFocus, EventControllerKey, Label,
-    Orientation, Popover, Separator, Window,
+    Orientation, Window,
 };
 use std::cell::Cell;
 use std::fs;
@@ -22,55 +23,6 @@ use std::rc::Rc;
 const PRIMARY_MASK: gdk::ModifierType = gdk::ModifierType::META_MASK;
 #[cfg(not(target_os = "macos"))]
 const PRIMARY_MASK: gdk::ModifierType = gdk::ModifierType::CONTROL_MASK;
-
-// Shortcut hints shown in the context menu — ⌘ on macOS, "Ctrl+" elsewhere,
-// so the menu never shows a Mac-only symbol on Windows/Linux or vice versa.
-#[cfg(target_os = "macos")]
-mod hint {
-    pub const CUT: &str = "\u{2318}X";
-    pub const COPY: &str = "\u{2318}C";
-    pub const COPY_PATH: &str = "\u{21E7}\u{2318}C";
-    pub const PASTE: &str = "\u{2318}V";
-    pub const DELETE: &str = "\u{232B}";
-}
-#[cfg(not(target_os = "macos"))]
-mod hint {
-    pub const CUT: &str = "Ctrl+X";
-    pub const COPY: &str = "Ctrl+C";
-    pub const COPY_PATH: &str = "Ctrl+Shift+C";
-    pub const PASTE: &str = "Ctrl+V";
-    pub const DELETE: &str = "Del";
-}
-
-/// Anchor `popover` (already parented to `frame`) to the bottom edge of
-/// `hbox`, spanning its full width, so the menu always drops down from
-/// directly under the row regardless of where inside the row it was
-/// right-clicked (and identically for files and folders, which have
-/// differently sized icons/labels).
-///
-/// The popover is parented to the tree's outer `frame` rather than to
-/// `hbox` itself — parenting into the row would put the popover's contents
-/// inside the `.file-list` CSS subtree, where `file_tree.scss`'s unscoped
-/// `row:hover *` / `& box` / `& label` rules (meant to recolor a row's own
-/// icon+label on hover/selection) would also repaint the menu's items,
-/// since GTK CSS descendant selectors don't stop at the row's boundary.
-/// Since `hbox`'s coordinates are relative to its own parent, they're
-/// translated into `frame`'s coordinate space before building the anchor
-/// rectangle.
-fn anchor_below(popover: &Popover, hbox: &GtkBox, frame: &gtk::Frame) {
-    let width = hbox.width().max(1);
-    let height = hbox.height().max(1);
-    let origin = hbox
-        .compute_point(frame, &gtk::graphene::Point::new(0.0, 0.0))
-        .unwrap_or_else(|| gtk::graphene::Point::new(0.0, 0.0));
-    popover.set_pointing_to(Some(&gdk::Rectangle::new(
-        origin.x() as i32,
-        origin.y() as i32 + height,
-        width,
-        1,
-    )));
-    popover.set_position(gtk::PositionType::Bottom);
-}
 
 impl FileTree {
     /// F2 to rename, Delete/Backspace to delete, and Cut/Copy/Paste — all
@@ -136,17 +88,9 @@ impl FileTree {
         is_dir: bool,
         is_root: bool,
     ) {
-        let popover = Popover::new();
-        popover.set_parent(&self.frame);
-        popover.set_has_arrow(false);
-        // Anchor to the bottom edge of the row itself — consistent
-        // regardless of exactly where in the row (or whether it's a file or
-        // a folder) it was right-clicked, rather than jumping around at the
-        // cursor's exact position.
-        anchor_below(&popover, hbox, &self.frame);
-
-        let menu_box = GtkBox::new(Orientation::Vertical, 0);
-        menu_box.set_css_classes(&["context-menu"]);
+        // Parented to the tree's outer `frame` rather than `hbox` itself —
+        // see `ContextMenu::new`'s doc comment for why.
+        let menu = ContextMenu::new(&self.frame);
 
         let target_dir = if is_dir {
             path.clone()
@@ -157,48 +101,32 @@ impl FileTree {
         };
 
         // New (opens a File/Folder submenu)
-        let new_item = submenu_item_button("New");
-        menu_box.append(&new_item);
-
-        let popover_ref = popover.clone();
+        let menu_ref = menu.clone();
         let file_tree_ref = self.clone();
         let hbox_ref = hbox.clone();
         let target_dir_for_new = target_dir.clone();
-        new_item.connect_clicked(move |_| {
-            popover_ref.popdown();
+        menu.add_submenu_item("New", move || {
+            menu_ref.popdown();
             file_tree_ref.show_new_submenu(&hbox_ref, target_dir_for_new.clone());
         });
 
         if !is_root {
-            menu_box.append(&Separator::new(Orientation::Horizontal));
+            menu.add_separator();
 
-            let cut_item = menu_item_button("Cut", Some(hint::CUT), None);
-            let copy_item = menu_item_button("Copy", Some(hint::COPY), None);
-            let copy_path_item = menu_item_button("Copy Path", Some(hint::COPY_PATH), None);
-            menu_box.append(&cut_item);
-            menu_box.append(&copy_item);
-            menu_box.append(&copy_path_item);
-
-            let popover_ref = popover.clone();
             let clipboard_ref = self.clipboard.clone();
             let path_for_cut = path.clone();
-            cut_item.connect_clicked(move |_| {
-                popover_ref.popdown();
+            menu.add_item("Cut", Some(hint::CUT), None, move || {
                 clipboard_ref.replace(Some((path_for_cut.clone(), true)));
             });
 
-            let popover_ref = popover.clone();
             let clipboard_ref = self.clipboard.clone();
             let path_for_copy = path.clone();
-            copy_item.connect_clicked(move |_| {
-                popover_ref.popdown();
+            menu.add_item("Copy", Some(hint::COPY), None, move || {
                 clipboard_ref.replace(Some((path_for_copy.clone(), false)));
             });
 
-            let popover_ref = popover.clone();
             let path_for_copy_path = path.clone();
-            copy_path_item.connect_clicked(move |_| {
-                popover_ref.popdown();
+            menu.add_item("Copy Path", Some(hint::COPY_PATH), None, move || {
                 if let Some(display) = gdk::Display::default() {
                     display
                         .clipboard()
@@ -210,97 +138,58 @@ impl FileTree {
         // Available for files too, not just folders — pastes as a sibling,
         // into the file's parent (target_dir already resolves that way).
         if self.clipboard.borrow().is_some() {
-            let paste_item = menu_item_button("Paste", Some(hint::PASTE), None);
-            menu_box.append(&paste_item);
-
-            let popover_ref = popover.clone();
             let file_tree_ref = self.clone();
             let target_dir_for_paste = target_dir.clone();
-            paste_item.connect_clicked(move |_| {
-                popover_ref.popdown();
+            menu.add_item("Paste", Some(hint::PASTE), None, move || {
                 file_tree_ref.paste_into(target_dir_for_paste.clone());
             });
         }
 
         if !is_root {
-            let rename_item = menu_item_button("Rename", None, None);
-            menu_box.append(&rename_item);
-
+            // No popdown()-then-refresh() race here: renaming edits the
+            // row's existing children in place rather than destroying the
+            // row, so the popover's parent widget stays alive.
             let file_tree_ref = self.clone();
             let hbox_ref = hbox.clone();
             let label_ref = label.clone();
             let path_for_rename = path.clone();
-            rename_item.connect_clicked(move |_| {
-                // No popdown()-then-refresh() race here: renaming edits the
-                // row's existing children in place rather than destroying
-                // the row, so the popover's parent widget stays alive.
+            menu.add_item("Rename", None, None, move || {
                 file_tree_ref.start_rename(&hbox_ref, &label_ref, path_for_rename.clone());
             });
 
-            menu_box.append(&Separator::new(Orientation::Horizontal));
+            menu.add_separator();
 
-            let delete_item = menu_item_button(
-                "Delete\u{2026}",
-                Some(hint::DELETE),
-                Some("destructive-menu-item"),
-            );
-            menu_box.append(&delete_item);
-
-            let popover_ref = popover.clone();
             let file_tree_ref = self.clone();
             let hbox_ref = hbox.clone();
             let path_for_delete = path.clone();
-            delete_item.connect_clicked(move |_| {
-                popover_ref.popdown();
-                file_tree_ref.confirm_delete(&hbox_ref, path_for_delete.clone(), is_dir);
-            });
+            menu.add_item(
+                "Delete\u{2026}",
+                Some(hint::DELETE),
+                Some("destructive-menu-item"),
+                move || {
+                    file_tree_ref.confirm_delete(&hbox_ref, path_for_delete.clone(), is_dir);
+                },
+            );
         }
 
-        popover.set_child(Some(&menu_box));
-
-        let popover_for_close = popover.clone();
-        popover.connect_closed(move |_| {
-            popover_for_close.unparent();
-        });
-
-        popover.popup();
+        menu.popup_below(hbox);
     }
 
     fn show_new_submenu(&self, hbox: &GtkBox, parent_dir: PathBuf) {
-        let popover = Popover::new();
-        popover.set_parent(&self.frame);
-        popover.set_has_arrow(false);
-        anchor_below(&popover, hbox, &self.frame);
+        let menu = ContextMenu::new(&self.frame);
 
-        let menu_box = GtkBox::new(Orientation::Vertical, 0);
-        menu_box.set_css_classes(&["context-menu"]);
-        let file_item = menu_item_button("New File", None, None);
-        let folder_item = menu_item_button("New Folder", None, None);
-        menu_box.append(&file_item);
-        menu_box.append(&folder_item);
-        popover.set_child(Some(&menu_box));
-
-        let popover_ref = popover.clone();
         let file_tree_ref = self.clone();
         let dir_for_file = parent_dir.clone();
-        file_item.connect_clicked(move |_| {
-            popover_ref.popdown();
+        menu.add_item("New File", None, None, move || {
             file_tree_ref.create_new_entry(dir_for_file.clone(), false);
         });
 
-        let popover_ref = popover.clone();
         let file_tree_ref = self.clone();
-        folder_item.connect_clicked(move |_| {
-            popover_ref.popdown();
+        menu.add_item("New Folder", None, None, move || {
             file_tree_ref.create_new_entry(parent_dir.clone(), true);
         });
 
-        let popover_for_close = popover.clone();
-        popover.connect_closed(move |_| {
-            popover_for_close.unparent();
-        });
-
-        popover.popup();
+        menu.popup_below(hbox);
     }
 
     /// Create a new file or folder inside `parent_dir` with a default,
@@ -572,7 +461,6 @@ impl FileTree {
             .modal(true)
             .resizable(false)
             .default_width(360)
-            .css_classes(vec!["new-project-content"])
             .build();
 
         let content = GtkBox::new(Orientation::Vertical, 16);
@@ -655,58 +543,6 @@ impl FileTree {
             crate::git::ops::stage_all_changes(&root);
         }
     }
-}
-
-/// A left-aligned, full-width flat menu row (icon-menu look, not a centered
-/// button) with an optional right-aligned shortcut hint and an optional
-/// extra CSS class (e.g. for Delete).
-fn menu_item_button(text: &str, shortcut: Option<&str>, extra_class: Option<&str>) -> Button {
-    let hbox = GtkBox::new(Orientation::Horizontal, 0);
-
-    let label = Label::new(Some(text));
-    label.set_halign(Align::Start);
-    label.set_hexpand(true);
-    hbox.append(&label);
-
-    if let Some(shortcut) = shortcut {
-        let hint = Label::new(Some(shortcut));
-        hint.set_halign(Align::End);
-        hint.set_css_classes(&["menu-shortcut"]);
-        hbox.append(&hint);
-    }
-
-    let button = Button::new();
-    button.set_child(Some(&hbox));
-    button.set_halign(Align::Fill);
-
-    let mut classes = vec!["flat", "context-menu-item"];
-    if let Some(extra) = extra_class {
-        classes.push(extra);
-    }
-    button.set_css_classes(&classes);
-    button
-}
-
-/// Same as `menu_item_button`, but with a trailing "opens a submenu" arrow.
-fn submenu_item_button(text: &str) -> Button {
-    let hbox = GtkBox::new(Orientation::Horizontal, 0);
-
-    let label = Label::new(Some(text));
-    label.set_halign(Align::Start);
-    label.set_hexpand(true);
-
-    let arrow = Label::new(Some("\u{203A}"));
-    arrow.set_halign(Align::End);
-    arrow.set_css_classes(&["dim-label"]);
-
-    hbox.append(&label);
-    hbox.append(&arrow);
-
-    let button = Button::new();
-    button.set_child(Some(&hbox));
-    button.set_halign(Align::Fill);
-    button.set_css_classes(&["flat", "context-menu-item"]);
-    button
 }
 
 fn copy_recursive(src: &Path, dest: &Path) -> std::io::Result<()> {

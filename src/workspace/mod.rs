@@ -2,16 +2,24 @@ pub mod controller;
 pub mod manager;
 pub mod recent;
 
+use crate::app::context_menu::ContextMenu;
 use crate::editor::TextEditor;
 use crate::file::ops::FileOps;
 use crate::file::tree::FileTree;
 use controller::WorkspaceController;
 use gtk::prelude::*;
-use gtk::{Box, Button, Frame, Label, Notebook, TextBuffer, TextView, Window};
+use gtk::{
+    Box, Button, EventSequenceState, Frame, GestureClick, Image, Label, Notebook, TextBuffer,
+    TextView, Widget, Window, gdk, pango,
+};
 use std::cell::RefCell;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
+
+/// Same file icon the file tree uses for an "open" row — reused here so a
+/// tab's icon matches what the user sees in the tree.
+const TAB_ICON_RESOURCE: &str = "/org/gtk_rs/rhymr/icons/note-active.svg";
 
 pub struct Workspace {
     frame: Frame,
@@ -27,12 +35,27 @@ pub struct Workspace {
 
 impl Workspace {
     pub fn new(controller: Rc<WorkspaceController>, file_tree: Option<FileTree>) -> Self {
-        // Create notebook (tabbed interface)
+        // Starts non-scrollable: GTK only ever shrinks tab allocations
+        // toward their ellipsized minimum (rather than growing the window)
+        // when scrolling is off — with it on, tabs stay at full width and
+        // overflow behind scroll arrows instead. `adapt_tab_display` (see
+        // its tick callback below) is what turns scrolling back on, but
+        // only once every tab has already been squeezed down to icon-only
+        // and *still* doesn't fit — the last resort, not the first one.
         let notebook = Notebook::builder()
-            .scrollable(true)
+            .scrollable(false)
             .show_border(false)
             .css_classes(vec!["workspace-notebook"])
             .build();
+
+        // Keeps the tab strip from ever pushing the window wider: every
+        // frame, shrink open tabs toward icon-only before falling back to
+        // paging arrows, rather than letting the header just demand more
+        // width than it's been given.
+        notebook.add_tick_callback(|notebook, _clock| {
+            adapt_tab_display(notebook);
+            glib::ControlFlow::Continue
+        });
 
         let open_files = Rc::new(RefCell::new(Vec::new()));
 
@@ -249,30 +272,10 @@ impl Workspace {
         let Some(page) = self.notebook.nth_page(Some(page_num)) else {
             return;
         };
-        let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
-            return;
-        };
 
-        let tab_box = Box::builder()
-            .orientation(gtk::Orientation::Horizontal)
-            .spacing(4)
-            .build();
-
-        let label = Label::new(Some(name));
-        let close_button = Button::builder()
-            .icon_name("window-close-symbolic")
-            .css_classes(vec!["flat", "tab-close-button"])
-            .build();
-
-        tab_box.append(&label);
-        tab_box.append(&close_button);
-
-        let controller = self.controller.clone();
-        close_button.connect_clicked(move |button| {
-            if let Some(window) = button.root().and_downcast::<Window>() {
-                controller.handle_close_tab(&window);
-            }
-        });
+        let (tab_box, close_button) = build_tab_widget(path);
+        wire_tab_close_button(&close_button, &self.controller);
+        wire_tab_context_menu(&tab_box, &self.notebook, &page, &self.controller, path);
 
         self.notebook.set_tab_label(&page, Some(&tab_box));
     }
@@ -431,6 +434,66 @@ impl Workspace {
         }
     }
 
+    /// Close the tab at `index` — the tab context menu's "Close".
+    pub fn close_tab_at(&self, index: usize) {
+        if index < self.open_files.borrow().len() {
+            self.remove_tab(index);
+        }
+    }
+
+    /// Close every open tab except `keep_index`. Highest index first, so
+    /// removing one never invalidates the indices of tabs still to close.
+    pub fn close_other_tabs(&self, keep_index: usize) {
+        let count = self.open_files.borrow().len();
+        for index in (0..count).rev() {
+            if index != keep_index {
+                self.remove_tab(index);
+            }
+        }
+    }
+
+    pub fn close_all_tabs(&self) {
+        while !self.open_files.borrow().is_empty() {
+            self.remove_tab(0);
+        }
+    }
+
+    /// Close every tab to the left of `index` (not including it).
+    pub fn close_tabs_to_left(&self, index: usize) {
+        // The `Ref` from `.borrow()` would otherwise live for the whole
+        // loop (a `for` header's temporaries aren't dropped until the loop
+        // ends, unlike a `while` condition's), and `remove_tab`'s own
+        // `borrow_mut()` would panic on the second iteration.
+        let count = self.open_files.borrow().len();
+        for i in (0..index.min(count)).rev() {
+            self.remove_tab(i);
+        }
+    }
+
+    /// Close every tab that hasn't been edited since it was opened (or
+    /// whose edits have already been autosaved) — mirrors JetBrains'
+    /// "Close Unmodified Tabs".
+    pub fn close_unmodified_tabs(&self) {
+        let indices: Vec<usize> = self
+            .text_editors
+            .borrow()
+            .iter()
+            .enumerate()
+            .filter(|(_, editor)| !editor.is_modified())
+            .map(|(index, _)| index)
+            .collect();
+        for index in indices.into_iter().rev() {
+            self.remove_tab(index);
+        }
+    }
+
+    pub fn any_unmodified_tabs(&self) -> bool {
+        self.text_editors
+            .borrow()
+            .iter()
+            .any(|editor| !editor.is_modified())
+    }
+
     /// Live-apply `settings` to every currently open tab — called after the
     /// settings dialog saves, so a toggle takes effect immediately instead
     /// of only for tabs opened afterward.
@@ -455,33 +518,24 @@ fn add_new_tab(
     // real edit that needs auto-saving.
     text_editor.set_path(path.to_path_buf());
 
-    // Create tab label box
-    let tab_box = Box::builder()
-        .orientation(gtk::Orientation::Horizontal)
-        .css_classes(vec!["tab-box"])
-        .spacing(0)
-        .build();
-
-    // Create the label
-    let label = Label::new(Some(
-        path.file_name()
-            .and_then(|name| name.to_str())
-            .unwrap_or("Untitled"),
-    ));
-
-    // Create close button
-    let close_button = Button::builder()
-        .icon_name("window-close-symbolic")
-        .css_classes(vec!["tab-close-button"])
-        .build();
-
-    tab_box.append(&label);
-    tab_box.append(&close_button);
+    let (tab_box, close_button) = build_tab_widget(path);
 
     // Add the page with our custom tab
-    let page_num = notebook.append_page(text_editor.get_widget(), Some(&tab_box));
+    let page_widget: Widget = text_editor.get_widget().clone().upcast();
+    let page_num = notebook.append_page(&page_widget, Some(&tab_box));
 
-    // Connect close button signal
+    // `tab_expand(false)`: without it, GTK stretches each tab to fill any
+    // leftover header width (and centers the row while it's at it) — pin
+    // every tab to its own size instead, so the strip stays left aligned.
+    // `tab_fill` is deliberately left at its default (true): that's what
+    // lets a tab size to its full natural (un-ellipsized) width when
+    // there's room, only shrinking toward the label's ellipsized minimum
+    // once the open tabs collectively overflow the header — setting it
+    // false here instead made every tab render at minimum width always,
+    // collapsing names even with plenty of space free.
+    let page = notebook.page(&page_widget);
+    page.set_tab_expand(false);
+
     if let Some(controller) = controller {
         // Only the active tab's edits should move the status bar's word
         // count — background tabs keep typing (autosave) without it.
@@ -493,11 +547,8 @@ fn add_new_tab(
             }
         });
 
-        close_button.connect_clicked(move |button| {
-            if let Some(window) = button.root().and_downcast::<Window>() {
-                controller.handle_close_tab(&window);
-            }
-        });
+        wire_tab_close_button(&close_button, &controller);
+        wire_tab_context_menu(&tab_box, notebook, &page_widget, &controller, path);
     }
 
     notebook.set_show_tabs(true);
@@ -505,6 +556,263 @@ fn add_new_tab(
     notebook.set_current_page(Some(page_num));
 
     (page_num, text_editor)
+}
+
+/// Icon + truncated label + close button for one tab — shared by the
+/// initial tab creation and by rename/Save As updates (`set_tab_label`) so
+/// both build an identical widget.
+fn build_tab_widget(path: &Path) -> (Box, Button) {
+    let display_path = path.to_string_lossy().into_owned();
+    let tab_box = Box::builder()
+        .orientation(gtk::Orientation::Horizontal)
+        .css_classes(vec!["tab-box"])
+        .spacing(4)
+        // Read regardless of label visibility, so a tab shrunk down to
+        // icon-only (see `adapt_tab_display`) still identifies itself on
+        // hover.
+        .tooltip_text(display_path)
+        .build();
+
+    let icon = Image::from_resource(TAB_ICON_RESOURCE);
+    icon.set_css_classes(&["tab-icon"]);
+    icon.set_pixel_size(14);
+
+    let display_name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .map(crate::file::tree::strip_txt_extension)
+        .unwrap_or("Untitled");
+
+    let label = Label::new(Some(display_name));
+    label.set_css_classes(&["tab-label"]);
+    label.set_ellipsize(pango::EllipsizeMode::End);
+    // A `Label` with ellipsize on but no explicit width hint requests only
+    // its *minimum* size (just enough for "…") as its natural size too —
+    // there's otherwise no basis for GTK to know it should ask for more.
+    // `max_width_chars` gives it a generous natural-size ceiling instead
+    // (comfortably past any real filename, so a tab shows its full name by
+    // default), while `width_chars` sets the actual minimum it can shrink
+    // down toward once the open tabs don't all fit — see
+    // `Notebook::scrollable(false)` in `Workspace::new`.
+    label.set_width_chars(4);
+    label.set_max_width_chars(40);
+    label.set_halign(gtk::Align::Start);
+
+    // Visibility is handled entirely by CSS (`tab:checked`/`tab:hover` in
+    // notebook.scss) rather than tracked here — GTK's own `:checked` state
+    // on the tab is always correct, unlike hand-rolled bookkeeping that has
+    // to be re-run on every switch/add/remove and is easy to miss a spot on.
+    let close_button = Button::builder()
+        .icon_name("window-close-symbolic")
+        .css_classes(vec!["tab-close-button"])
+        .build();
+
+    tab_box.append(&icon);
+    tab_box.append(&label);
+    tab_box.append(&close_button);
+
+    (tab_box, close_button)
+}
+
+/// Keeps the open tabs from ever forcing the notebook (and so the window)
+/// wider than it already is. Run every frame from a tick callback (GTK
+/// gives no resize/allocation-changed signal for a stock widget we haven't
+/// subclassed, and this needs to react to both window resizes and tabs
+/// being added/removed) it re-measures every tab and picks the least
+/// cramped of three tiers that still fits:
+///
+/// 1. Full labels — every tab at its natural (un-ellipsized) width.
+/// 2. Ellipsized labels — GTK's own min/natural shrink already handles
+///    this; no help needed from here.
+/// 3. Icon-only — labels hidden entirely.
+///
+/// Only once even icon-only tabs collectively don't fit does it fall back
+/// to paging arrows (`scrollable`), so the header hands off to those
+/// rather than to a wider window.
+fn adapt_tab_display(notebook: &Notebook) {
+    let available = notebook.width() - 16;
+    if available <= 0 {
+        return;
+    }
+
+    let mut tab_widgets = Vec::new();
+    let mut labels = Vec::new();
+
+    for i in 0..notebook.n_pages() {
+        let Some(page) = notebook.nth_page(Some(i)) else {
+            continue;
+        };
+        // No tab label at all on the empty-state placeholder page.
+        let Some(tab_widget) = notebook.tab_label(&page) else {
+            continue;
+        };
+        let Some(label) = tab_widget
+            .first_child()
+            .and_then(|icon| icon.next_sibling())
+            .and_then(|w| w.downcast::<Label>().ok())
+        else {
+            continue;
+        };
+        tab_widgets.push(tab_widget);
+        labels.push(label);
+    }
+
+    if labels.is_empty() {
+        return;
+    }
+
+    // Always measure as if every label were visible first, regardless of
+    // whatever state they're currently in. Measuring a tab whose label is
+    // *already* hidden would report its "full" width as just the
+    // icon/close-button footprint (a hidden child contributes ~nothing to
+    // its box's size) — nowhere near what showing it back would actually
+    // need — and the strip would flip back to full labels next frame, only
+    // to immediately re-collapse the frame after that: an infinite
+    // show/hide oscillation, which is what tabs visibly flying off to the
+    // right turned out to be. Toggling visible→hidden synchronously within
+    // this same callback, before layout/paint for this frame happens,
+    // doesn't flicker — only the final state at the end of this function
+    // is ever actually drawn.
+    for label in &labels {
+        if !label.is_visible() {
+            label.set_visible(true);
+        }
+    }
+
+    let mut full_natural_total = 0;
+    let mut min_total = 0;
+    for tab_widget in &tab_widgets {
+        let (min_w, natural_w, _, _) = tab_widget.measure(gtk::Orientation::Horizontal, -1);
+        full_natural_total += natural_w;
+        min_total += min_w;
+    }
+
+    if full_natural_total <= available || min_total <= available {
+        // Labels are already visible from the measurement pass above.
+        if notebook.is_scrollable() {
+            notebook.set_scrollable(false);
+        }
+        return;
+    }
+
+    for label in &labels {
+        label.set_visible(false);
+    }
+
+    // Real re-measurement now that labels are actually hidden, rather than
+    // the fixed `TAB_ICON_ONLY_WIDTH_ESTIMATE` guess this used to compare
+    // against — any mismatch between an estimate and each tab's genuine
+    // icon-only footprint (padding/border/margin from notebook.scss) could
+    // leave tabs overflowing uncontained, since a non-scrollable notebook
+    // doesn't clip its header.
+    let icon_only_total: i32 = tab_widgets
+        .iter()
+        .map(|w| w.measure(gtk::Orientation::Horizontal, -1).1)
+        .sum();
+    let need_scrolling = icon_only_total > available;
+    if notebook.is_scrollable() != need_scrolling {
+        notebook.set_scrollable(need_scrolling);
+    }
+}
+
+fn wire_tab_close_button(close_button: &Button, controller: &Rc<WorkspaceController>) {
+    let controller = controller.clone();
+    close_button.connect_clicked(move |button| {
+        if let Some(window) = button.root().and_downcast::<Window>() {
+            controller.handle_close_tab(&window);
+        }
+    });
+}
+
+/// Right-click menu for a tab: Close/Close Other/Close All/Close
+/// Unmodified/Close Tabs to the Left, plus Copy Path — matching the same
+/// `ContextMenu` used by the file tree and editor. `page_widget` (the
+/// page's content, not the tab label) is used to look up this tab's
+/// *current* page index at click time via `Notebook::page_num`, so the
+/// menu still targets the right tab even after other tabs have been
+/// closed/reordered since this one was created.
+fn wire_tab_context_menu(
+    tab_box: &Box,
+    notebook: &Notebook,
+    page_widget: &Widget,
+    controller: &Rc<WorkspaceController>,
+    path: &Path,
+) {
+    let gesture = GestureClick::new();
+    gesture.set_button(gdk::BUTTON_SECONDARY);
+
+    let notebook = notebook.clone();
+    let page_widget = page_widget.clone();
+    let controller = controller.clone();
+    let path = path.to_path_buf();
+    let tab_box_for_popup = tab_box.clone();
+
+    gesture.connect_pressed(move |gesture, _n_press, _x, _y| {
+        gesture.set_state(EventSequenceState::Claimed);
+        let Some(index) = notebook.page_num(&page_widget) else {
+            return;
+        };
+        let index = index as usize;
+        let tab_count = notebook.n_pages() as usize;
+
+        let menu = ContextMenu::new(&tab_box_for_popup);
+
+        let c = controller.clone();
+        menu.add_item("Close", None, None, move || {
+            if let Some(ws) = c.get_workspace() {
+                ws.close_tab_at(index);
+            }
+        });
+
+        let c = controller.clone();
+        let other_btn = menu.add_item("Close Other Tabs", None, None, move || {
+            if let Some(ws) = c.get_workspace() {
+                ws.close_other_tabs(index);
+            }
+        });
+        other_btn.set_sensitive(tab_count > 1);
+
+        let c = controller.clone();
+        menu.add_item("Close All Tabs", None, None, move || {
+            if let Some(ws) = c.get_workspace() {
+                ws.close_all_tabs();
+            }
+        });
+
+        let c = controller.clone();
+        let any_unmodified = controller
+            .get_workspace()
+            .map(|ws| ws.any_unmodified_tabs())
+            .unwrap_or(false);
+        let unmodified_btn = menu.add_item("Close Unmodified Tabs", None, None, move || {
+            if let Some(ws) = c.get_workspace() {
+                ws.close_unmodified_tabs();
+            }
+        });
+        unmodified_btn.set_sensitive(any_unmodified);
+
+        let c = controller.clone();
+        let left_btn = menu.add_item("Close Tabs to the Left", None, None, move || {
+            if let Some(ws) = c.get_workspace() {
+                ws.close_tabs_to_left(index);
+            }
+        });
+        left_btn.set_sensitive(index > 0);
+
+        menu.add_separator();
+
+        let widget_for_clipboard = tab_box_for_popup.clone();
+        let path_for_copy = path.clone();
+        menu.add_item("Copy Path/Reference...", None, None, move || {
+            widget_for_clipboard
+                .clipboard()
+                .set_text(&path_for_copy.to_string_lossy());
+        });
+
+        menu.popup_below(&tab_box_for_popup);
+    });
+
+    tab_box.add_controller(gesture);
 }
 
 /// Descend from a notebook page's root widget to its actual TextView

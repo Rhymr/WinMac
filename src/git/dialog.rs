@@ -3,9 +3,10 @@ use crate::workspace::controller::WorkspaceController;
 use futures_util::StreamExt;
 use gtk::prelude::*;
 use gtk::{
-    Align, Application, Box as GtkBox, Button, Label, ListBox, Orientation, ScrolledWindow,
-    Spinner, TextBuffer, TextView, Window,
+    Align, Box as GtkBox, Button, Label, ListBox, Orientation, ScrolledWindow, Spinner, TextBuffer,
+    TextView, Window,
 };
+use libadwaita::Application;
 use std::path::PathBuf;
 use std::rc::Rc;
 

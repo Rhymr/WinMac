@@ -1,37 +1,17 @@
+@use "mixins" as *;
+
 /* File tree styling */
 .file-list {
     background: var(--bg-mid);
     padding: 0;
+
+    @include list-row-hover-select(var(--bg-hover), var(--bg-light));
 
     & > row {
         padding: 0;
         margin: 0;
         min-height: 16px;
         background-color: var(--bg-mid);
-
-        &:hover {
-            background-color: var(--bg-light);
-        }
-
-        &:hover * {
-            background-color: var(--bg-light);
-        }
-
-        &:selected {
-            background-color: var(--bg-light);
-        }
-
-        &:selected * {
-            background-color: var(--bg-light);
-        }
-
-        &:hover:not(:selected) {
-            background-color: var(--bg-hover);
-        }
-
-        &:hover:not(:selected) * {
-            background-color: var(--bg-hover);
-        }
     }
 
     & box {
@@ -140,106 +120,10 @@
     min-height: 20px;
 }
 
-/* Popovers (right-click menus, submenus) — GTK's default rounding/shadow is
-   stripped by the app-wide `* { border-radius: 0; box-shadow: none; }`
-   reset, so the menu itself needs its own elevated, rounded surface. The
-   native popover/contents nodes still paint their own background+border
-   underneath our `.context-menu` box though, showing through as a
-   mismatched rectangle behind the rounded corners — kill those explicitly. */
-popover {
-    background: none;
-    border: none;
-    box-shadow: none;
-
-    & > contents {
-        background: none;
-        border: none;
-        box-shadow: none;
-        padding: 0;
-    }
-}
-
-.context-menu {
-    background-color: #34373c;
-    border: 1px solid var(--border-light);
-    border-radius: 9px;
-    padding: 4px;
-    min-width: 220px;
-    box-shadow: 0 6px 16px rgba(0, 0, 0, 0.45);
-}
-
-.context-menu-item {
-    padding: 5px 8px;
-    margin: 0 2px;
-    border-radius: 5px;
-    background-color: transparent;
-    border: none;
-    color: var(--text-bright);
-    min-height: 20px;
-
-    /* The row's label/hint sit inside an unclassed Box, which would
-       otherwise still pick up the app-wide `box { background: ... }`
-       rule and show through as a mismatched rectangle. */
-    & box,
-    & label {
-        background-color: transparent;
-    }
-
-    &:hover,
-    &:hover box,
-    &:hover label {
-        background-color: var(--selection-bg);
-    }
-
-    &:active,
-    &:active box,
-    &:active label {
-        background-color: var(--selection-active);
-    }
-}
-
-.menu-shortcut {
-    color: var(--text-muted);
-    font-size: 11px;
-    margin-left: 16px;
-}
-
-.context-menu-item:hover .menu-shortcut {
-    color: var(--text-dim);
-}
-
-.context-menu separator {
-    background-color: var(--border-light);
-    margin: 4px 2px;
-    min-height: 1px;
-}
-
-.destructive-menu-item {
-    color: #e57474;
-
-    &:hover,
-    &:hover box,
-    &:hover label {
-        background-color: #b23b3b;
-        color: var(--text-bright);
-    }
-}
-
-.destructive-action {
-    background-color: #b23b3b;
-    color: var(--text-bright);
-    border: 1px solid #b23b3b;
-
-    &:hover {
-        background-color: #c94444;
-        border-color: #c94444;
-    }
-
-    &:active {
-        background-color: #942f2f;
-        border-color: #942f2f;
-    }
-}
+/* Context-menu (.context-menu/.context-menu-item/popover reset/etc.) lives
+   in context_menu.scss — shared with the editor's right-click menu and the
+   welcome screen's project row menu. `.suggested-action`/`.destructive-action`
+   button variants live in base.scss — also app-wide, not file-tree-specific. */
 
 /* Drag-and-drop feedback */
 .dragging {

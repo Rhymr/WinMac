@@ -3,14 +3,20 @@ use crate::rhyme::search::RhymeSearch;
 use crate::workspace::Workspace;
 use crate::workspace::controller::WorkspaceController;
 use gtk::prelude::*;
-use gtk::{Application, Box as GtkBox, Label, Orientation, Paned};
+#[cfg(target_os = "windows")]
+use gtk::MenuButton;
+use gtk::{Box as GtkBox, Label, Orientation, Paned};
+use libadwaita::prelude::*;
+use libadwaita::{Application, ApplicationWindow};
+#[cfg(any(target_os = "windows", target_os = "macos"))]
+use libadwaita::{HeaderBar, ToolbarView, WindowTitle};
 use std::cell::Cell;
 use std::rc::Rc;
 
-pub fn build_ui(app: &Application) -> (gtk::ApplicationWindow, Rc<WorkspaceController>) {
+pub fn build_ui(app: &Application) -> (ApplicationWindow, Rc<WorkspaceController>) {
     // CSS is loaded once, up front, in main.rs — the welcome window needs it
     // too and is shown before this function ever runs.
-    let main_window = gtk::ApplicationWindow::builder()
+    let main_window = ApplicationWindow::builder()
         .application(app)
         .title("Rhymr")
         .default_width(1280)
@@ -24,9 +30,54 @@ pub fn build_ui(app: &Application) -> (gtk::ApplicationWindow, Rc<WorkspaceContr
         main_window.set_data("workspace_controller", workspace_controller.clone());
     }
 
-    main_window.set_child(Some(&main_layout));
-
+    // `setup_menu` wires up every File/Git/Help action (including their
+    // keyboard accelerators) and sets the app's native menubar. GNOME/Linux
+    // desktops can surface that menubar through shell integration and their
+    // own window manager already gives the window a draggable native
+    // titlebar, so neither needs any extra in-window chrome — content goes
+    // straight into the window. Windows has no such shell integration at
+    // all, so it gets a full in-window header bar with a hamburger menu
+    // reaching the same actions. macOS's menubar integration covers
+    // File/Git/Help (no hamburger needed), but an `AdwApplicationWindow`
+    // still uses client-side decorations there with no native titlebar of
+    // its own — without *something* in the header-bar role the window has
+    // no draggable region at all — so it gets the same slim header bar as
+    // Windows, just without the menu button.
+    #[cfg(any(target_os = "windows", target_os = "macos"))]
+    let menu_model = crate::app::menu::setup_menu(app, workspace_controller.clone());
+    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
     crate::app::menu::setup_menu(app, workspace_controller.clone());
+
+    #[cfg(any(target_os = "windows", target_os = "macos"))]
+    {
+        let header_bar = HeaderBar::new();
+        header_bar.set_title_widget(Some(&WindowTitle::new("Rhymr", "")));
+
+        #[cfg(target_os = "windows")]
+        {
+            let menu_button = MenuButton::builder()
+                .icon_name("open-menu-symbolic")
+                .menu_model(&menu_model)
+                .tooltip_text("Main Menu")
+                .build();
+            header_bar.pack_end(&menu_button);
+        }
+        #[cfg(target_os = "macos")]
+        let _ = &menu_model;
+
+        let toolbar_view = ToolbarView::new();
+        toolbar_view.add_top_bar(&header_bar);
+        toolbar_view.set_content(Some(&main_layout));
+
+        // `AdwApplicationWindow` doesn't support plain `GtkWindow::set_child`
+        // (it aborts at runtime: "gtk_window_set_child() is not supported
+        // for AdwApplicationWindow") — it manages its own internal child and
+        // exposes `content` as its own property/method instead.
+        main_window.set_content(Some(&toolbar_view));
+    }
+
+    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+    main_window.set_content(Some(&main_layout));
 
     main_window.present();
 

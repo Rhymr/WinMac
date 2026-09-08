@@ -3,10 +3,36 @@ pub mod dialog;
 use std::fs;
 use std::path::PathBuf;
 
+/// Light vs. dark app-wide color scheme — drives both the custom CSS
+/// palette (see `crate::css`) and, in tandem, `AdwStyleManager` plus the
+/// editor's GtkSourceView style scheme, so all three stay in lockstep.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Theme {
+    Dark,
+    Light,
+}
+
+impl Theme {
+    fn as_str(self) -> &'static str {
+        match self {
+            Theme::Dark => "dark",
+            Theme::Light => "light",
+        }
+    }
+
+    fn parse(s: &str) -> Option<Self> {
+        match s {
+            "dark" => Some(Theme::Dark),
+            "light" => Some(Theme::Light),
+            _ => None,
+        }
+    }
+}
+
 /// User-configurable app behavior, persisted across launches. New
 /// `TextEditor`s read this at construction time — changing a setting takes
 /// effect for tabs opened afterward, not ones already open.
-#[derive(Clone, Copy, PartialEq)]
+#[derive(Clone, PartialEq)]
 pub struct Settings {
     pub show_syllable_gutter: bool,
     pub rhyme_highlighting: bool,
@@ -20,6 +46,9 @@ pub struct Settings {
     pub auto_indent: bool,
     pub tab_width: u32,
     pub git_autostage: bool,
+    pub theme: Theme,
+    pub font_family: String,
+    pub font_size: u32,
 }
 
 impl Default for Settings {
@@ -35,6 +64,15 @@ impl Default for Settings {
             auto_indent: true,
             tab_width: 4,
             git_autostage: true,
+            theme: Theme::Dark,
+            // JetBrains Mono, 13px — matches the JetBrains IDE look the
+            // rest of the app's styling is chasing. Falls back to whatever
+            // Pango's normal font matching picks if it isn't installed
+            // (this app doesn't bundle the font file itself — see the
+            // settings dialog's font picker, which only ever lists
+            // already-installed system fonts).
+            font_family: "JetBrains Mono".to_string(),
+            font_size: 13,
         }
     }
 }
@@ -69,6 +107,9 @@ impl Settings {
                 "auto_indent" => settings.auto_indent = value == "true",
                 "tab_width" => settings.tab_width = value.parse().unwrap_or(settings.tab_width),
                 "git_autostage" => settings.git_autostage = value == "true",
+                "theme" => settings.theme = Theme::parse(value).unwrap_or(settings.theme),
+                "font_family" if !value.is_empty() => settings.font_family = value.to_string(),
+                "font_size" => settings.font_size = value.parse().unwrap_or(settings.font_size),
                 _ => {}
             }
         }
@@ -80,8 +121,11 @@ impl Settings {
         let Some(path) = settings_file() else {
             return;
         };
+        // Lines are a naive `key=value` format — strip newlines from the one
+        // free-text field so a pasted font name can't corrupt the file.
+        let font_family = self.font_family.replace(['\n', '\r'], "");
         let contents = format!(
-            "show_syllable_gutter={}\nrhyme_highlighting={}\nrhyme_stop_at_blank_line={}\nword_completion={}\nauto_indent={}\ntab_width={}\ngit_autostage={}\n",
+            "show_syllable_gutter={}\nrhyme_highlighting={}\nrhyme_stop_at_blank_line={}\nword_completion={}\nauto_indent={}\ntab_width={}\ngit_autostage={}\ntheme={}\nfont_family={}\nfont_size={}\n",
             self.show_syllable_gutter,
             self.rhyme_highlighting,
             self.rhyme_stop_at_blank_line,
@@ -89,6 +133,9 @@ impl Settings {
             self.auto_indent,
             self.tab_width,
             self.git_autostage,
+            self.theme.as_str(),
+            font_family,
+            self.font_size,
         );
         let _ = fs::write(path, contents);
     }

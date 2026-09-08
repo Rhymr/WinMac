@@ -1,0 +1,39 @@
+/* Plain (non-popover) dialogs: the git commit/push/pull/fetch windows and
+   the file tree's delete-confirmation window. These don't get a dedicated
+   wrapper class — buttons/entries are already rounded app-wide by
+   base.scss — this file just covers the handful of git-commit-dialog
+   widgets base.scss's generic `listbox`/`textview` rules don't quite fit. */
+.commit-file-list {
+    background: var(--bg-mid);
+    border: 1px solid var(--border-light);
+    border-radius: var(--radius-sm);
+
+    & > row {
+        padding: 4px 8px;
+    }
+
+    & label {
+        font-size: 12px;
+        background-color: var(--bg-mid);
+    }
+}
+
+.commit-file-scroll {
+    border: 1px solid var(--border-light);
+    border-radius: var(--radius-sm);
+}
+
+.commit-message-box {
+    border: 1px solid var(--border-light);
+    border-radius: var(--radius-sm);
+    background-color: var(--bg-mid);
+
+    & textview {
+        background-color: var(--bg-mid);
+        padding: 6px;
+
+        & text {
+            background-color: var(--bg-mid);
+        }
+    }
+}

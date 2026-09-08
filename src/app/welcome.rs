@@ -4,9 +4,10 @@ use crate::workspace::recent::load_recent_workspaces;
 use gio::prelude::FileExt;
 use gtk::prelude::*;
 use gtk::{
-    Align, Application, ApplicationWindow, Box, Button, CheckButton, Entry, FileDialog, Grid,
-    Image, Label, ListBox, ListBoxRow, Orientation, Popover, SearchEntry, Separator, Window,
+    Align, ApplicationWindow, Box, Button, CheckButton, Entry, FileDialog, Grid, Image, Label,
+    ListBox, ListBoxRow, Orientation, SearchEntry, Window,
 };
+use libadwaita::Application;
 use std::path::PathBuf;
 use std::rc::Rc;
 
@@ -299,96 +300,58 @@ fn show_project_menu<F>(
 ) where
     F: Fn(PathBuf) + 'static,
 {
-    let popover = Popover::new();
-    popover.set_parent(anchor);
-    popover.set_has_arrow(false);
+    let menu = crate::app::context_menu::ContextMenu::new(anchor);
 
-    let menu_box = Box::new(Orientation::Vertical, 0);
-
-    let open_item = Button::builder()
-        .label("Open Selected")
-        .css_classes(vec!["flat", "context-menu-item"])
-        .build();
-    let reveal_item = Button::builder()
-        .label("Reveal in Finder")
-        .css_classes(vec!["flat", "context-menu-item"])
-        .build();
-    let copy_item = Button::builder()
-        .label("Copy Path")
-        .css_classes(vec!["flat", "context-menu-item"])
-        .build();
-    let remove_item = Button::builder()
-        .label("Remove from Recent Projects…")
-        .css_classes(vec!["flat", "context-menu-item"])
-        .build();
-
-    menu_box.append(&open_item);
-    menu_box.append(&Separator::new(Orientation::Horizontal));
-    menu_box.append(&reveal_item);
-    menu_box.append(&copy_item);
-    menu_box.append(&Separator::new(Orientation::Horizontal));
-    menu_box.append(&remove_item);
-
-    popover.set_child(Some(&menu_box));
-
-    // Open Selected
-    let popover_ref = popover.clone();
     let window_for_open = window.clone();
     let path_for_open = workspace_path.clone();
     let callback_for_open = on_workspace_ready.clone();
-    open_item.connect_clicked(move |_| {
-        popover_ref.popdown();
+    menu.add_item("Open Selected", None, None, move || {
         window_for_open.close();
         callback_for_open(path_for_open.clone());
     });
 
-    // Reveal in Finder
-    let popover_ref = popover.clone();
+    menu.add_separator();
+
     let path_for_reveal = workspace_path.clone();
-    reveal_item.connect_clicked(move |_| {
-        popover_ref.popdown();
+    menu.add_item("Reveal in Finder", None, None, move || {
         let uri = format!("file://{}", path_for_reveal.display());
         let _ = gio::AppInfo::launch_default_for_uri(&uri, gio::AppLaunchContext::NONE);
     });
 
-    // Copy Path
-    let popover_ref = popover.clone();
     let path_for_copy = workspace_path.to_string_lossy().to_string();
-    copy_item.connect_clicked(move |_| {
-        popover_ref.popdown();
+    menu.add_item("Copy Path", None, None, move || {
         if let Some(display) = gtk::gdk::Display::default() {
             display.clipboard().set_text(&path_for_copy);
         }
     });
 
-    // Remove from Recent Projects
-    let popover_ref = popover.clone();
+    menu.add_separator();
+
     let path_for_remove = workspace_path.clone();
     let row_for_remove = row.clone();
     let projects_list_for_remove = projects_list.clone();
-    remove_item.connect_clicked(move |_| {
-        popover_ref.popdown();
-        crate::workspace::recent::remove_recent_workspace(&path_for_remove);
-        projects_list_for_remove.remove(&row_for_remove);
+    menu.add_item(
+        "Remove from Recent Projects\u{2026}",
+        None,
+        Some("destructive-menu-item"),
+        move || {
+            crate::workspace::recent::remove_recent_workspace(&path_for_remove);
+            projects_list_for_remove.remove(&row_for_remove);
 
-        if projects_list_for_remove.row_at_index(0).is_none() {
-            let empty_label = Label::builder()
-                .label("No recent workspaces yet")
-                .halign(Align::Start)
-                .margin_top(12)
-                .css_classes(vec!["dim-label"])
-                .build();
-            projects_list_for_remove.append(&empty_label);
-            projects_list_for_remove.set_selection_mode(gtk::SelectionMode::None);
-        }
-    });
+            if projects_list_for_remove.row_at_index(0).is_none() {
+                let empty_label = Label::builder()
+                    .label("No recent workspaces yet")
+                    .halign(Align::Start)
+                    .margin_top(12)
+                    .css_classes(vec!["dim-label"])
+                    .build();
+                projects_list_for_remove.append(&empty_label);
+                projects_list_for_remove.set_selection_mode(gtk::SelectionMode::None);
+            }
+        },
+    );
 
-    let popover_for_close = popover.clone();
-    popover.connect_closed(move |_| {
-        popover_for_close.unparent();
-    });
-
-    popover.popup();
+    menu.popup_below(anchor);
 }
 
 /// The "New Project" dialog: name, location, and Git/Apple-Notes options —
@@ -407,7 +370,6 @@ where
         .build();
 
     let content = Box::new(Orientation::Vertical, 16);
-    content.set_css_classes(&["new-project-content"]);
     content.set_margin_top(24);
     content.set_margin_bottom(24);
     content.set_margin_start(24);

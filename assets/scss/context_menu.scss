@@ -1,0 +1,108 @@
+/* Shared context-menu styling — used by every right-click/dropdown menu in
+   the app (file tree, editor, welcome's recent-projects row menu), so a
+   menu looks the same regardless of which widget it was opened from.
+
+   Popovers (right-click menus, submenus) — GTK's default rounding/shadow is
+   stripped by the app-wide `* { border-radius: 0; box-shadow: none; }`
+   reset, so the menu itself needs its own elevated, rounded surface. The
+   native popover/contents nodes still paint their own background+border
+   underneath our `.context-menu` box though, showing through as a
+   mismatched rectangle behind the rounded corners — kill those explicitly. */
+popover {
+    background: none;
+    border: none;
+    box-shadow: none;
+
+    & > contents {
+        background: none;
+        border: none;
+        box-shadow: none;
+        padding: 0;
+    }
+}
+
+.context-menu {
+    background-color: var(--popover-bg-color);
+    border: 1px solid var(--border-light);
+    border-radius: var(--radius-lg);
+    padding: 4px;
+    min-width: 220px;
+    box-shadow: 0 6px 16px rgba(0, 0, 0, 0.45);
+}
+
+.context-menu-item {
+    padding: 6px 10px;
+    margin: 0 2px;
+    border-radius: var(--radius-md);
+    background-color: transparent;
+    border: none;
+    color: var(--popover-fg-color);
+    min-height: 20px;
+    font-size: 13px;
+    transition: background-color var(--transition-fast);
+
+    /* The row's label/hint sit inside an unclassed Box, which would
+       otherwise still pick up the app-wide `box { background: ... }`
+       rule and show through as a mismatched rectangle. */
+    & box,
+    & label {
+        background-color: transparent;
+        color: inherit;
+    }
+
+    &:hover,
+    &:hover box,
+    &:hover label {
+        background-color: var(--selection-bg);
+        color: var(--selection-fg);
+    }
+
+    &:active,
+    &:active box,
+    &:active label {
+        background-color: var(--selection-active);
+        color: var(--selection-fg);
+    }
+
+    /* Overrides base.scss's generic `button:disabled` (a filled gray box)
+       — a disabled menu item should stay flat, just dimmed, matching how
+       JetBrains IDEs gray out unavailable actions (e.g. Rename… with
+       nothing selected) rather than boxing them. */
+    &:disabled,
+    &:disabled box,
+    &:disabled label {
+        background-color: transparent;
+        border: none;
+    }
+
+    &:disabled {
+        color: var(--text-muted);
+    }
+}
+
+.menu-shortcut {
+    color: var(--text-muted);
+    font-size: 11px;
+    margin-left: 16px;
+}
+
+.context-menu-item:hover .menu-shortcut {
+    color: var(--selection-fg);
+}
+
+.context-menu separator {
+    background-color: var(--border-light);
+    margin: 4px 2px;
+    min-height: 1px;
+}
+
+.destructive-menu-item {
+    color: var(--destructive-text);
+
+    &:hover,
+    &:hover box,
+    &:hover label {
+        background-color: var(--destructive);
+        color: var(--selection-fg);
+    }
+}

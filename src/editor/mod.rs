@@ -1,11 +1,13 @@
 pub mod completion;
 pub mod stat;
 
+use crate::app::context_menu::{ContextMenu, hint};
 use crate::rhyme::highlight::RhymeHighlight;
 use crate::setting::Settings;
 use completion::WordCompletionProvider;
+use gtk::gdk;
 use gtk::prelude::*;
-use gtk::{Frame, ScrolledWindow};
+use gtk::{EventSequenceState, Frame, GestureClick, PropagationPhase, ScrolledWindow};
 use sourceview5::GutterRendererText;
 use sourceview5::prelude::{BufferExt, GutterRendererExt, GutterRendererTextExt, ViewExt};
 use sourceview5::{Buffer as SourceBuffer, Completion, Gutter, View as SourceView};
@@ -21,6 +23,11 @@ pub struct TextEditor {
     source_view: SourceView,
     buffer: SourceBuffer,
     current_path: Rc<RefCell<Option<PathBuf>>>,
+    // Has this tab been edited since it was opened, and does that edit not
+    // yet have a successful autosave behind it? Used by "Close Unmodified
+    // Tabs" (see workspace::Workspace) — set on the first real edit after
+    // load, cleared once the debounced autosave actually writes to disk.
+    modified: Rc<Cell<bool>>,
     gutter: Gutter,
     syllable_renderer: RefCell<Option<GutterRendererText>>,
     completion: Completion,
@@ -67,14 +74,17 @@ impl TextEditor {
         // keystroke reschedules another one — only the latest write should
         // actually land.
         let save_generation = Rc::new(Cell::new(0u64));
+        let modified = Rc::new(Cell::new(false));
 
         let buffer_clone = buffer.clone();
         let path_ref = current_path.clone();
         let generation_ref = save_generation.clone();
+        let modified_ref = modified.clone();
         buffer_clone.connect_changed(move |buf| {
             let Some(path) = path_ref.borrow().clone() else {
                 return;
             };
+            modified_ref.set(true);
             let text = buf
                 .text(&buf.start_iter(), &buf.end_iter(), false)
                 .to_string();
@@ -83,6 +93,7 @@ impl TextEditor {
             generation_ref.set(this_generation);
 
             let generation_for_timeout = generation_ref.clone();
+            let modified_for_timeout = modified_ref.clone();
             glib::timeout_add_local_once(AUTOSAVE_DEBOUNCE, move || {
                 // A newer edit came in while this was waiting — let that one win.
                 if generation_for_timeout.get() != this_generation {
@@ -92,6 +103,7 @@ impl TextEditor {
                     eprintln!("Auto-save failed for {path:?}: {e}");
                     return;
                 }
+                modified_for_timeout.set(false);
                 if crate::setting::Settings::load().git_autostage
                     && let Some(root) = find_git_root(&path)
                 {
@@ -100,15 +112,13 @@ impl TextEditor {
             });
         });
 
-        source_view.set_css_classes(&["rhyme-editor-view"]);
-
         // Disable bracket matching
         buffer.set_highlight_matching_brackets(false);
 
         let scheme_manager = sourceview5::StyleSchemeManager::default();
         scheme_manager.append_search_path("assets/styles");
         let style_scheme = scheme_manager
-            .scheme("rhymr")
+            .scheme(scheme_id(settings.theme))
             .expect("Failed to load rhymr style scheme");
         buffer.set_style_scheme(Some(&style_scheme));
 
@@ -119,7 +129,7 @@ impl TextEditor {
         let completion = ViewExt::completion(&source_view);
 
         // Add custom CSS classes for the editor
-        source_view.set_css_classes(&["rhyme-editor"]);
+        source_view.set_css_classes(&["rhyme-editor-view", "rhyme-editor"]);
 
         // Add scrolling support
         let scroll = ScrolledWindow::builder()
@@ -128,13 +138,17 @@ impl TextEditor {
             .child(&source_view)
             .build();
 
-        let frame = Frame::builder().child(&scroll).build();
+        let frame = Frame::builder()
+            .child(&scroll)
+            .css_classes(vec!["rhyme-editor-frame"])
+            .build();
 
         let editor = Self {
             frame,
             source_view,
             buffer,
             current_path,
+            modified,
             gutter,
             syllable_renderer: RefCell::new(None),
             completion,
@@ -142,11 +156,78 @@ impl TextEditor {
             rhyme_highlight: RefCell::new(None),
         };
 
+        editor.setup_context_menu();
+
         // Set initial empty state
         editor.set_text("");
         editor.apply_settings(&settings);
 
         editor
+    }
+
+    /// Right-click Cut/Copy/Paste/Delete/Select All, styled to match every
+    /// other menu in the app instead of GtkTextView's native popup (which,
+    /// under this app's CSS reset, renders with no visible background at
+    /// all — see base.scss's `* { background: none; }`). A capture-phase
+    /// `GestureClick` intercepts the press before GtkText's own internal
+    /// click gesture (bubble phase) gets a chance to open that native menu,
+    /// and claims the sequence so it never does.
+    fn setup_context_menu(&self) {
+        let gesture = GestureClick::new();
+        gesture.set_button(gdk::BUTTON_SECONDARY);
+        gesture.set_propagation_phase(PropagationPhase::Capture);
+
+        let frame = self.frame.clone();
+        let source_view = self.source_view.clone();
+        let buffer = self.buffer.clone();
+        gesture.connect_pressed(move |gesture, _n_press, x, y| {
+            gesture.set_state(EventSequenceState::Claimed);
+
+            let menu = ContextMenu::new(&frame);
+            let has_selection = buffer.has_selection();
+
+            let sv = source_view.clone();
+            let cut_btn = menu.add_item("Cut", Some(hint::CUT), None, move || {
+                sv.emit_cut_clipboard();
+            });
+            cut_btn.set_sensitive(has_selection);
+
+            let sv = source_view.clone();
+            let copy_btn = menu.add_item("Copy", Some(hint::COPY), None, move || {
+                sv.emit_copy_clipboard();
+            });
+            copy_btn.set_sensitive(has_selection);
+
+            let sv = source_view.clone();
+            menu.add_item("Paste", Some(hint::PASTE), None, move || {
+                sv.emit_paste_clipboard();
+            });
+
+            let buffer_for_delete = buffer.clone();
+            let delete_btn = menu.add_item(
+                "Delete",
+                Some(hint::DELETE),
+                Some("destructive-menu-item"),
+                move || {
+                    buffer_for_delete.delete_selection(true, true);
+                },
+            );
+            delete_btn.set_sensitive(has_selection);
+
+            menu.add_separator();
+
+            let buffer_for_select_all = buffer.clone();
+            menu.add_item("Select All", Some(hint::SELECT_ALL), None, move || {
+                let (start, end) = (
+                    buffer_for_select_all.start_iter(),
+                    buffer_for_select_all.end_iter(),
+                );
+                buffer_for_select_all.select_range(&start, &end);
+            });
+
+            menu.popup_at(&source_view, x, y);
+        });
+        self.source_view.add_controller(gesture);
     }
 
     /// Toggle the syllable gutter, completion provider, and rhyme
@@ -157,6 +238,17 @@ impl TextEditor {
         self.source_view.set_tab_width(settings.tab_width);
         self.source_view.set_indent_width(settings.tab_width as i32);
         self.source_view.set_auto_indent(settings.auto_indent);
+
+        // Font family/size are applied app-wide via the `--app-font-*` CSS
+        // variables (see crate::css and base.scss's `* {}` rule) — only the
+        // GtkSourceView style scheme (syntax/background colors, separate
+        // from the app-wide CSS palette) needs switching here to follow
+        // light/dark live.
+        if let Some(scheme) =
+            sourceview5::StyleSchemeManager::default().scheme(scheme_id(settings.theme))
+        {
+            self.buffer.set_style_scheme(Some(&scheme));
+        }
 
         let mut renderer_slot = self.syllable_renderer.borrow_mut();
         match (renderer_slot.is_some(), settings.show_syllable_gutter) {
@@ -226,10 +318,27 @@ impl TextEditor {
         &self.frame
     }
 
+    /// Has this tab been edited since it was opened, with that edit not yet
+    /// written to disk by the autosave debounce? Used by "Close Unmodified
+    /// Tabs" in the tab context menu (see workspace::Workspace).
+    pub fn is_modified(&self) -> bool {
+        self.modified.get()
+    }
+
     /// Notify `f` on every buffer edit — used by the status bar's live
     /// word-count listener, independent of the autosave debounce above.
     pub fn connect_changed(&self, f: impl Fn() + 'static) {
         self.buffer.connect_changed(move |_| f());
+    }
+}
+
+/// The GtkSourceView style scheme id (see assets/styles/*.xml) matching
+/// `theme` — kept in one place so `new()` and `apply_settings()` can't
+/// drift onto different scheme names for the same theme.
+fn scheme_id(theme: crate::setting::Theme) -> &'static str {
+    match theme {
+        crate::setting::Theme::Dark => "rhymr",
+        crate::setting::Theme::Light => "rhymr-light",
     }
 }
 

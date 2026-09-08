@@ -1,3 +1,8 @@
+/* Rounded-chip tabs (modern IDE convention — JetBrains/VS Code): each tab
+   is its own floating rounded rectangle over the header's flat background,
+   with a small gap between tabs, rather than a continuous boxed/underlined
+   strip. The active tab reads via the app's accent color, same as a
+   selected row anywhere else. */
 notebook {
     background-color: var(--bg-darkest);
 
@@ -10,38 +15,57 @@ notebook {
     }
 
     & > header {
-        background-color: var(--bg-darkest);
-        padding: 0;
+        background-color: var(--bg-dark);
+        padding: 6px 6px 0 6px;
         margin: 0;
+        border-bottom: 1px solid var(--border-dark);
 
         & > tabs {
-            background-color: var(--bg-darkest);
+            background-color: var(--bg-dark);
 
             & > tab {
-                background-color: var(--bg-dark);
-                padding: 4px 8px;
-                border: 1px solid var(--border-dark);
-                margin: 0;
+                background-color: var(--bg-mid);
+                // Reserve the same 1px every tab would get outlined with,
+                // even when not checked — otherwise gaining/losing the
+                // border on selection shifts every tab's size by 2px.
+                padding: 4px 7px;
+                border: 1px solid transparent;
+                border-radius: var(--radius-md);
+                margin: 0 3px 6px 0;
+                transition: background-color var(--transition-fast), border-color var(--transition-fast);
 
                 &:checked {
-                    background-color: var(--bg-light);
-                    border-bottom: none;
-                    font-weight: bold;
-                    color: var(--text-bright);
-                    border: 1px solid var(--border-dark);
+                    background-color: var(--bg-mid);
+                    border-color: var(--selection-hover);
 
-                    & > label {
+                    // `:backdrop` = the window isn't focused (e.g. another
+                    // app is active) — the accent outline reads as "not
+                    // actually your focus right now" if it stays the vivid
+                    // accent color, so it drops to a neutral gray instead,
+                    // same convention GNOME/Adwaita apps use for backdrop
+                    // header bars.
+                    &:backdrop {
+                        border-color: var(--border-active);
+                    }
+
+                    & label {
                         color: var(--text-bright);
-                        background-color: var(--bg-light);
+                        background-color: inherit;
+                    }
+
+                    & .tab-icon {
+                        opacity: 1;
                     }
                 }
 
-                &:hover {
-                    background-color: var(--bg-mid);
+                &:hover:not(:checked) {
+                    background-color: var(--bg-hover);
                 }
 
                 & label {
-                    color: var(--text-bright);
+                    color: var(--text-not-so-dim);
+                    background-color: inherit;
+                    font-size: 12px;
                 }
             }
         }
@@ -49,35 +73,49 @@ notebook {
 }
 
 .workspace-notebook {
-    padding: 8px 5px 5px 5px;
+    padding: 0;
     margin: 0;
-
-    & tab {
-        &:checked {
-            background-color: var(--bg-mid);
-        }
-
-        & label {
-            color: var(--text-dim);
-        }
-    }
 }
 
 .tab-box {
     background: none;
 }
 
+.tab-icon {
+    background: none;
+    opacity: 0.75;
+}
+
+.tab-label {
+    background: none;
+}
+
+/* Hidden (zero-size, not just invisible, so an inactive/unhovered tab
+   doesn't reserve dead space for it) except on the active tab or whichever
+   tab the pointer is currently over — matches JetBrains, where every other
+   tab shows just its icon and (possibly truncated) name. */
 .tab-close-button {
-    padding: 0 0 0 5px;
-    margin: 0;
+    padding: 0;
+    margin: 0 0 0 4px;
     background: none;
     border: none;
+    border-radius: var(--radius-sm);
+    opacity: 0;
+    min-width: 0;
+    min-height: 0;
+    transition:
+        background-color var(--transition-fast),
+        opacity var(--transition-fast);
 
     &:hover {
-        padding: 0 0 0 5px;
-        margin: 0;
-        background: none;
-        border: none;
-        color: #ff0000;
+        background-color: var(--destructive);
+        color: var(--selection-fg);
     }
+}
+
+tab:checked .tab-close-button,
+tab:hover .tab-close-button {
+    opacity: 1;
+    min-width: 16px;
+    min-height: 16px;
 }

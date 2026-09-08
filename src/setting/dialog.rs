@@ -1,18 +1,37 @@
-use super::Settings;
+use super::{Settings, Theme};
 use crate::workspace::controller::WorkspaceController;
 use gtk::prelude::*;
 use gtk::{
-    Align, Application, Box as GtkBox, Button, CheckButton, Label, ListBox, ListBoxRow,
-    Orientation, SearchEntry, Separator, SpinButton, Stack, Window,
+    Align, Box as GtkBox, Button, CheckButton, DropDown, FontDialog, FontDialogButton, Label,
+    ListBox, ListBoxRow, Orientation, SearchEntry, Separator, SpinButton, Stack, Window, pango,
 };
+use libadwaita::Application;
+use std::cell::RefCell;
 use std::rc::Rc;
 
-const CATEGORIES: [(&str, &str); 4] = [
+const CATEGORIES: [(&str, &str); 5] = [
+    ("appearance", "Appearance"),
     ("editor", "Editor"),
     ("rhyme", "Rhyme Highlighting"),
     ("completion", "Completions"),
     ("git", "Git"),
 ];
+
+/// The two widgets `page()` doesn't cover: a field row (label + control)
+/// used by the Appearance category, styled like the rest of the dialog's
+/// left-aligned, margin-matched form rows.
+fn field_row(label_text: &str, control: &impl IsA<gtk::Widget>) -> GtkBox {
+    let row = GtkBox::new(Orientation::Horizontal, 10);
+    row.append(
+        &Label::builder()
+            .label(label_text)
+            .halign(Align::Start)
+            .width_chars(12)
+            .build(),
+    );
+    row.append(control);
+    row
+}
 
 /// A category page: a checkbox toggle plus an optional description label
 /// underneath it, both left-aligned with the same margins.
@@ -119,6 +138,34 @@ pub fn show_settings_dialog(app: &Application, controller: Option<Rc<WorkspaceCo
 
     let stack = Stack::new();
     stack.set_vexpand(true);
+
+    // ==========================================
+    // Appearance: theme + app-wide font (the font dialog button covers both
+    // family and size in one native picker)
+    // ==========================================
+    let theme_dropdown = DropDown::from_strings(&["Dark", "Light"]);
+    theme_dropdown.set_selected(if settings.theme == Theme::Dark { 0 } else { 1 });
+
+    let font_button = FontDialogButton::builder()
+        .dialog(&FontDialog::builder().title("Font").build())
+        .valign(Align::Center)
+        .build();
+    font_button.set_use_size(true);
+    font_button.set_font_desc(&pango::FontDescription::from_string(&format!(
+        "{} {}",
+        settings.font_family, settings.font_size
+    )));
+
+    let appearance_page = GtkBox::builder()
+        .orientation(Orientation::Vertical)
+        .spacing(14)
+        .margin_top(20)
+        .margin_start(24)
+        .margin_end(24)
+        .build();
+    appearance_page.append(&field_row("Theme:", &theme_dropdown));
+    appearance_page.append(&field_row("Font:", &font_button));
+    stack.add_named(&appearance_page, Some("appearance"));
 
     let gutter_toggle = CheckButton::builder()
         .label("Show syllable count in the gutter")
@@ -253,21 +300,44 @@ pub fn show_settings_dialog(app: &Application, controller: Option<Rc<WorkspaceCo
         let rhyme_stop_at_blank_line_toggle = rhyme_stop_at_blank_line_toggle.clone();
         let completion_toggle = completion_toggle.clone();
         let git_toggle = git_toggle.clone();
-        move || Settings {
-            show_syllable_gutter: gutter_toggle.is_active(),
-            rhyme_highlighting: rhyme_toggle.is_active(),
-            rhyme_stop_at_blank_line: rhyme_stop_at_blank_line_toggle.is_active(),
-            word_completion: completion_toggle.is_active(),
-            auto_indent: auto_indent_toggle.is_active(),
-            tab_width: tab_width_spin.value() as u32,
-            git_autostage: git_toggle.is_active(),
+        let theme_dropdown = theme_dropdown.clone();
+        let font_button = font_button.clone();
+        move || {
+            let font_desc = font_button.font_desc().unwrap_or_else(|| {
+                pango::FontDescription::from_string(&Settings::default().font_family)
+            });
+            let font_family = font_desc
+                .family()
+                .map(|f| f.to_string())
+                .unwrap_or_else(|| Settings::default().font_family);
+            let font_size = if font_desc.size() > 0 {
+                (font_desc.size() / pango::SCALE).max(6) as u32
+            } else {
+                Settings::default().font_size
+            };
+            Settings {
+                show_syllable_gutter: gutter_toggle.is_active(),
+                rhyme_highlighting: rhyme_toggle.is_active(),
+                rhyme_stop_at_blank_line: rhyme_stop_at_blank_line_toggle.is_active(),
+                word_completion: completion_toggle.is_active(),
+                auto_indent: auto_indent_toggle.is_active(),
+                tab_width: tab_width_spin.value() as u32,
+                git_autostage: git_toggle.is_active(),
+                theme: if theme_dropdown.selected() == 0 {
+                    Theme::Dark
+                } else {
+                    Theme::Light
+                },
+                font_family,
+                font_size,
+            }
         }
     });
 
     // What's currently saved on disk — Apply is only enabled once the
     // widgets diverge from this, and it's refreshed after every save so
     // Apply goes back to disabled until something changes again.
-    let baseline = Rc::new(std::cell::Cell::new(settings));
+    let baseline = Rc::new(RefCell::new(settings));
 
     apply_btn.set_sensitive(false);
     let update_apply_sensitivity: Rc<dyn Fn()> = Rc::new({
@@ -275,7 +345,7 @@ pub fn show_settings_dialog(app: &Application, controller: Option<Rc<WorkspaceCo
         let read_current = read_current.clone();
         let baseline = baseline.clone();
         move || {
-            apply_btn.set_sensitive(read_current() != baseline.get());
+            apply_btn.set_sensitive(read_current() != *baseline.borrow());
         }
     });
 
@@ -292,6 +362,10 @@ pub fn show_settings_dialog(app: &Application, controller: Option<Rc<WorkspaceCo
     }
     let f = update_apply_sensitivity.clone();
     tab_width_spin.connect_value_changed(move |_| f());
+    let f = update_apply_sensitivity.clone();
+    theme_dropdown.connect_selected_notify(move |_| f());
+    let f = update_apply_sensitivity.clone();
+    font_button.connect_font_desc_notify(move |_| f());
 
     let apply: Rc<dyn Fn()> = Rc::new({
         let read_current = read_current.clone();
@@ -300,10 +374,12 @@ pub fn show_settings_dialog(app: &Application, controller: Option<Rc<WorkspaceCo
         move || {
             let current = read_current();
             current.save();
+            crate::css::reload(&current);
+            crate::css::sync_style_manager(&current);
             if let Some(controller) = &controller {
                 controller.apply_settings(&current);
             }
-            baseline.set(current);
+            baseline.replace(current);
             update_apply_sensitivity();
         }
     });

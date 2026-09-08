@@ -1,29 +1,8 @@
-:root {
-    --bg-darkest: #1e1e1e;
-    --bg-dark: #2e2e2e;
-    --bg-mid: #3e3e3e;
-    --bg-light: #4e4e4e;
-    --bg-hover: #404040;
-    --text-bright: #ffffff;
-    --text-dim: #e1e1e1;
-    --text-not-so-dim: #bababa;
-    --text-muted: #888888;
-    --text-number: #666666;
-    --text-green: #00FF00;
-    --text-modified: #d19a66;
-    --text-new: #6fbf73;
-    --text-renamed: #61afef;
-    --border-dark: #000000;
-    --border-light: #5e5e5e;
-    --border-hover: #cfcfcf;
-    --border-active: #8e8e8e;
-    --button-hover: #707070;
-    --button-active: #484848;
-    --button-disabled: #2c2c2c;
-    --selection-bg: #2b5278;
-    --selection-hover: #366391;
-    --selection-active: #1e4271;
-}
+/* Palette custom properties (--bg-*, --text-*, --selection-*, --destructive-*,
+   plus the --radius and --transition tokens) are generated at runtime from
+   `Settings.theme` — see `crate::css::theme_css` — rather than hardcoded
+   here, so light/dark is a single source of truth and every stylesheet
+   below just consumes `var(--...)`. */
 
 * {
     border: none;
@@ -31,12 +10,28 @@
     background: none;
     border-radius: 0;
     color: var(--text-bright);
-    font-family: Arial, sans-serif;
+    // App-wide font from Settings (see crate::css) — every widget defaults
+    // to it; a more specific rule with its own font-size (status bar,
+    // captions, the gutter's syllable count, …) still wins via cascade.
+    font-family: var(--app-font-family);
+    font-size: var(--app-font-size);
+}
 
-    &::selection {
-        background-color: var(--selection-hover);
-        color: var(--text-bright);
-    }
+/* `*::selection` (a web-CSS pseudo-element) isn't valid GTK CSS — GTK logs
+   an "Unknown pseudoclass" parser warning and silently drops it, which
+   left every widget's text-selection highlight to fall back to whatever
+   faint default GTK/libadwaita supplies. `selection` (an actual GTK CSS
+   node) and `:selected` (the state GtkTextView's own text node carries
+   while selected) are the two forms GTK actually recognizes — set on both
+   since which one a given widget uses isn't consistent across node types. */
+selection {
+    background-color: var(--selection-hover);
+    color: var(--selection-fg);
+}
+
+*:selected {
+    background-color: var(--selection-hover);
+    color: var(--selection-fg);
 }
 
 window {
@@ -134,8 +129,12 @@ entry {
     background: var(--bg-mid);
     color: var(--text-bright);
     border: 1px solid var(--border-light);
+    border-radius: var(--radius-sm);
     margin: 0;
     padding-left: 5px;
+    transition:
+        background-color var(--transition-fast),
+        border-color var(--transition-fast);
 
     &:focus {
         border-color: var(--text-bright);
@@ -148,9 +147,13 @@ button {
     background: var(--bg-mid);
     color: var(--text-bright);
     border: 1px solid var(--border-light);
+    border-radius: var(--radius-sm);
     padding: 0 15px;
     margin: 0;
     cursor: pointer;
+    transition:
+        background-color var(--transition-fast),
+        border-color var(--transition-fast);
 
     &:hover {
         background: var(--button-hover);
@@ -197,8 +200,63 @@ listbox {
         text-align: left;
         padding: 5px;
         color: var(--text-bright);
-        font-size: 14px;
         word-wrap: break-word;
         background-color: var(--bg-mid);
     }
-} 
+}
+
+/* Typography utilities — shared across the welcome screen, settings
+   dialog, and git dialogs. */
+.title-3 {
+    font-size: 16px;
+}
+
+.bold {
+    font-weight: bold;
+}
+
+.caption {
+    font-size: 11px;
+}
+
+.dim-label {
+    color: var(--text-muted);
+}
+
+.field-label {
+    color: var(--text-not-so-dim);
+    font-weight: bold;
+}
+
+/* Button variants — likewise shared, not specific to any one dialog. */
+.suggested-action {
+    background-color: var(--selection-bg);
+    color: var(--selection-fg);
+    border: 1px solid var(--selection-bg);
+
+    &:hover {
+        background-color: var(--selection-hover);
+        border-color: var(--selection-hover);
+    }
+
+    &:active {
+        background-color: var(--selection-active);
+        border-color: var(--selection-active);
+    }
+}
+
+.destructive-action {
+    background-color: var(--destructive);
+    color: var(--selection-fg);
+    border: 1px solid var(--destructive);
+
+    &:hover {
+        background-color: var(--destructive-hover);
+        border-color: var(--destructive-hover);
+    }
+
+    &:active {
+        background-color: var(--destructive-active);
+        border-color: var(--destructive-active);
+    }
+}
