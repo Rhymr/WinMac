@@ -42,7 +42,6 @@ sourceview {
     margin-right: 3px;
     background-color: var(--gutter-bg);
     font-family: var(--app-font-family);
-    text-align: center;
 }
 
 .line-numbers {
@@ -50,7 +49,6 @@ sourceview {
     padding: 0 2px;
     margin: 0;
     font-family: var(--app-font-family);
-    text-align: right;
 
     & + .syllable-count {
         margin-top: 0;
@@ -58,7 +56,6 @@ sourceview {
 }
 
 .rhyme-editor {
-    line-height: 1.5;
     border: none;
 }
 
@@ -66,12 +63,19 @@ sourceview {
    editor while you scroll inside it (JetBrains sticky-scroll analog). */
 .sticky-line {
     background-color: var(--bg-darkest);
-    color: var(--text-dim);
-    font-family: var(--app-font-family);
-    font-size: var(--app-font-size);
-    padding: 1px 8px 2px 12px;
+    /* left inset (gutter width) is set per scroll tick in Rust;
+       `padding-left` here matches `.rhyme-editor-view textview text` so the
+       pinned text lines up with the editor's text column. */
+    padding: 1px 8px 2px 6px;
     border-bottom: 1px solid var(--border-dark);
     box-shadow: 0 2px 4px rgba(0, 0, 0, 0.35);
+}
+
+.sticky-line-text {
+    color: var(--sticky-fg);
+    background: none;
+    font-family: var(--app-font-family);
+    font-size: var(--app-font-size);
 }
 
 /* VCS change bar column — painted in Rust (src/editor/vcs_gutter.rs),
@@ -85,6 +89,16 @@ sourceview {
 
 scrolledwindow {
     background-color: var(--bg-darkest);
+}
+
+/* The editor's scrollbar sits directly on the text — its trough takes the
+   editor background instead of the chrome's `--bg-dark` slab
+   (base.scss `scrollbar`). The slider keeps its own contrast. */
+.rhyme-editor-frame scrollbar,
+.rhyme-editor-frame scrollbar > range > trough {
+    background-color: var(--bg-darkest);
+    background-image: none;
+    border: none;
 }
 
 .rhyme-editor-frame {

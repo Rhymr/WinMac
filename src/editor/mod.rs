@@ -9,8 +9,8 @@ use completion::WordCompletionProvider;
 use gtk::gdk;
 use gtk::prelude::*;
 use gtk::{
-    Align, EventSequenceState, Frame, GestureClick, Label, Overlay, PropagationPhase,
-    ScrolledWindow,
+    Align, Box as GtkBox, EventSequenceState, Frame, GestureClick, Label, Orientation, Overlay,
+    PropagationPhase, ScrolledWindow,
 };
 use sourceview5::GutterRendererText;
 use sourceview5::prelude::{BufferExt, GutterRendererExt, GutterRendererTextExt, ViewExt};
@@ -38,6 +38,11 @@ pub struct TextEditor {
     modified: Rc<Cell<bool>>,
     gutter: Gutter,
     syllable_renderer: RefCell<Option<GutterRendererText>>,
+    // The caret's current line, and whether the editor scheme is the dark
+    // one — read by the syllable renderer to draw the active line's count
+    // green + bold; kept current by a cursor-move handler and `apply_settings`.
+    caret_line: Rc<Cell<i32>>,
+    syllable_theme_dark: Rc<Cell<bool>>,
     vcs_renderer: Rc<RefCell<Option<vcs_gutter::VcsGutterRenderer>>>,
     completion: Completion,
     word_provider: RefCell<Option<WordCompletionProvider>>,
@@ -180,20 +185,33 @@ impl TextEditor {
 
         // "Sticky line" (JetBrains sticky-scroll analog): the first line of
         // the stanza/paragraph the top of the viewport is inside, pinned to
-        // the top of the editor once its real position has scrolled off.
+        // the top of the editor once its real position has scrolled off. It
+        // stays pinned across the blank lines between stanzas until the
+        // next stanza's first line reaches the top.
         let sticky = Label::builder()
+            .css_classes(["sticky-line-text"])
+            .halign(Align::Start)
+            .xalign(0.0)
+            .single_line_mode(true)
+            .ellipsize(gtk::pango::EllipsizeMode::End)
+            .build();
+        // The row carries the strip's background/border; it's inset from
+        // the left by the gutter width (updated per tick) so its text lines
+        // up with the editor's text column rather than sitting over the
+        // gutter.
+        let sticky_row = GtkBox::builder()
+            .orientation(Orientation::Horizontal)
             .css_classes(["sticky-line"])
             .halign(Align::Fill)
             .valign(Align::Start)
-            .xalign(0.0)
-            .single_line_mode(true)
             .build();
-        sticky.set_visible(false);
+        sticky_row.append(&sticky);
+        sticky_row.set_visible(false);
 
         let overlay = Overlay::new();
         overlay.set_child(Some(&scroll));
-        overlay.add_overlay(&sticky);
-        setup_sticky_line(&scroll, &source_view, &buffer, &sticky);
+        overlay.add_overlay(&sticky_row);
+        setup_sticky_line(&scroll, &source_view, &buffer, &sticky, &sticky_row);
 
         let frame = Frame::builder()
             .child(&overlay)
@@ -208,6 +226,8 @@ impl TextEditor {
             modified,
             gutter,
             syllable_renderer: RefCell::new(None),
+            caret_line: Rc::new(Cell::new(0)),
+            syllable_theme_dark: Rc::new(Cell::new(settings.theme == crate::setting::Theme::Dark)),
             vcs_renderer,
             completion,
             word_provider: RefCell::new(None),
@@ -215,6 +235,19 @@ impl TextEditor {
         };
 
         editor.setup_context_menu();
+
+        // Keep the caret's line current for the syllable renderer's
+        // green-bold active-line count, repainting the gutter when it moves.
+        {
+            let caret_line = editor.caret_line.clone();
+            let gutter = editor.gutter.clone();
+            editor.buffer.connect_cursor_position_notify(move |buf| {
+                let line = buf.iter_at_offset(buf.cursor_position()).line();
+                if caret_line.replace(line) != line {
+                    gutter.queue_draw();
+                }
+            });
+        }
 
         // Set initial empty state
         editor.set_text("");
@@ -315,16 +348,28 @@ impl TextEditor {
             self.buffer.set_style_scheme(Some(&scheme));
         }
 
+        self.syllable_theme_dark
+            .set(settings.theme == crate::setting::Theme::Dark);
         let mut renderer_slot = self.syllable_renderer.borrow_mut();
         match (renderer_slot.is_some(), settings.show_syllable_gutter) {
             (false, true) => {
-                let renderer = create_syllable_renderer(&self.buffer);
+                let renderer = create_syllable_renderer(
+                    &self.buffer,
+                    self.caret_line.clone(),
+                    self.syllable_theme_dark.clone(),
+                );
                 self.gutter.insert(&renderer, -20); // Position right after line numbers (-30)
                 *renderer_slot = Some(renderer);
             }
             (true, false) => {
                 if let Some(renderer) = renderer_slot.take() {
                     self.gutter.remove(&renderer);
+                }
+            }
+            // Repaint so the active-line count picks up a live theme switch.
+            (true, true) => {
+                if let Some(renderer) = renderer_slot.as_ref() {
+                    renderer.queue_draw();
                 }
             }
             _ => {}
@@ -454,10 +499,23 @@ impl Clone for TextEditor {
     }
 }
 
+/// The syllable-count green for `dark` / light — mirrors the
+/// `--syllable-green` palette row in `crate::css` (kept in hex here because
+/// a gutter renderer can't read CSS vars mid-draw, same as `vcs_colors`).
+fn syllable_green(dark: bool) -> &'static str {
+    if dark { "#57a64a" } else { "#3a8a2e" }
+}
+
 /// Builds a gutter renderer that shows each line's syllable count, live —
 /// separate from `TextEditor::new()` so `apply_settings` can add this back
-/// after the setting was toggled off and back on again.
-fn create_syllable_renderer(buffer: &SourceBuffer) -> GutterRendererText {
+/// after the setting was toggled off and back on again. The caret's line is
+/// drawn green + bold; `caret_line` / `theme_dark` are kept current by the
+/// editor.
+fn create_syllable_renderer(
+    buffer: &SourceBuffer,
+    caret_line: Rc<Cell<i32>>,
+    theme_dark: Rc<Cell<bool>>,
+) -> GutterRendererText {
     let syllable_renderer = GutterRendererText::new();
     syllable_renderer.set_css_classes(&["syllable-count"]);
     syllable_renderer.set_xalign(0.5);
@@ -473,11 +531,18 @@ fn create_syllable_renderer(buffer: &SourceBuffer) -> GutterRendererText {
             };
 
             let line = buffer_clone.text(&iter, &end_iter, false);
-            if !line.trim().is_empty() {
-                let syllables = crate::editor::stat::count_syllables(&line);
-                renderer.set_text(&syllables.to_string());
-            } else {
+            if line.trim().is_empty() {
                 renderer.set_text("");
+            } else {
+                let syllables = crate::editor::stat::count_syllables(&line);
+                if line_num as i32 == caret_line.get() {
+                    let color = syllable_green(theme_dark.get());
+                    renderer.set_markup(&format!(
+                        "<span foreground='{color}' weight='bold'>{syllables}</span>"
+                    ));
+                } else {
+                    renderer.set_text(&syllables.to_string());
+                }
             }
         }
     });
@@ -485,27 +550,38 @@ fn create_syllable_renderer(buffer: &SourceBuffer) -> GutterRendererText {
     syllable_renderer
 }
 
-/// Wire the sticky-line label: on scroll or edit, show the first line of the
-/// stanza/paragraph the viewport's top is inside, pinned to the top, once
-/// that line's real position has scrolled off screen.
+/// Wire the sticky-line label: on scroll, edit or resize, show the first
+/// line of the stanza/paragraph the viewport's top is inside — or, when the
+/// top sits in the blank gap between stanzas, the stanza just above it —
+/// pinned to the top, once that line's real position has scrolled off.
 fn setup_sticky_line(
     scroll: &ScrolledWindow,
     view: &SourceView,
     buffer: &SourceBuffer,
     sticky: &Label,
+    sticky_row: &GtkBox,
 ) {
-    sticky.set_can_target(false);
+    sticky_row.set_can_target(false);
     let vadj = scroll.vadjustment();
+    let gutter = ViewExt::gutter(view, gtk::TextWindowType::Left);
 
     let update = {
         let vadj = vadj.clone();
         let view = view.clone();
         let buffer = buffer.clone();
         let sticky = sticky.clone();
+        let sticky_row = sticky_row.clone();
+        let gutter = gutter.clone();
         Rc::new(move || {
+            let hide = || sticky_row.set_visible(false);
+
             let y_top = vadj.value() as i32;
             let (top_iter, _) = view.line_at_y(y_top);
             let top_line = top_iter.line();
+            if top_line < 0 {
+                hide();
+                return;
+            }
 
             let is_blank = |line: i32| -> bool {
                 let Some(start) = buffer.iter_at_line(line) else {
@@ -517,28 +593,37 @@ fn setup_sticky_line(
                 buffer.text(&start, &end, false).trim().is_empty()
             };
 
-            if top_line < 0 || is_blank(top_line) {
-                sticky.set_visible(false);
+            // The non-blank line the sticky tracks: the top line itself, or
+            // — when the top is in a blank gap between stanzas — the last
+            // non-blank line above it.
+            let mut anchor = top_line;
+            while anchor >= 0 && is_blank(anchor) {
+                anchor -= 1;
+            }
+            if anchor < 0 {
+                hide();
                 return;
             }
 
-            // First line of the paragraph containing the top visible line.
-            let mut start_line = top_line;
+            // First line of that stanza/paragraph.
+            let mut start_line = anchor;
             while start_line > 0 && !is_blank(start_line - 1) {
                 start_line -= 1;
             }
+
+            // Nothing to pin while the stanza's real first line is the top
+            // line or hasn't scrolled off yet.
             if start_line == top_line {
-                sticky.set_visible(false);
+                hide();
                 return;
             }
-
             let Some(start_iter) = buffer.iter_at_line(start_line) else {
-                sticky.set_visible(false);
+                hide();
                 return;
             };
             let (line_y, _) = view.line_yrange(&start_iter);
             if line_y >= y_top {
-                sticky.set_visible(false);
+                hide();
                 return;
             }
 
@@ -546,12 +631,23 @@ fn setup_sticky_line(
                 .iter_at_line(start_line + 1)
                 .unwrap_or_else(|| buffer.end_iter());
             let text = buffer.text(&start_iter, &end, false);
-            sticky.set_text(text.trim_end());
-            sticky.set_visible(!text.trim().is_empty());
+            let text = text.trim_end();
+            if text.trim().is_empty() {
+                hide();
+                return;
+            }
+            sticky.set_text(text);
+            sticky_row.set_margin_start(gutter.width().max(0));
+            sticky_row.set_visible(true);
         })
     };
 
     vadj.connect_value_changed({
+        let update = update.clone();
+        move |_| update()
+    });
+    // Page-size changes (e.g. window resize) also move what's at the top.
+    vadj.connect_changed({
         let update = update.clone();
         move |_| update()
     });

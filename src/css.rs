@@ -42,6 +42,9 @@ const PALETTE: &[(&str, &str, &str)] = &[
     ("gutter-bg", "#313335", "#f0f0f0"),
     // The syllable count in the gutter is always this green, both themes.
     ("syllable-green", "#57a64a", "#3a8a2e"),
+    // Sticky stanza-line text — matches the editor scheme's body text fg
+    // (rhymr.xml / rhymr-light.xml), which `--text-*` don't track per theme.
+    ("sticky-fg", "#a9b7c6", "#000000"),
     ("text-modified", "#d19a66", "#a85f1d"),
     ("text-new", "#6fbf73", "#1f8a3d"),
     ("text-renamed", "#61afef", "#1568c9"),

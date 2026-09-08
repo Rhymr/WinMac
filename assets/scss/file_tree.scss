@@ -31,24 +31,24 @@
     & label {
         padding: 2px 4px 2px 0;
         margin: 0 0 0 4px;
-        text-align: left;
         background-color: inherit;
     }
 }
 
 .file-icon {
     margin: 0;
-    //padding-left: 5px;
-    min-width: 16px;
-    min-height: 16px;
+    padding: 0;
+    min-width: 0;
+    min-height: 0;
     background-color: inherit;
 }
 
 .file-tree-container {
     background-color: var(--bg-darkest);
-    /* No divider here — the tree flows straight into the editor; the only
-       vertical line in the editor area is the gutter/text divider. */
-    border-right: none;
+    /* Hard 1px divider between the file tree and the editor pane,
+       JetBrains-style (a second vertical line sits inside the editor
+       between its gutter and text). */
+    border-right: 1px solid var(--border-dark);
 }
 
 .file-tree-outer {
