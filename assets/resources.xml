@@ -20,6 +20,8 @@
     <file compressed="true" preprocess="xml-stripblanks">icons/color/rename-color.svg</file>
     <file compressed="true" preprocess="xml-stripblanks">icons/color/delete-color.svg</file>
     <file compressed="true" preprocess="xml-stripblanks">icons/color/folder-color.svg</file>
+    <file compressed="true" preprocess="xml-stripblanks">icons/color/json-color.svg</file>
+    <file compressed="true" preprocess="xml-stripblanks">icons/color/usage-documentation-color.svg</file>
     <file compressed="true" preprocess="xml-stripblanks">icons/color/file-color.svg</file>
     <file compressed="true" preprocess="xml-stripblanks">icons/color/folder-ios-color.svg</file>
     <file compressed="true" preprocess="xml-stripblanks">icons/color/diff-added-color.svg</file>
@@ -44,6 +46,8 @@
     <file compressed="true" preprocess="xml-stripblanks">icons/dark/rename-dark.svg</file>
     <file compressed="true" preprocess="xml-stripblanks">icons/dark/delete-dark.svg</file>
     <file compressed="true" preprocess="xml-stripblanks">icons/dark/folder-dark.svg</file>
+    <file compressed="true" preprocess="xml-stripblanks">icons/dark/json-dark.svg</file>
+    <file compressed="true" preprocess="xml-stripblanks">icons/dark/usage-documentation-dark.svg</file>
     <file compressed="true" preprocess="xml-stripblanks">icons/dark/file-dark.svg</file>
     <file compressed="true" preprocess="xml-stripblanks">icons/dark/folder-ios-dark.svg</file>
     <file compressed="true" preprocess="xml-stripblanks">icons/dark/diff-added-dark.svg</file>
@@ -68,6 +72,8 @@
     <file compressed="true" preprocess="xml-stripblanks">icons/light/rename-light.svg</file>
     <file compressed="true" preprocess="xml-stripblanks">icons/light/delete-light.svg</file>
     <file compressed="true" preprocess="xml-stripblanks">icons/light/folder-light.svg</file>
+    <file compressed="true" preprocess="xml-stripblanks">icons/light/json-light.svg</file>
+    <file compressed="true" preprocess="xml-stripblanks">icons/light/usage-documentation-light.svg</file>
     <file compressed="true" preprocess="xml-stripblanks">icons/light/file-light.svg</file>
     <file compressed="true" preprocess="xml-stripblanks">icons/light/folder-ios-light.svg</file>
     <file compressed="true" preprocess="xml-stripblanks">icons/light/diff-added-light.svg</file>

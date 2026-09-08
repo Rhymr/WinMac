@@ -49,6 +49,7 @@ pub struct FileTree {
     // avoids re-decoding the SVG per row.
     folder_icon: Option<gdk::Paintable>,
     file_icon: Option<gdk::Paintable>,
+    json_icon: Option<gdk::Paintable>,
 }
 
 impl Default for FileTree {
@@ -65,15 +66,16 @@ impl FileTree {
             .selection_mode(gtk::SelectionMode::Single)
             .build();
 
-        // Keep the list bounded to the pane's height instead of growing
-        // forever. Horizontal scrolling is disabled outright: without it,
-        // a long name or deep nesting level would otherwise let the whole
-        // tree shift sideways, misaligning every row's icons from the left
-        // edge — wide content just clips instead.
+        // The project tree does NOT scroll on its own — it grows to its
+        // content and the *left panel's* single outer scroller (see
+        // `app::layout`) scrolls the project tree, the Apple Notes tree and
+        // any other source tree together. Horizontal scrolling stays off:
+        // wide content clips rather than shifting every row's icons.
         let scrolled_list = ScrolledWindow::builder()
             .hexpand(true)
-            .vexpand(true)
             .hscrollbar_policy(gtk::PolicyType::Never)
+            .vscrollbar_policy(gtk::PolicyType::Never)
+            .propagate_natural_height(true)
             .child(&file_list)
             .build();
 
@@ -119,6 +121,7 @@ impl FileTree {
             git_statuses: Rc::new(RefCell::new(HashMap::new())),
             folder_icon: crate::app::icons::paintable("folder"),
             file_icon: crate::app::icons::paintable("file"),
+            json_icon: crate::app::icons::paintable("json"),
         };
 
         // F2/Delete/Cut/Copy/Paste for the selected row (see tree_menu.rs)
@@ -320,7 +323,17 @@ impl FileTree {
             chevron.set_css_classes(&chevron_classes);
             hbox.append(&chevron);
 
-            let icon = Image::from_paintable(self.file_icon.as_ref());
+            // Per-extension leaf icon (just JSON for now — the `.rhymr/`
+            // config/cache files); everything else is the generic file glyph.
+            let leaf_icon = if path
+                .extension()
+                .is_some_and(|e| e.eq_ignore_ascii_case("json"))
+            {
+                self.json_icon.as_ref()
+            } else {
+                self.file_icon.as_ref()
+            };
+            let icon = Image::from_paintable(leaf_icon);
             icon.set_pixel_size(16);
             icon.set_css_classes(&["file-icon"]);
             hbox.append(&icon);
