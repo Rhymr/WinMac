@@ -1,0 +1,42 @@
+/* Splash window (src/app/splash.rs) — classic JetBrains product splash:
+   product name + version top-left, logo mark bottom-right, bold gradient. */
+
+.splash {
+    background: transparent;
+}
+
+.splash-body {
+    padding: 40px 44px;
+    border: 1px solid var(--border-dark);
+    /* Blue → violet → magenta → red sweep, with a soft highlight bloom in
+       the lower-left, echoing the Rider splash. */
+    background-image:
+        radial-gradient(circle at 14% 82%, rgba(255, 255, 255, 0.20), rgba(255, 255, 255, 0) 46%),
+        linear-gradient(122deg, #1657e0 0%, #3d2fcf 30%, #9b1f97 60%, #ec3346 100%);
+
+    /* base.scss's `box { background: var(--bg-dark) }` would otherwise paint
+       an opaque panel behind every nested Box/Label on top of the gradient. */
+    & box,
+    & label,
+    & image {
+        background: none;
+        background-color: transparent;
+    }
+}
+
+.splash-name {
+    color: #ffffff;
+    font-size: 52px;
+    font-weight: bold;
+}
+
+.splash-version {
+    color: rgba(255, 255, 255, 0.82);
+    font-size: 16px;
+    margin-top: 4px;
+}
+
+.splash-logo {
+    color: #ffffff;
+    opacity: 0.95;
+}

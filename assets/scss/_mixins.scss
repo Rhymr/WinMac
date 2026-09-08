@@ -14,14 +14,21 @@
    - `$hover`/`$selected`: the two background colors.
    - `$radius`: rounds every row, not just on hover/selected (`none` skips
      it — the file tree's rows sit flush edge-to-edge).
-   - `$force-fg`: forces light text on selected descendants. Needed
+   - `$force-fg`: forces light text on every selected descendant. Needed
      wherever `$selected` is the saturated accent blue (`--selection-bg`),
      since regular text color (`--text-bright`) flips dark in light theme
-     and would be unreadable on it. Left off where `$selected` is a neutral
-     gray tint instead (the file tree), so status-colored labels (modified/
-     new/renamed) keep their own color through selection.
+     and would be unreadable on it.
+   - `$fg-except-status`: like `$force-fg`, but spares the file tree's git
+     status labels (`.file-modified` / `.file-new` / `.file-renamed`) so
+     they keep their own color through a (now accent-blue) selection.
 */
-@mixin list-row-hover-select($hover, $selected, $radius: none, $force-fg: false) {
+@mixin list-row-hover-select(
+    $hover,
+    $selected,
+    $radius: none,
+    $force-fg: false,
+    $fg-except-status: false
+) {
     & > row {
         transition: background-color var(--transition-fast);
 
@@ -44,6 +51,12 @@
         &:selected * {
             background-color: $selected;
             @if $force-fg {
+                color: var(--selection-fg);
+            }
+        }
+
+        @if $fg-except-status {
+            &:selected *:not(.file-modified):not(.file-new):not(.file-renamed) {
                 color: var(--selection-fg);
             }
         }

@@ -10,18 +10,26 @@
     background-color: var(--bg-dark);
 }
 
-.welcome-settings-button {
+/* Bottom-of-sidebar Configure / Help dropdowns (JetBrains welcome window). */
+.welcome-sidebar-footer {
+    background: none;
+}
+
+.welcome-sidebar-menu {
     background: none;
     border: none;
-    padding: 4px 8px;
-    font-size: 20px;
+    border-radius: 0;
+    padding: 3px 8px;
+    color: var(--text-not-so-dim);
 
     &:hover {
         background-color: var(--bg-hover);
+        color: var(--text-bright);
     }
 
-    &:active {
-        background-color: var(--button-active);
+    &:checked {
+        background-color: var(--bg-light);
+        color: var(--text-bright);
     }
 }
 
@@ -45,7 +53,7 @@
 .sidebar-nav {
     background-color: transparent;
 
-    @include list-row-hover-select(var(--bg-hover), var(--selection-bg), var(--radius-md), $force-fg: true);
+    @include list-row-hover-select(var(--bg-hover), var(--selection-bg), $force-fg: true);
 
     & label {
         background-color: inherit;
@@ -55,11 +63,11 @@
 .recent-projects-list {
     background-color: transparent;
 
-    @include list-row-hover-select(var(--bg-light), var(--selection-bg), 8px, $force-fg: true);
+    @include list-row-hover-select(var(--bg-hover), var(--selection-bg), $force-fg: true);
 
     & > row {
         background-color: var(--bg-mid);
-        margin-bottom: 6px;
+        border-bottom: 1px solid var(--border-dark);
     }
 
     & box {
@@ -74,7 +82,7 @@ checkbutton {
         min-width: 16px;
         min-height: 16px;
         border: 1px solid var(--border-light);
-        border-radius: 4px;
+        border-radius: var(--radius-sm);
         background-color: var(--bg-mid);
 
         &:checked {
@@ -97,7 +105,7 @@ checkbutton {
 .project-menu-button {
     background: transparent;
     border: none;
-    border-radius: 6px;
+    border-radius: 0;
     min-width: 24px;
     min-height: 24px;
     padding: 0 6px;
@@ -112,7 +120,7 @@ checkbutton {
 .project-avatar {
     background-color: var(--selection-bg);
     color: var(--selection-fg);
-    border-radius: 6px;
+    border-radius: 0;
     font-weight: bold;
 }
 
