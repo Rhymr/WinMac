@@ -1,5 +1,5 @@
 use git2::Repository;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 /// A file's status relative to HEAD, simplified to the categories the file
@@ -11,6 +11,93 @@ pub enum GitFileStatus {
     New,
     Renamed,
     Modified,
+}
+
+/// Per-line change status of a file's current text vs the version in HEAD,
+/// for the editor's VCS gutter bars. `Deleted` marks the surviving line at
+/// the seam where one or more lines were removed.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum LineChange {
+    Added,
+    Modified,
+    Deleted,
+}
+
+/// Change type keyed by 0-based line number of `current_text`. Empty when
+/// `file_abs` isn't inside `repo_root`'s repo, there's no HEAD, or nothing
+/// changed. A file with no blob in HEAD (brand new / untracked) reports
+/// every line `Added`. Granularity is per hunk (the whole changed hunk gets
+/// one color), matching how JetBrains paints the gutter.
+pub fn line_changes(
+    repo_root: &Path,
+    file_abs: &Path,
+    current_text: &str,
+) -> HashMap<usize, LineChange> {
+    let mut out = HashMap::new();
+
+    let Ok(repo) = Repository::open(repo_root) else {
+        return out;
+    };
+    let Ok(rel) = file_abs.strip_prefix(repo_root) else {
+        return out;
+    };
+
+    let head_blob = repo
+        .head()
+        .ok()
+        .and_then(|head| head.peel_to_tree().ok())
+        .and_then(|tree| tree.get_path(rel).ok())
+        .and_then(|entry| repo.find_blob(entry.id()).ok());
+
+    let Some(head_blob) = head_blob else {
+        // Untracked / newly added — the whole file is new.
+        for line in 0..current_text.lines().count() {
+            out.insert(line, LineChange::Added);
+        }
+        return out;
+    };
+
+    let mut opts = git2::DiffOptions::new();
+    opts.context_lines(0);
+
+    let patch = match git2::Patch::from_blob_and_buffer(
+        &head_blob,
+        Some(rel),
+        current_text.as_bytes(),
+        Some(rel),
+        Some(&mut opts),
+    ) {
+        Ok(patch) => patch,
+        Err(_) => return out,
+    };
+
+    for h in 0..patch.num_hunks() {
+        let Ok((hunk, _)) = patch.hunk(h) else {
+            continue;
+        };
+        let new_start = hunk.new_start();
+        let new_lines = hunk.new_lines();
+        let old_lines = hunk.old_lines();
+
+        if new_lines == 0 {
+            // Pure deletion — flag the line just after the removed block.
+            out.entry(new_start.saturating_sub(1) as usize)
+                .or_insert(LineChange::Deleted);
+            continue;
+        }
+
+        let kind = if old_lines == 0 {
+            LineChange::Added
+        } else {
+            LineChange::Modified
+        };
+        let start = new_start.saturating_sub(1) as usize;
+        for line in start..start + new_lines as usize {
+            out.insert(line, kind);
+        }
+    }
+
+    out
 }
 
 pub struct GitController {
@@ -108,6 +195,31 @@ impl GitController {
         }
 
         result
+    }
+
+    /// Absolute paths of entries git ignores (one entry per ignored
+    /// directory — the contents aren't enumerated). Empty when the path
+    /// isn't a repo. Used to grey ignored rows in the file tree.
+    pub fn ignored_paths(&self) -> HashSet<PathBuf> {
+        let mut set = HashSet::new();
+        let Ok(repo) = Repository::open(&self.repo_path) else {
+            return set;
+        };
+        let mut opts = git2::StatusOptions::new();
+        opts.include_ignored(true)
+            .recurse_ignored_dirs(false)
+            .include_untracked(false);
+        let Ok(statuses) = repo.statuses(Some(&mut opts)) else {
+            return set;
+        };
+        for entry in statuses.iter() {
+            if entry.status().is_ignored()
+                && let Ok(path) = entry.path()
+            {
+                set.insert(self.repo_path.join(path.trim_end_matches('/')));
+            }
+        }
+        set
     }
 
     /// The checked-out branch's short name (e.g. `"main"`), or `None` on a

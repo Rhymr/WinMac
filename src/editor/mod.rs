@@ -1,5 +1,6 @@
 pub mod completion;
 pub mod stat;
+pub mod vcs_gutter;
 
 use crate::app::context_menu::{ContextMenu, hint};
 use crate::rhyme::highlight::RhymeHighlight;
@@ -7,7 +8,10 @@ use crate::setting::Settings;
 use completion::WordCompletionProvider;
 use gtk::gdk;
 use gtk::prelude::*;
-use gtk::{EventSequenceState, Frame, GestureClick, PropagationPhase, ScrolledWindow};
+use gtk::{
+    Align, Box as GtkBox, EventSequenceState, Frame, GestureClick, Label, Orientation, Overlay,
+    PropagationPhase, ScrolledWindow,
+};
 use sourceview5::GutterRendererText;
 use sourceview5::prelude::{BufferExt, GutterRendererExt, GutterRendererTextExt, ViewExt};
 use sourceview5::{Buffer as SourceBuffer, Completion, Gutter, View as SourceView};
@@ -17,6 +21,10 @@ use std::rc::Rc;
 
 /// How long to wait after the last keystroke before writing to disk.
 const AUTOSAVE_DEBOUNCE: std::time::Duration = std::time::Duration::from_millis(600);
+
+/// How long to wait after the last keystroke before recomputing the VCS
+/// gutter's per-line diff vs HEAD.
+const VCS_DEBOUNCE: std::time::Duration = std::time::Duration::from_millis(400);
 
 pub struct TextEditor {
     frame: Frame,
@@ -30,6 +38,12 @@ pub struct TextEditor {
     modified: Rc<Cell<bool>>,
     gutter: Gutter,
     syllable_renderer: RefCell<Option<GutterRendererText>>,
+    // The caret's current line, and whether the editor scheme is the dark
+    // one — read by the syllable renderer to draw the active line's count
+    // green + bold; kept current by a cursor-move handler and `apply_settings`.
+    caret_line: Rc<Cell<i32>>,
+    syllable_theme_dark: Rc<Cell<bool>>,
+    vcs_renderer: Rc<RefCell<Option<vcs_gutter::VcsGutterRenderer>>>,
     completion: Completion,
     word_provider: RefCell<Option<WordCompletionProvider>>,
     rhyme_highlight: RefCell<Option<RhymeHighlight>>,
@@ -56,6 +70,11 @@ impl TextEditor {
             .auto_indent(settings.auto_indent)
             .indent_width(settings.tab_width as i32)
             .highlight_current_line(true)
+            .pixels_above_lines(1)
+            .pixels_below_lines(1)
+            // Long bars wrap to the editor width rather than scrolling
+            // sideways; the gutter still counts once per logical line.
+            .wrap_mode(gtk::WrapMode::Word)
             .background_pattern(sourceview5::BackgroundPatternType::None)
             .smart_backspace(true)
             .smart_home_end(sourceview5::SmartHomeEndType::After)
@@ -75,6 +94,8 @@ impl TextEditor {
         // actually land.
         let save_generation = Rc::new(Cell::new(0u64));
         let modified = Rc::new(Cell::new(false));
+        let vcs_renderer: Rc<RefCell<Option<vcs_gutter::VcsGutterRenderer>>> =
+            Rc::new(RefCell::new(None));
 
         let buffer_clone = buffer.clone();
         let path_ref = current_path.clone();
@@ -112,6 +133,35 @@ impl TextEditor {
             });
         });
 
+        // VCS gutter: recompute the per-line diff vs HEAD on its own short
+        // debounce after edits (independent of the autosave one above). The
+        // handler is a no-op whenever the renderer isn't attached (the
+        // "Show VCS gutter" setting is off).
+        {
+            let buffer_for_vcs = buffer.clone();
+            let path_for_vcs = current_path.clone();
+            let renderer_for_vcs = vcs_renderer.clone();
+            let vcs_generation = Rc::new(Cell::new(0u64));
+            buffer.connect_changed(move |_| {
+                if renderer_for_vcs.borrow().is_none() {
+                    return;
+                }
+                let this_generation = vcs_generation.get() + 1;
+                vcs_generation.set(this_generation);
+
+                let buffer_for_vcs = buffer_for_vcs.clone();
+                let path_for_vcs = path_for_vcs.clone();
+                let renderer_for_vcs = renderer_for_vcs.clone();
+                let vcs_generation = vcs_generation.clone();
+                glib::timeout_add_local_once(VCS_DEBOUNCE, move || {
+                    if vcs_generation.get() != this_generation {
+                        return;
+                    }
+                    recompute_vcs(&buffer_for_vcs, &path_for_vcs, &renderer_for_vcs);
+                });
+            });
+        }
+
         // Disable bracket matching
         buffer.set_highlight_matching_brackets(false);
 
@@ -138,8 +188,38 @@ impl TextEditor {
             .child(&source_view)
             .build();
 
+        // "Sticky line" (JetBrains sticky-scroll analog): the first line of
+        // the stanza/paragraph the top of the viewport is inside, pinned to
+        // the top of the editor once its real position has scrolled off. It
+        // stays pinned across the blank lines between stanzas until the
+        // next stanza's first line reaches the top.
+        let sticky = Label::builder()
+            .css_classes(["sticky-line-text"])
+            .halign(Align::Start)
+            .xalign(0.0)
+            .single_line_mode(true)
+            .ellipsize(gtk::pango::EllipsizeMode::End)
+            .build();
+        // The row carries the strip's background/border; it's inset from
+        // the left by the gutter width (updated per tick) so its text lines
+        // up with the editor's text column rather than sitting over the
+        // gutter.
+        let sticky_row = GtkBox::builder()
+            .orientation(Orientation::Horizontal)
+            .css_classes(["sticky-line"])
+            .halign(Align::Fill)
+            .valign(Align::Start)
+            .build();
+        sticky_row.append(&sticky);
+        sticky_row.set_visible(false);
+
+        let overlay = Overlay::new();
+        overlay.set_child(Some(&scroll));
+        overlay.add_overlay(&sticky_row);
+        setup_sticky_line(&scroll, &source_view, &buffer, &sticky, &sticky_row);
+
         let frame = Frame::builder()
-            .child(&scroll)
+            .child(&overlay)
             .css_classes(vec!["rhyme-editor-frame"])
             .build();
 
@@ -151,12 +231,28 @@ impl TextEditor {
             modified,
             gutter,
             syllable_renderer: RefCell::new(None),
+            caret_line: Rc::new(Cell::new(0)),
+            syllable_theme_dark: Rc::new(Cell::new(settings.theme == crate::setting::Theme::Dark)),
+            vcs_renderer,
             completion,
             word_provider: RefCell::new(None),
             rhyme_highlight: RefCell::new(None),
         };
 
         editor.setup_context_menu();
+
+        // Keep the caret's line current for the syllable renderer's
+        // green-bold active-line count, repainting the gutter when it moves.
+        {
+            let caret_line = editor.caret_line.clone();
+            let gutter = editor.gutter.clone();
+            editor.buffer.connect_cursor_position_notify(move |buf| {
+                let line = buf.iter_at_offset(buf.cursor_position()).line();
+                if caret_line.replace(line) != line {
+                    gutter.queue_draw();
+                }
+            });
+        }
 
         // Set initial empty state
         editor.set_text("");
@@ -187,24 +283,25 @@ impl TextEditor {
             let has_selection = buffer.has_selection();
 
             let sv = source_view.clone();
-            let cut_btn = menu.add_item("Cut", Some(hint::CUT), None, move || {
+            let cut_btn = menu.add_item(None, "Cut", Some(hint::CUT), None, move || {
                 sv.emit_cut_clipboard();
             });
             cut_btn.set_sensitive(has_selection);
 
             let sv = source_view.clone();
-            let copy_btn = menu.add_item("Copy", Some(hint::COPY), None, move || {
+            let copy_btn = menu.add_item(Some("copy"), "Copy", Some(hint::COPY), None, move || {
                 sv.emit_copy_clipboard();
             });
             copy_btn.set_sensitive(has_selection);
 
             let sv = source_view.clone();
-            menu.add_item("Paste", Some(hint::PASTE), None, move || {
+            menu.add_item(Some("paste"), "Paste", Some(hint::PASTE), None, move || {
                 sv.emit_paste_clipboard();
             });
 
             let buffer_for_delete = buffer.clone();
             let delete_btn = menu.add_item(
+                Some("delete"),
                 "Delete",
                 Some(hint::DELETE),
                 Some("destructive-menu-item"),
@@ -217,13 +314,19 @@ impl TextEditor {
             menu.add_separator();
 
             let buffer_for_select_all = buffer.clone();
-            menu.add_item("Select All", Some(hint::SELECT_ALL), None, move || {
-                let (start, end) = (
-                    buffer_for_select_all.start_iter(),
-                    buffer_for_select_all.end_iter(),
-                );
-                buffer_for_select_all.select_range(&start, &end);
-            });
+            menu.add_item(
+                None,
+                "Select All",
+                Some(hint::SELECT_ALL),
+                None,
+                move || {
+                    let (start, end) = (
+                        buffer_for_select_all.start_iter(),
+                        buffer_for_select_all.end_iter(),
+                    );
+                    buffer_for_select_all.select_range(&start, &end);
+                },
+            );
 
             menu.popup_at(&source_view, x, y);
         });
@@ -250,10 +353,16 @@ impl TextEditor {
             self.buffer.set_style_scheme(Some(&scheme));
         }
 
+        self.syllable_theme_dark
+            .set(settings.theme == crate::setting::Theme::Dark);
         let mut renderer_slot = self.syllable_renderer.borrow_mut();
         match (renderer_slot.is_some(), settings.show_syllable_gutter) {
             (false, true) => {
-                let renderer = create_syllable_renderer(&self.buffer);
+                let renderer = create_syllable_renderer(
+                    &self.buffer,
+                    self.caret_line.clone(),
+                    self.syllable_theme_dark.clone(),
+                );
                 self.gutter.insert(&renderer, -20); // Position right after line numbers (-30)
                 *renderer_slot = Some(renderer);
             }
@@ -262,9 +371,44 @@ impl TextEditor {
                     self.gutter.remove(&renderer);
                 }
             }
+            // Repaint so the active-line count picks up a live theme switch.
+            (true, true) => {
+                if let Some(renderer) = renderer_slot.as_ref() {
+                    renderer.queue_draw();
+                }
+            }
             _ => {}
         }
         drop(renderer_slot);
+
+        // VCS gutter — same add/remove-live pattern as the syllable renderer,
+        // plus a colour refresh so the bars follow a live theme switch.
+        let vcs_colors = vcs_colors(settings.theme);
+        let mut vcs_slot = self.vcs_renderer.borrow_mut();
+        match (vcs_slot.is_some(), settings.show_vcs_gutter) {
+            (false, true) => {
+                let renderer = vcs_gutter::VcsGutterRenderer::new();
+                renderer.set_colors(vcs_colors.0, vcs_colors.1, vcs_colors.2);
+                // Rightmost in the gutter — after line numbers (-30) and the
+                // syllable count (-20) — so the change bar sits flush against
+                // the text edge, JetBrains-style.
+                self.gutter.insert(&renderer, 10);
+                *vcs_slot = Some(renderer);
+            }
+            (true, false) => {
+                if let Some(renderer) = vcs_slot.take() {
+                    self.gutter.remove(&renderer);
+                }
+            }
+            (true, true) => {
+                if let Some(renderer) = vcs_slot.as_ref() {
+                    renderer.set_colors(vcs_colors.0, vcs_colors.1, vcs_colors.2);
+                }
+            }
+            _ => {}
+        }
+        drop(vcs_slot);
+        recompute_vcs(&self.buffer, &self.current_path, &self.vcs_renderer);
 
         let mut provider_slot = self.word_provider.borrow_mut();
         match (provider_slot.is_some(), settings.word_completion) {
@@ -312,10 +456,24 @@ impl TextEditor {
     /// tab's initial content never triggers a spurious save.
     pub fn set_path(&self, path: PathBuf) {
         self.current_path.replace(Some(path));
+        recompute_vcs(&self.buffer, &self.current_path, &self.vcs_renderer);
     }
 
     pub fn get_widget(&self) -> &Frame {
         &self.frame
+    }
+
+    /// Make this editor read-only — no typing, no caret, a `.readonly` CSS
+    /// hook. Used for external-source documents (Apple Notes), which Rhymr
+    /// never writes back.
+    pub fn set_editable(&self, editable: bool) {
+        self.source_view.set_editable(editable);
+        self.source_view.set_cursor_visible(editable);
+        if editable {
+            self.source_view.remove_css_class("readonly");
+        } else {
+            self.source_view.add_css_class("readonly");
+        }
     }
 
     /// Has this tab been edited since it was opened, with that edit not yet
@@ -329,6 +487,41 @@ impl TextEditor {
     /// word-count listener, independent of the autosave debounce above.
     pub fn connect_changed(&self, f: impl Fn() + 'static) {
         self.buffer.connect_changed(move |_| f());
+    }
+
+    /// Notify `f` whenever the caret moves — the status bar's line:col
+    /// readout.
+    pub fn connect_cursor_notify(&self, f: impl Fn() + 'static) {
+        self.buffer.connect_cursor_position_notify(move |_| f());
+    }
+
+    /// Notify `f` when the selection changes: `Some(word)` when exactly one
+    /// word is selected, `None` otherwise. Used to seed the Rhyme Search
+    /// box from the editor selection.
+    pub fn connect_selection_notify(&self, f: impl Fn(Option<String>) + 'static) {
+        let f = Rc::new(f);
+        let selected_word = {
+            let buffer = self.buffer.clone();
+            move || {
+                buffer.selection_bounds().and_then(|(start, end)| {
+                    let text = buffer.text(&start, &end, false).to_string();
+                    let trimmed = text.trim();
+                    let one_word = !trimmed.is_empty()
+                        && trimmed
+                            .chars()
+                            .all(|c| c.is_alphanumeric() || c == '\'' || c == '-');
+                    one_word.then(|| trimmed.to_string())
+                })
+            }
+        };
+        // `mark-set` fires as the selection is dragged; `changed` covers a
+        // selection cleared by an edit.
+        {
+            let (f, selected_word) = (f.clone(), selected_word.clone());
+            self.buffer
+                .connect_mark_set(move |_, _, _| f(selected_word()));
+        }
+        self.buffer.connect_changed(move |_| f(selected_word()));
     }
 }
 
@@ -353,10 +546,23 @@ impl Clone for TextEditor {
     }
 }
 
+/// The syllable-count green for `dark` / light — mirrors the
+/// `--syllable-green` palette row in `crate::css` (kept in hex here because
+/// a gutter renderer can't read CSS vars mid-draw, same as `vcs_colors`).
+fn syllable_green(dark: bool) -> &'static str {
+    if dark { "#57a64a" } else { "#3a8a2e" }
+}
+
 /// Builds a gutter renderer that shows each line's syllable count, live —
 /// separate from `TextEditor::new()` so `apply_settings` can add this back
-/// after the setting was toggled off and back on again.
-fn create_syllable_renderer(buffer: &SourceBuffer) -> GutterRendererText {
+/// after the setting was toggled off and back on again. The caret's line is
+/// drawn green + bold; `caret_line` / `theme_dark` are kept current by the
+/// editor.
+fn create_syllable_renderer(
+    buffer: &SourceBuffer,
+    caret_line: Rc<Cell<i32>>,
+    theme_dark: Rc<Cell<bool>>,
+) -> GutterRendererText {
     let syllable_renderer = GutterRendererText::new();
     syllable_renderer.set_css_classes(&["syllable-count"]);
     syllable_renderer.set_xalign(0.5);
@@ -372,16 +578,131 @@ fn create_syllable_renderer(buffer: &SourceBuffer) -> GutterRendererText {
             };
 
             let line = buffer_clone.text(&iter, &end_iter, false);
-            if !line.trim().is_empty() {
-                let syllables = crate::editor::stat::count_syllables(&line);
-                renderer.set_text(&syllables.to_string());
-            } else {
+            if line.trim().is_empty() {
                 renderer.set_text("");
+            } else {
+                let syllables = crate::editor::stat::count_syllables(&line);
+                if line_num as i32 == caret_line.get() {
+                    let color = syllable_green(theme_dark.get());
+                    renderer.set_markup(&format!(
+                        "<span foreground='{color}' weight='bold'>{syllables}</span>"
+                    ));
+                } else {
+                    renderer.set_text(&syllables.to_string());
+                }
             }
         }
     });
 
     syllable_renderer
+}
+
+/// Wire the sticky-line label: on scroll, edit or resize, show the first
+/// line of the stanza/paragraph the viewport's top is inside — or, when the
+/// top sits in the blank gap between stanzas, the stanza just above it —
+/// pinned to the top, once that line's real position has scrolled off.
+fn setup_sticky_line(
+    scroll: &ScrolledWindow,
+    view: &SourceView,
+    buffer: &SourceBuffer,
+    sticky: &Label,
+    sticky_row: &GtkBox,
+) {
+    sticky_row.set_can_target(false);
+    let vadj = scroll.vadjustment();
+    let gutter = ViewExt::gutter(view, gtk::TextWindowType::Left);
+
+    let update = {
+        let vadj = vadj.clone();
+        let view = view.clone();
+        let buffer = buffer.clone();
+        let sticky = sticky.clone();
+        let sticky_row = sticky_row.clone();
+        let gutter = gutter.clone();
+        Rc::new(move || {
+            let hide = || sticky_row.set_visible(false);
+
+            let y_top = vadj.value() as i32;
+            let (top_iter, _) = view.line_at_y(y_top);
+            let top_line = top_iter.line();
+            if top_line < 0 {
+                hide();
+                return;
+            }
+
+            let is_blank = |line: i32| -> bool {
+                let Some(start) = buffer.iter_at_line(line) else {
+                    return true;
+                };
+                let end = buffer
+                    .iter_at_line(line + 1)
+                    .unwrap_or_else(|| buffer.end_iter());
+                buffer.text(&start, &end, false).trim().is_empty()
+            };
+
+            // The non-blank line the sticky tracks: the top line itself, or
+            // — when the top is in a blank gap between stanzas — the last
+            // non-blank line above it.
+            let mut anchor = top_line;
+            while anchor >= 0 && is_blank(anchor) {
+                anchor -= 1;
+            }
+            if anchor < 0 {
+                hide();
+                return;
+            }
+
+            // First line of that stanza/paragraph.
+            let mut start_line = anchor;
+            while start_line > 0 && !is_blank(start_line - 1) {
+                start_line -= 1;
+            }
+
+            // Nothing to pin while the stanza's real first line is the top
+            // line or hasn't scrolled off yet.
+            if start_line == top_line {
+                hide();
+                return;
+            }
+            let Some(start_iter) = buffer.iter_at_line(start_line) else {
+                hide();
+                return;
+            };
+            let (line_y, _) = view.line_yrange(&start_iter);
+            if line_y >= y_top {
+                hide();
+                return;
+            }
+
+            let end = buffer
+                .iter_at_line(start_line + 1)
+                .unwrap_or_else(|| buffer.end_iter());
+            let text = buffer.text(&start_iter, &end, false);
+            let text = text.trim_end();
+            if text.trim().is_empty() {
+                hide();
+                return;
+            }
+            sticky.set_text(text);
+            sticky_row.set_margin_start(gutter.width().max(0));
+            sticky_row.set_visible(true);
+        })
+    };
+
+    vadj.connect_value_changed({
+        let update = update.clone();
+        move |_| update()
+    });
+    // Page-size changes (e.g. window resize) also move what's at the top.
+    vadj.connect_changed({
+        let update = update.clone();
+        move |_| update()
+    });
+    buffer.connect_changed({
+        let update = update.clone();
+        move |_| update()
+    });
+    glib::idle_add_local_once(move || update());
 }
 
 /// Walk up from a file's directory looking for the workspace's `.git` —
@@ -395,4 +716,43 @@ fn find_git_root(file_path: &std::path::Path) -> Option<PathBuf> {
         dir = current.parent();
     }
     None
+}
+
+/// Recompute the VCS gutter's per-line diff from the buffer's current text
+/// and hand it to the renderer, if one is attached. Clears it when there's
+/// no path or no repo.
+fn recompute_vcs(
+    buffer: &SourceBuffer,
+    path: &Rc<RefCell<Option<PathBuf>>>,
+    renderer: &Rc<RefCell<Option<vcs_gutter::VcsGutterRenderer>>>,
+) {
+    let Some(renderer) = renderer.borrow().clone() else {
+        return;
+    };
+    let Some(path) = path.borrow().clone() else {
+        renderer.set_changes(std::collections::HashMap::new());
+        return;
+    };
+    let Some(root) = find_git_root(&path) else {
+        renderer.set_changes(std::collections::HashMap::new());
+        return;
+    };
+    let text = buffer
+        .text(&buffer.start_iter(), &buffer.end_iter(), false)
+        .to_string();
+    renderer.set_changes(crate::git::ops::line_changes(&root, &path, &text));
+}
+
+/// The (added, modified, deleted) colour triple for the VCS gutter bars,
+/// matching the `--vcs-*` / `--destructive` palette rows in `crate::css`.
+fn vcs_colors(theme: crate::setting::Theme) -> (gdk::RGBA, gdk::RGBA, gdk::RGBA) {
+    let (added, modified, deleted) = match theme {
+        crate::setting::Theme::Dark => ("#59a869", "#4a88c7", "#c75450"),
+        crate::setting::Theme::Light => ("#4a8f3c", "#3573b8", "#c0392b"),
+    };
+    let parse = |hex: &str| {
+        hex.parse::<gdk::RGBA>()
+            .unwrap_or_else(|_| gdk::RGBA::new(0.5, 0.5, 0.5, 1.0))
+    };
+    (parse(added), parse(modified), parse(deleted))
 }

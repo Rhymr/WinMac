@@ -10,11 +10,13 @@
     background: none;
     border-radius: 0;
     color: var(--text-bright);
-    // App-wide font from Settings (see crate::css) — every widget defaults
-    // to it; a more specific rule with its own font-size (status bar,
-    // captions, the gutter's syllable count, …) still wins via cascade.
-    font-family: var(--app-font-family);
-    font-size: var(--app-font-size);
+    // Chrome (everything outside the editor) uses the OS UI font at a compact
+    // classic-IDE size. The editor + its gutter re-pin the monospace
+    // `--app-font-*` (from Settings) in editor.scss — that's now the only
+    // place the mono font is applied. A more specific rule with its own
+    // font-size (status bar, captions, …) still wins via cascade.
+    font-family: var(--ui-font-family);
+    font-size: var(--ui-font-size);
 }
 
 /* `*::selection` (a web-CSS pseudo-element) isn't valid GTK CSS — GTK logs
@@ -48,10 +50,8 @@ frame {
     }
 
     & > label {
-        text-align: left;
-        padding: 5px;
+        padding: 2px 6px;
         color: var(--text-bright);
-        word-wrap: break-word;
         background-color: var(--bg-mid);
     }
 }
@@ -131,15 +131,16 @@ entry {
     border: 1px solid var(--border-light);
     border-radius: var(--radius-sm);
     margin: 0;
-    padding-left: 5px;
+    min-height: 22px;
+    padding: 2px 6px;
     transition:
         background-color var(--transition-fast),
         border-color var(--transition-fast);
 
+    // Classic blue focus ring, no fill change.
     &:focus {
-        border-color: var(--text-bright);
-        outline: none;
-        background: var(--button-active);
+        border-color: var(--selection-bg);
+        background: var(--bg-mid);
     }
 }
 
@@ -148,28 +149,25 @@ button {
     color: var(--text-bright);
     border: 1px solid var(--border-light);
     border-radius: var(--radius-sm);
-    padding: 0 15px;
+    min-height: 22px;
+    padding: 2px 12px;
     margin: 0;
-    cursor: pointer;
-    transition:
-        background-color var(--transition-fast),
-        border-color var(--transition-fast);
+    transition: background-color var(--transition-fast);
 
+    // Classic buttons shift only their fill on hover/active — the 1px border
+    // stays put (no colour "pop").
     &:hover {
         background: var(--button-hover);
-        border-color: var(--border-hover);
     }
 
     &:active {
         background: var(--button-active);
-        border-color: var(--border-active);
     }
 
     &:disabled {
         background: var(--button-disabled);
-        color: var(--border-active);
-        border: 1px solid var(--bg-mid);
-        cursor: not-allowed;
+        color: var(--text-muted);
+        border: 1px solid var(--border-light);
     }
 }
 
@@ -188,21 +186,104 @@ listbox {
     padding: 0;
 
     & > row {
-        padding: 2px 4px;
+        padding: 2px 6px;
         margin: 0;
 
         &:hover {
-            background-color: var(--bg-light);
+            background-color: var(--bg-hover);
         }
     }
 
     & label {
-        text-align: left;
-        padding: 5px;
+        padding: 2px 6px;
         color: var(--text-bright);
-        word-wrap: break-word;
         background-color: var(--bg-mid);
     }
+}
+
+/* --- The rest of the stock GTK primitives, squared + de-rounded to match
+   the classic look. None of these carry a radius any more; scrollbars go
+   chunky and always-visible-on-hover rather than the thin modern overlay. */
+scrollbar {
+    background-color: var(--bg-dark);
+    border: none;
+    border-radius: 0;
+
+    & > range > trough {
+        background: none;
+        border-radius: 0;
+        min-width: 12px;
+        min-height: 12px;
+    }
+
+    & > range > trough > slider {
+        background-color: var(--bg-light);
+        border: 1px solid var(--border-dark);
+        border-radius: 0;
+        min-width: 10px;
+        min-height: 10px;
+        margin: 0;
+    }
+
+    & > range > trough > slider:hover {
+        background-color: var(--border-hover);
+    }
+}
+
+spinbutton {
+    border-radius: 0;
+    border: 1px solid var(--border-light);
+    background: var(--bg-mid);
+
+    & > text {
+        background: none;
+        border: none;
+    }
+
+    & > button {
+        border-radius: 0;
+        border: none;
+        border-left: 1px solid var(--border-light);
+        background: var(--bg-mid);
+        min-width: 20px;
+    }
+}
+
+/* MenuButton (toolbar "Configure" dropdown) + its menu popover. */
+menubutton > button {
+    border-radius: 0;
+}
+
+popover.menu > contents,
+popover > contents > .menu {
+    background-color: var(--popover-bg-color);
+    border: 1px solid var(--border-light);
+    border-radius: 0;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
+    padding: 0;
+}
+
+popover.menu modelbutton {
+    border-radius: 0;
+    padding: 3px 12px;
+    min-height: 22px;
+
+    &:hover {
+        background-color: var(--selection-bg);
+        color: var(--selection-fg);
+    }
+}
+
+separator {
+    background-color: var(--border-dark);
+    min-width: 1px;
+    min-height: 1px;
+    border: none;
+}
+
+check,
+radio {
+    border-radius: 0;
 }
 
 /* Typography utilities — shared across the welcome screen, settings
@@ -216,7 +297,7 @@ listbox {
 }
 
 .caption {
-    font-size: 11px;
+    font-size: 10px;
 }
 
 .dim-label {

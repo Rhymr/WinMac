@@ -1,29 +1,29 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <style-scheme id="rhymr" name="Rhymr" version="1.0">
   <author>Rhymr Team</author>
-  <description>Dark theme optimized for poetry writing</description>
-  
+  <description>Classic Darcula-style dark theme for poetry writing</description>
+
   <!-- Main styles -->
-  <style name="text" foreground="#e1e1e1" background="#1e1e1e"/>
-  <style name="selection" background="#2b5278" foreground="#ffffff"/>
-  <style name="selection-unfocused" background="#366391" foreground="#ffffff"/>
-  <style name="cursor" foreground="#ffffff"/>
-  <style name="secondary-cursor" foreground="#e1e1e1"/>
-  <style name="line-numbers" foreground="#666666" background="#3e3e3e"/>
-  <style name="line-numbers-border" background="#000000"/>
-  <style name="bracket-match" background="#366391" bold="true"/>
-  <style name="bracket-mismatch" background="#2c2c2c" bold="true"/>
-  <style name="right-margin" foreground="#000000" background="#2e2e2e"/>
-  <style name="draw-spaces" foreground="#888888"/>
-  <style name="background-pattern" background="#2e2e2e"/>
+  <style name="text" foreground="#a9b7c6" background="#2b2b2b"/>
+  <style name="selection" background="#214283" foreground="#a9b7c6"/>
+  <style name="selection-unfocused" background="#0d293e" foreground="#a9b7c6"/>
+  <style name="cursor" foreground="#bbbbbb"/>
+  <style name="secondary-cursor" foreground="#a9b7c6"/>
+  <style name="line-numbers" foreground="#606366" background="#313335"/>
+  <style name="line-numbers-border" background="#313335"/>
+  <style name="bracket-match" background="#3b514d" bold="true"/>
+  <style name="bracket-mismatch" background="#63302f" bold="true"/>
+  <style name="right-margin" foreground="#5b5b5b" background="#2b2b2b"/>
+  <style name="draw-spaces" foreground="#5c6370"/>
+  <style name="background-pattern" background="#2b2b2b"/>
 
   <!-- Editor specific -->
-  <style name="rhyme-editor-gutter" foreground="#888888" background="#3e3e3e"/>
-  <style name="syllable-count" foreground="#888888" background="#3e3e3e"/>
+  <style name="rhyme-editor-gutter" foreground="#606366" background="#313335"/>
+  <style name="syllable-count" foreground="#57a64a" background="#313335"/>
 
-  <!-- Current line highlight -->
-  <style name="line-highlight" background="#2b527866"/>
-  <style name="current-line-number" foreground="#ffffff" background="#2b527866" bold="true"/>
-  <style name="current-line" background="#2b527866"/>
+  <!-- Current line highlight — a solid subtle grey, classic Darcula -->
+  <style name="line-highlight" background="#323232"/>
+  <style name="current-line-number" foreground="#a4a3a3" background="#323232" bold="true"/>
+  <style name="current-line" background="#323232"/>
 
-</style-scheme> 
+</style-scheme>

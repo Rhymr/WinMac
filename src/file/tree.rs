@@ -15,7 +15,7 @@ use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
 const IGNORED_ENTRIES: [&str; 2] = ["target", "node_modules"];
-const INDENT_PX: i32 = 20;
+const INDENT_PX: i32 = 16;
 
 /// The tree's rendering/data model. Context menus, keyboard shortcuts, and
 /// every file-mutating operation (new/rename/cut/copy/paste/delete/move)
@@ -41,6 +41,9 @@ pub struct FileTree {
     // Uncommitted-changes status vs HEAD, refreshed alongside the tree.
     // Empty whenever the workspace isn't a git repo.
     git_statuses: Rc<RefCell<HashMap<PathBuf, GitFileStatus>>>,
+    // Absolute paths git ignores (one per ignored dir). A row whose path
+    // is, or is under, one of these is greyed goldenrod (`.file-ignored`).
+    ignored: Rc<RefCell<HashSet<PathBuf>>>,
     // Decoded once and shared as *paintable data*, not as widgets: a GTK
     // widget can only ever have one parent, so reusing the same Image
     // widget instance across rows silently reparents it away from whichever
@@ -49,6 +52,7 @@ pub struct FileTree {
     // avoids re-decoding the SVG per row.
     folder_icon: Option<gdk::Paintable>,
     file_icon: Option<gdk::Paintable>,
+    json_icon: Option<gdk::Paintable>,
 }
 
 impl Default for FileTree {
@@ -65,15 +69,16 @@ impl FileTree {
             .selection_mode(gtk::SelectionMode::Single)
             .build();
 
-        // Keep the list bounded to the pane's height instead of growing
-        // forever. Horizontal scrolling is disabled outright: without it,
-        // a long name or deep nesting level would otherwise let the whole
-        // tree shift sideways, misaligning every row's icons from the left
-        // edge — wide content just clips instead.
+        // The project tree does NOT scroll on its own — it grows to its
+        // content and the *left panel's* single outer scroller (see
+        // `app::layout`) scrolls the project tree, the Apple Notes tree and
+        // any other source tree together. Horizontal scrolling stays off:
+        // wide content clips rather than shifting every row's icons.
         let scrolled_list = ScrolledWindow::builder()
             .hexpand(true)
-            .vexpand(true)
             .hscrollbar_policy(gtk::PolicyType::Never)
+            .vscrollbar_policy(gtk::PolicyType::Never)
+            .propagate_natural_height(true)
             .child(&file_list)
             .build();
 
@@ -117,8 +122,10 @@ impl FileTree {
             collapsed: Rc::new(RefCell::new(HashSet::new())),
             clipboard: Rc::new(RefCell::new(None)),
             git_statuses: Rc::new(RefCell::new(HashMap::new())),
-            folder_icon: Image::from_resource("/org/gtk_rs/rhymr/icons/folder.svg").paintable(),
-            file_icon: Image::from_resource("/org/gtk_rs/rhymr/icons/note-active.svg").paintable(),
+            ignored: Rc::new(RefCell::new(HashSet::new())),
+            folder_icon: crate::app::icons::paintable("folder"),
+            file_icon: crate::app::icons::paintable("file"),
+            json_icon: crate::app::icons::paintable("json"),
         };
 
         // F2/Delete/Cut/Copy/Paste for the selected row (see tree_menu.rs)
@@ -175,11 +182,13 @@ impl FileTree {
             return;
         };
 
-        let mut git_statuses = if root.join(".git").is_dir() {
-            crate::git::ops::GitController::new(&root).file_statuses()
+        let (mut git_statuses, ignored) = if root.join(".git").is_dir() {
+            let git = crate::git::ops::GitController::new(&root);
+            (git.file_statuses(), git.ignored_paths())
         } else {
-            HashMap::new()
+            (HashMap::new(), HashSet::new())
         };
+        self.ignored.replace(ignored);
 
         // Propagate each file's status up to every ancestor folder (and the
         // root itself), keeping the highest-priority one where several
@@ -221,6 +230,27 @@ impl FileTree {
                 self.entries.borrow_mut().push((path, is_dir));
             }
         }
+    }
+
+    /// Whether `path` is git-ignored, directly or via an ignored ancestor
+    /// directory (git reports one entry per ignored dir, not its contents).
+    fn is_ignored(&self, path: &Path) -> bool {
+        let ignored = self.ignored.borrow();
+        if ignored.is_empty() {
+            return false;
+        }
+        let root = self.root_path.borrow().clone();
+        let mut cur = Some(path);
+        while let Some(p) = cur {
+            if ignored.contains(p) {
+                return true;
+            }
+            if root.as_deref() == Some(p) {
+                break;
+            }
+            cur = p.parent();
+        }
+        false
     }
 
     /// Highlight the row backing `path`, if it is currently shown.
@@ -277,7 +307,7 @@ impl FileTree {
             hbox.append(&chevron);
 
             let icon = Image::from_paintable(self.folder_icon.as_ref());
-            icon.set_pixel_size(14);
+            icon.set_pixel_size(16);
             icon.set_css_classes(&["file-icon"]);
             hbox.append(&icon);
 
@@ -303,16 +333,35 @@ impl FileTree {
                 .map(|w| w.open_files.borrow().iter().any(|p| p == path))
                 .unwrap_or(false);
 
-            let chevron = Label::new(if is_open { Some("\u{25CA}") } else { None });
-            chevron.set_css_classes(if is_open {
-                &["dir-chevron", "active-chevron"]
-            } else {
-                &["dir-chevron"]
-            });
+            // Open-file dot: a solid circle, white when the file is merely
+            // open, otherwise following the file's VCS colour (orange
+            // modified, etc.) — same classes as the name label below.
+            let chevron = Label::new(if is_open { Some("\u{25CF}") } else { None });
+            let mut chevron_classes = vec!["dir-chevron"];
+            if is_open {
+                chevron_classes.push("active-chevron");
+                match git_status {
+                    Some(GitFileStatus::New) => chevron_classes.push("file-new"),
+                    Some(GitFileStatus::Renamed) => chevron_classes.push("file-renamed"),
+                    Some(GitFileStatus::Modified) => chevron_classes.push("file-modified"),
+                    None => {}
+                }
+            }
+            chevron.set_css_classes(&chevron_classes);
             hbox.append(&chevron);
 
-            let icon = Image::from_paintable(self.file_icon.as_ref());
-            icon.set_pixel_size(14);
+            // Per-extension leaf icon (just JSON for now — the `.rhymr/`
+            // config/cache files); everything else is the generic file glyph.
+            let leaf_icon = if path
+                .extension()
+                .is_some_and(|e| e.eq_ignore_ascii_case("json"))
+            {
+                self.json_icon.as_ref()
+            } else {
+                self.file_icon.as_ref()
+            };
+            let icon = Image::from_paintable(leaf_icon);
+            icon.set_pixel_size(16);
             icon.set_css_classes(&["file-icon"]);
             hbox.append(&icon);
 
@@ -329,6 +378,12 @@ impl FileTree {
             hbox.append(&label);
             label
         };
+
+        // Git-ignored entries (and anything under an ignored dir) go
+        // goldenrod, JetBrains-style — but not the workspace root itself.
+        if !is_root && self.is_ignored(path) {
+            name_label.add_css_class("file-ignored");
+        }
 
         if is_root && let Some(path_str) = path.to_str() {
             let path_label = Label::new(Some(path_str));

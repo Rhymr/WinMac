@@ -10,19 +10,30 @@
     background-color: var(--bg-dark);
 }
 
-.welcome-settings-button {
+/* Borderless search field in the top bar — just the magnifier + placeholder,
+   flowing into the row, like the JetBrains welcome window. */
+.welcome-content searchentry {
     background: none;
     border: none;
-    padding: 4px 8px;
-    font-size: 20px;
+    box-shadow: none;
+    padding: 2px 0;
 
-    &:hover {
-        background-color: var(--bg-hover);
+    & > text {
+        background: none;
     }
+}
 
-    &:active {
-        background-color: var(--button-active);
-    }
+/* Bottom-of-sidebar Configure / Help dropdowns. They ride the shared
+   `.app-dropdown` trigger style (context_menu.scss) — flat label + chevron,
+   with a hover background. Only the resting text colour is bumped here so
+   it reads on the sidebar's darkest surface. */
+.welcome-sidebar-footer {
+    background: none;
+    border-top: 1px solid var(--border-dark);
+}
+
+.welcome-sidebar-footer .app-dropdown > button {
+    color: var(--text-dim);
 }
 
 .brand-box {
@@ -45,7 +56,7 @@
 .sidebar-nav {
     background-color: transparent;
 
-    @include list-row-hover-select(var(--bg-hover), var(--selection-bg), var(--radius-md), $force-fg: true);
+    @include list-row-hover-select(var(--bg-hover), var(--selection-bg), $force-fg: true);
 
     & label {
         background-color: inherit;
@@ -55,15 +66,16 @@
 .recent-projects-list {
     background-color: transparent;
 
-    @include list-row-hover-select(var(--bg-light), var(--selection-bg), 8px, $force-fg: true);
+    @include list-row-hover-select(var(--bg-hover), var(--selection-bg), $force-fg: true);
 
+    /* Rows are flush with the pane — no card background, just the
+       hover/selection wash from the mixin above. */
     & > row {
-        background-color: var(--bg-mid);
-        margin-bottom: 6px;
+        background-color: transparent;
     }
 
     & box {
-        background-color: inherit;
+        background-color: transparent;
     }
 }
 
@@ -74,7 +86,7 @@ checkbutton {
         min-width: 16px;
         min-height: 16px;
         border: 1px solid var(--border-light);
-        border-radius: 4px;
+        border-radius: var(--radius-sm);
         background-color: var(--bg-mid);
 
         &:checked {
@@ -97,7 +109,7 @@ checkbutton {
 .project-menu-button {
     background: transparent;
     border: none;
-    border-radius: 6px;
+    border-radius: 0;
     min-width: 24px;
     min-height: 24px;
     padding: 0 6px;
@@ -112,7 +124,7 @@ checkbutton {
 .project-avatar {
     background-color: var(--selection-bg);
     color: var(--selection-fg);
-    border-radius: 6px;
+    border-radius: 0;
     font-weight: bold;
 }
 

@@ -9,17 +9,13 @@ use crate::file::tree::FileTree;
 use controller::WorkspaceController;
 use gtk::prelude::*;
 use gtk::{
-    Box, Button, EventSequenceState, Frame, GestureClick, Image, Label, Notebook, TextBuffer,
-    TextView, Widget, Window, gdk, pango,
+    Box, Button, EventSequenceState, Frame, GestureClick, Label, Notebook, TextBuffer, TextView,
+    Widget, Window, gdk,
 };
 use std::cell::RefCell;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
-
-/// Same file icon the file tree uses for an "open" row — reused here so a
-/// tab's icon matches what the user sees in the tree.
-const TAB_ICON_RESOURCE: &str = "/org/gtk_rs/rhymr/icons/note-active.svg";
 
 pub struct Workspace {
     frame: Frame,
@@ -35,27 +31,17 @@ pub struct Workspace {
 
 impl Workspace {
     pub fn new(controller: Rc<WorkspaceController>, file_tree: Option<FileTree>) -> Self {
-        // Starts non-scrollable: GTK only ever shrinks tab allocations
-        // toward their ellipsized minimum (rather than growing the window)
-        // when scrolling is off — with it on, tabs stay at full width and
-        // overflow behind scroll arrows instead. `adapt_tab_display` (see
-        // its tick callback below) is what turns scrolling back on, but
-        // only once every tab has already been squeezed down to icon-only
-        // and *still* doesn't fit — the last resort, not the first one.
+        // Scrollable: when the open tabs don't fit, each tab's label
+        // ellipsizes toward its `width_chars` minimum (see
+        // `build_tab_widget`) and only once even those minimums overflow
+        // does the header hand off to paging arrows — JetBrains-style. No
+        // per-frame relayout: the label's own min/natural sizing does the
+        // shrinking.
         let notebook = Notebook::builder()
-            .scrollable(false)
+            .scrollable(true)
             .show_border(false)
             .css_classes(vec!["workspace-notebook"])
             .build();
-
-        // Keeps the tab strip from ever pushing the window wider: every
-        // frame, shrink open tabs toward icon-only before falling back to
-        // paging arrows, rather than letting the header just demand more
-        // width than it's been given.
-        notebook.add_tick_callback(|notebook, _clock| {
-            adapt_tab_display(notebook);
-            glib::ControlFlow::Continue
-        });
 
         let open_files = Rc::new(RefCell::new(Vec::new()));
 
@@ -78,10 +64,13 @@ impl Workspace {
             notebook.set_show_tabs(false);
         }
 
-        // Keep the status bar's word count pointed at whichever tab is active.
+        // Keep the status bar's word count + caret readout pointed at
+        // whichever tab is active.
         let controller_for_switch = workspace.controller.clone();
         notebook.connect_switch_page(move |_, _, _| {
             controller_for_switch.refresh_word_count();
+            controller_for_switch.refresh_cursor();
+            controller_for_switch.refresh_nav();
         });
 
         workspace
@@ -119,6 +108,7 @@ impl Workspace {
         self.notebook.add_css_class("has-open-files");
 
         self.controller.refresh_word_count();
+        self.controller.refresh_nav();
 
         page_num
     }
@@ -137,6 +127,52 @@ impl Workspace {
 
         if let Ok(content) = fs::read_to_string(&path) {
             self.add_new_tab(&path, &content);
+        }
+    }
+
+    /// Open an external-source document (Apple Notes, …) in a **read-only**
+    /// tab. The body is staged to a temp file so the existing tab / editor
+    /// machinery can be reused unchanged; the editor is then locked so it
+    /// can't be typed into and never autosaves.
+    pub fn open_readonly(&self, title: &str, body: &str) {
+        let mut dir = std::env::temp_dir();
+        dir.push("rhymr-external");
+        if fs::create_dir_all(&dir).is_err() {
+            return;
+        }
+        let safe: String = title
+            .chars()
+            .map(|c| {
+                if matches!(c, '/' | ':' | '\\') {
+                    '_'
+                } else {
+                    c
+                }
+            })
+            .collect();
+        let path = dir.join(format!("{safe}.txt"));
+        if fs::write(&path, body).is_err() {
+            return;
+        }
+
+        self.open_path(path.clone());
+
+        let index = self.open_files.borrow().iter().position(|p| p == &path);
+        if let Some(index) = index {
+            if let Some(editor) = self.text_editors.borrow().get(index) {
+                editor.set_editable(false);
+            }
+            // Swap the tab's icon for the read-only "documentation" glyph.
+            if let Some(page) = self.notebook.nth_page(Some(index as u32))
+                && let Some(tab) = self.notebook.tab_label(&page)
+                && let Ok(tab_box) = tab.downcast::<Box>()
+                && let Some(old_icon) = tab_box.first_child()
+            {
+                let icon = crate::app::icons::img("usage-documentation", 16);
+                icon.set_css_classes(&["tab-icon"]);
+                tab_box.remove(&old_icon);
+                tab_box.prepend(&icon);
+            }
         }
     }
 
@@ -526,13 +562,11 @@ fn add_new_tab(
 
     // `tab_expand(false)`: without it, GTK stretches each tab to fill any
     // leftover header width (and centers the row while it's at it) — pin
-    // every tab to its own size instead, so the strip stays left aligned.
-    // `tab_fill` is deliberately left at its default (true): that's what
-    // lets a tab size to its full natural (un-ellipsized) width when
-    // there's room, only shrinking toward the label's ellipsized minimum
-    // once the open tabs collectively overflow the header — setting it
-    // false here instead made every tab render at minimum width always,
-    // collapsing names even with plenty of space free.
+    // every tab to its own size instead, so the strip stays left aligned,
+    // JetBrains-style, with a plain empty band after the last tab.
+    // `tab_fill` stays at its default (true): a tab sizes to its full
+    // natural width when there's room and ellipsizes toward the label's
+    // `width_chars` minimum once the strip is crowded (`scrollable(true)`).
     let page = notebook.page(&page_widget);
     page.set_tab_expand(false);
 
@@ -547,6 +581,23 @@ fn add_new_tab(
             }
         });
 
+        let notebook_for_cursor = notebook.clone();
+        let controller_for_cursor = controller.clone();
+        text_editor.connect_cursor_notify(move || {
+            if notebook_for_cursor.current_page() == Some(page_num) {
+                controller_for_cursor.refresh_cursor();
+            }
+        });
+
+        // Active tab's selection seeds the Rhyme Search box (when it's open).
+        let notebook_for_sel = notebook.clone();
+        let controller_for_sel = controller.clone();
+        text_editor.connect_selection_notify(move |word| {
+            if notebook_for_sel.current_page() == Some(page_num) {
+                controller_for_sel.notify_selection(word);
+            }
+        });
+
         wire_tab_close_button(&close_button, &controller);
         wire_tab_context_menu(&tab_box, notebook, &page_widget, &controller, path);
     }
@@ -558,6 +609,23 @@ fn add_new_tab(
     (page_num, text_editor)
 }
 
+/// Longest a tab name is shown before it's cut with an ellipsis.
+const MAX_TAB_CHARS: usize = 18;
+
+/// Cap a tab name at [`MAX_TAB_CHARS`], breaking on the last word boundary
+/// within the limit where there is one so a title doesn't cut mid-word.
+fn truncate_tab_name(name: &str) -> String {
+    if name.chars().count() <= MAX_TAB_CHARS {
+        return name.to_string();
+    }
+    let head: String = name.chars().take(MAX_TAB_CHARS).collect();
+    let cut = match head.rfind(' ') {
+        Some(sp) if sp >= MAX_TAB_CHARS / 2 => &head[..sp],
+        _ => head.trim_end(),
+    };
+    format!("{}\u{2026}", cut.trim_end())
+}
+
 /// Icon + truncated label + close button for one tab — shared by the
 /// initial tab creation and by rename/Save As updates (`set_tab_label`) so
 /// both build an identical widget.
@@ -566,16 +634,17 @@ fn build_tab_widget(path: &Path) -> (Box, Button) {
     let tab_box = Box::builder()
         .orientation(gtk::Orientation::Horizontal)
         .css_classes(vec!["tab-box"])
-        .spacing(4)
-        // Read regardless of label visibility, so a tab shrunk down to
-        // icon-only (see `adapt_tab_display`) still identifies itself on
-        // hover.
+        // Even gap between icon, name and × — the tab's own left/right
+        // padding (notebook.scss) matches it so the whole tab reads evenly.
+        .spacing(6)
+        // Shown on hover so a truncated name still identifies itself.
         .tooltip_text(display_path)
         .build();
 
-    let icon = Image::from_resource(TAB_ICON_RESOURCE);
+    // Same file icon the file tree uses for an "open" row, so a tab's icon
+    // matches what the user sees in the tree.
+    let icon = crate::app::icons::img("file", 16);
     icon.set_css_classes(&["tab-icon"]);
-    icon.set_pixel_size(14);
 
     let display_name = path
         .file_name()
@@ -583,136 +652,38 @@ fn build_tab_widget(path: &Path) -> (Box, Button) {
         .map(crate::file::tree::strip_txt_extension)
         .unwrap_or("Untitled");
 
-    let label = Label::new(Some(display_name));
+    // Tabs size to their content, capped at MAX_TAB_CHARS. A plain
+    // non-ellipsizing label makes min == natural == text width, so
+    // GtkNotebook (which allocates non-expand tabs their minimum) still
+    // shows the whole name; the cap is applied here in Rust rather than via
+    // Pango ellipsize, whose "natural width" would collapse to just "…".
+    // The full name is always on the tab's tooltip.
+    let shown_name = truncate_tab_name(display_name);
+
+    let label = Label::new(Some(&shown_name));
     label.set_css_classes(&["tab-label"]);
-    label.set_ellipsize(pango::EllipsizeMode::End);
-    // A `Label` with ellipsize on but no explicit width hint requests only
-    // its *minimum* size (just enough for "…") as its natural size too —
-    // there's otherwise no basis for GTK to know it should ask for more.
-    // `max_width_chars` gives it a generous natural-size ceiling instead
-    // (comfortably past any real filename, so a tab shows its full name by
-    // default), while `width_chars` sets the actual minimum it can shrink
-    // down toward once the open tabs don't all fit — see
-    // `Notebook::scrollable(false)` in `Workspace::new`.
-    label.set_width_chars(4);
-    label.set_max_width_chars(40);
     label.set_halign(gtk::Align::Start);
+    label.set_xalign(0.0);
 
     // Visibility is handled entirely by CSS (`tab:checked`/`tab:hover` in
     // notebook.scss) rather than tracked here — GTK's own `:checked` state
     // on the tab is always correct, unlike hand-rolled bookkeeping that has
     // to be re-run on every switch/add/remove and is easy to miss a spot on.
+    // A bare red "×" (JetBrains-style) — a plain label, so no circular
+    // symbolic-icon backdrop.
     let close_button = Button::builder()
-        .icon_name("window-close-symbolic")
         .css_classes(vec!["tab-close-button"])
         .build();
+    close_button.set_child(Some(&Label::new(Some("\u{2715}"))));
 
+    // Explicit non-expand so GtkNotebook never stretches a tab past its
+    // content width.
+    tab_box.set_hexpand(false);
     tab_box.append(&icon);
     tab_box.append(&label);
     tab_box.append(&close_button);
 
     (tab_box, close_button)
-}
-
-/// Keeps the open tabs from ever forcing the notebook (and so the window)
-/// wider than it already is. Run every frame from a tick callback (GTK
-/// gives no resize/allocation-changed signal for a stock widget we haven't
-/// subclassed, and this needs to react to both window resizes and tabs
-/// being added/removed) it re-measures every tab and picks the least
-/// cramped of three tiers that still fits:
-///
-/// 1. Full labels — every tab at its natural (un-ellipsized) width.
-/// 2. Ellipsized labels — GTK's own min/natural shrink already handles
-///    this; no help needed from here.
-/// 3. Icon-only — labels hidden entirely.
-///
-/// Only once even icon-only tabs collectively don't fit does it fall back
-/// to paging arrows (`scrollable`), so the header hands off to those
-/// rather than to a wider window.
-fn adapt_tab_display(notebook: &Notebook) {
-    let available = notebook.width() - 16;
-    if available <= 0 {
-        return;
-    }
-
-    let mut tab_widgets = Vec::new();
-    let mut labels = Vec::new();
-
-    for i in 0..notebook.n_pages() {
-        let Some(page) = notebook.nth_page(Some(i)) else {
-            continue;
-        };
-        // No tab label at all on the empty-state placeholder page.
-        let Some(tab_widget) = notebook.tab_label(&page) else {
-            continue;
-        };
-        let Some(label) = tab_widget
-            .first_child()
-            .and_then(|icon| icon.next_sibling())
-            .and_then(|w| w.downcast::<Label>().ok())
-        else {
-            continue;
-        };
-        tab_widgets.push(tab_widget);
-        labels.push(label);
-    }
-
-    if labels.is_empty() {
-        return;
-    }
-
-    // Always measure as if every label were visible first, regardless of
-    // whatever state they're currently in. Measuring a tab whose label is
-    // *already* hidden would report its "full" width as just the
-    // icon/close-button footprint (a hidden child contributes ~nothing to
-    // its box's size) — nowhere near what showing it back would actually
-    // need — and the strip would flip back to full labels next frame, only
-    // to immediately re-collapse the frame after that: an infinite
-    // show/hide oscillation, which is what tabs visibly flying off to the
-    // right turned out to be. Toggling visible→hidden synchronously within
-    // this same callback, before layout/paint for this frame happens,
-    // doesn't flicker — only the final state at the end of this function
-    // is ever actually drawn.
-    for label in &labels {
-        if !label.is_visible() {
-            label.set_visible(true);
-        }
-    }
-
-    let mut full_natural_total = 0;
-    let mut min_total = 0;
-    for tab_widget in &tab_widgets {
-        let (min_w, natural_w, _, _) = tab_widget.measure(gtk::Orientation::Horizontal, -1);
-        full_natural_total += natural_w;
-        min_total += min_w;
-    }
-
-    if full_natural_total <= available || min_total <= available {
-        // Labels are already visible from the measurement pass above.
-        if notebook.is_scrollable() {
-            notebook.set_scrollable(false);
-        }
-        return;
-    }
-
-    for label in &labels {
-        label.set_visible(false);
-    }
-
-    // Real re-measurement now that labels are actually hidden, rather than
-    // the fixed `TAB_ICON_ONLY_WIDTH_ESTIMATE` guess this used to compare
-    // against — any mismatch between an estimate and each tab's genuine
-    // icon-only footprint (padding/border/margin from notebook.scss) could
-    // leave tabs overflowing uncontained, since a non-scrollable notebook
-    // doesn't clip its header.
-    let icon_only_total: i32 = tab_widgets
-        .iter()
-        .map(|w| w.measure(gtk::Orientation::Horizontal, -1).1)
-        .sum();
-    let need_scrolling = icon_only_total > available;
-    if notebook.is_scrollable() != need_scrolling {
-        notebook.set_scrollable(need_scrolling);
-    }
 }
 
 fn wire_tab_close_button(close_button: &Button, controller: &Rc<WorkspaceController>) {
@@ -755,17 +726,20 @@ fn wire_tab_context_menu(
         let index = index as usize;
         let tab_count = notebook.n_pages() as usize;
 
-        let menu = ContextMenu::new(&tab_box_for_popup);
+        // Parent the popover to the notebook, not the tab's own box: a
+        // popover parented into the horizontal `tab_box` gets counted by
+        // `GtkBox::measure` and visibly balloons the tab while open.
+        let menu = ContextMenu::new(&notebook);
 
         let c = controller.clone();
-        menu.add_item("Close", None, None, move || {
+        menu.add_item(None, "Close", None, None, move || {
             if let Some(ws) = c.get_workspace() {
                 ws.close_tab_at(index);
             }
         });
 
         let c = controller.clone();
-        let other_btn = menu.add_item("Close Other Tabs", None, None, move || {
+        let other_btn = menu.add_item(None, "Close Other Tabs", None, None, move || {
             if let Some(ws) = c.get_workspace() {
                 ws.close_other_tabs(index);
             }
@@ -773,7 +747,7 @@ fn wire_tab_context_menu(
         other_btn.set_sensitive(tab_count > 1);
 
         let c = controller.clone();
-        menu.add_item("Close All Tabs", None, None, move || {
+        menu.add_item(None, "Close All Tabs", None, None, move || {
             if let Some(ws) = c.get_workspace() {
                 ws.close_all_tabs();
             }
@@ -784,7 +758,7 @@ fn wire_tab_context_menu(
             .get_workspace()
             .map(|ws| ws.any_unmodified_tabs())
             .unwrap_or(false);
-        let unmodified_btn = menu.add_item("Close Unmodified Tabs", None, None, move || {
+        let unmodified_btn = menu.add_item(None, "Close Unmodified Tabs", None, None, move || {
             if let Some(ws) = c.get_workspace() {
                 ws.close_unmodified_tabs();
             }
@@ -792,7 +766,7 @@ fn wire_tab_context_menu(
         unmodified_btn.set_sensitive(any_unmodified);
 
         let c = controller.clone();
-        let left_btn = menu.add_item("Close Tabs to the Left", None, None, move || {
+        let left_btn = menu.add_item(None, "Close Tabs to the Left", None, None, move || {
             if let Some(ws) = c.get_workspace() {
                 ws.close_tabs_to_left(index);
             }
@@ -803,7 +777,7 @@ fn wire_tab_context_menu(
 
         let widget_for_clipboard = tab_box_for_popup.clone();
         let path_for_copy = path.clone();
-        menu.add_item("Copy Path/Reference...", None, None, move || {
+        menu.add_item(None, "Copy Path/Reference...", None, None, move || {
             widget_for_clipboard
                 .clipboard()
                 .set_text(&path_for_copy.to_string_lossy());
@@ -817,12 +791,17 @@ fn wire_tab_context_menu(
 
 /// Descend from a notebook page's root widget to its actual TextView
 /// (SourceView, which extends TextView). A tab page is
-/// `Frame -> ScrolledWindow -> SourceView` (see TextEditor) — this needs
-/// *two* `first_child()` hops, not one, since the ScrolledWindow itself
-/// obviously isn't a TextView.
+/// `Frame -> Overlay -> ScrolledWindow -> SourceView` (see TextEditor);
+/// walk `first_child()` until a TextView turns up rather than hard-coding
+/// the hop count.
 fn text_view_for_page(page: &gtk::Widget) -> Option<TextView> {
-    page.first_child()?
-        .first_child()?
-        .downcast::<TextView>()
-        .ok()
+    let mut widget = page.first_child();
+    for _ in 0..6 {
+        let current = widget?;
+        if let Ok(view) = current.clone().downcast::<TextView>() {
+            return Some(view);
+        }
+        widget = current.first_child();
+    }
+    None
 }

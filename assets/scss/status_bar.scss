@@ -1,13 +1,23 @@
-/* Status bar styling */
+/* Status bar styling — classic segmented strip: compact, each segment
+   fenced off from the next by a 1px rule. */
 .status-bar {
     background-color: var(--bg-dark);
     border-top: 1px solid var(--border-dark);
-    min-height: 24px;
-    padding: 0 8px 2px;
+    min-height: 22px;
+    padding: 0 4px;
 }
 
 .status-text {
     color: var(--text-dim);
-    font-size: 12px;
-    padding: 4px 0;
+    font-size: 11px;
+    padding: 2px 8px;
+}
+
+/* Right-hand info segments (branch, caret position, word count) — each
+   fenced from its neighbour by a 1px rule, classic status-bar style. */
+.status-segment {
+    color: var(--text-dim);
+    font-size: 11px;
+    padding: 2px 8px;
+    border-left: 1px solid var(--border-dark);
 } 

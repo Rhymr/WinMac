@@ -7,14 +7,38 @@ use std::fs;
 use std::path::PathBuf;
 use std::rc::Rc;
 
-/// Boxed word-count callback — factored out purely to keep the field
-/// declaration under clippy's type-complexity threshold.
+/// Boxed status-bar callbacks — factored out purely to keep the field
+/// declarations under clippy's type-complexity threshold.
 type WordCountListener = RefCell<Option<Box<dyn Fn(u32)>>>;
+type CursorListener = RefCell<Option<Box<dyn Fn(i32, i32)>>>;
+type BranchListener = RefCell<Option<Box<dyn Fn(Option<String>)>>>;
+type NavListener = RefCell<Option<Box<dyn Fn(Vec<String>)>>>;
+type GitListener = RefCell<Option<Box<dyn Fn(GitAvailability)>>>;
+type RootListener = RefCell<Option<Box<dyn Fn(Option<PathBuf>)>>>;
+type SelectionListener = RefCell<Option<Box<dyn Fn(Option<String>)>>>;
+
+/// What git actions the loaded workspace supports — drives the toolbar's
+/// Git group (see `crate::app::chrome::main_toolbar`).
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum GitAvailability {
+    /// Not a git repository — no git actions.
+    None,
+    /// A repository with no `origin` remote — local actions only (commit).
+    LocalOnly,
+    /// A repository with an `origin` remote — every git action.
+    Full,
+}
 
 pub struct WorkspaceController {
     pub(crate) workspace: RefCell<Option<Rc<Workspace>>>,
     root_path: RefCell<Option<PathBuf>>,
     word_count_listener: WordCountListener,
+    cursor_listener: CursorListener,
+    branch_listener: BranchListener,
+    nav_listener: NavListener,
+    git_listener: GitListener,
+    root_listener: RootListener,
+    selection_listener: SelectionListener,
 }
 
 impl Default for WorkspaceController {
@@ -29,6 +53,12 @@ impl WorkspaceController {
             workspace: RefCell::new(None),
             root_path: RefCell::new(None),
             word_count_listener: RefCell::new(None),
+            cursor_listener: RefCell::new(None),
+            branch_listener: RefCell::new(None),
+            nav_listener: RefCell::new(None),
+            git_listener: RefCell::new(None),
+            root_listener: RefCell::new(None),
+            selection_listener: RefCell::new(None),
         }
     }
 
@@ -54,10 +84,145 @@ impl WorkspaceController {
         }
     }
 
+    /// Subscribe to the active tab's caret position (1-based line, column).
+    pub fn set_cursor_listener(&self, listener: impl Fn(i32, i32) + 'static) {
+        self.cursor_listener.replace(Some(Box::new(listener)));
+    }
+
+    /// Subscribe to the active tab's selection — `Some(word)` when exactly
+    /// one word is selected. Wired to the Rhyme Search box.
+    pub fn set_selection_listener(&self, listener: impl Fn(Option<String>) + 'static) {
+        self.selection_listener.replace(Some(Box::new(listener)));
+    }
+
+    /// Forward a selection change from the active tab to the listener.
+    pub fn notify_selection(&self, word: Option<String>) {
+        if let Some(listener) = self.selection_listener.borrow().as_ref() {
+            listener(word);
+        }
+    }
+
+    /// Recompute the active tab's caret position and notify the listener.
+    pub fn refresh_cursor(&self) {
+        let (line, col) = self
+            .get_workspace()
+            .and_then(|workspace| workspace.get_current_buffer())
+            .map(|(buffer, _)| {
+                let iter = buffer.iter_at_offset(buffer.cursor_position());
+                (iter.line() + 1, iter.line_offset() + 1)
+            })
+            .unwrap_or((1, 1));
+
+        if let Some(listener) = self.cursor_listener.borrow().as_ref() {
+            listener(line, col);
+        }
+    }
+
+    /// Subscribe to the workspace's current git branch (`None` = detached /
+    /// not a repo).
+    pub fn set_branch_listener(&self, listener: impl Fn(Option<String>) + 'static) {
+        self.branch_listener.replace(Some(Box::new(listener)));
+    }
+
+    /// Re-read the current branch name and notify the listener.
+    pub fn refresh_branch(&self) {
+        let branch = self.root_path.borrow().as_ref().and_then(|root| {
+            if root.join(".git").is_dir() {
+                crate::git::ops::GitController::new(root).current_branch_name()
+            } else {
+                None
+            }
+        });
+
+        if let Some(listener) = self.branch_listener.borrow().as_ref() {
+            listener(branch);
+        }
+    }
+
+    /// Subscribe to whether the workspace supports git actions — notified
+    /// on every `set_root_path`.
+    pub fn set_git_listener(&self, listener: impl Fn(GitAvailability) + 'static) {
+        self.git_listener.replace(Some(Box::new(listener)));
+    }
+
+    /// Re-derive git availability from the workspace root and notify the
+    /// listener.
+    pub fn refresh_git_availability(&self) {
+        let availability = match self.root_path.borrow().as_ref() {
+            Some(root) if root.join(".git").is_dir() => {
+                if crate::git::ops::GitController::new(root).has_remote("origin") {
+                    GitAvailability::Full
+                } else {
+                    GitAvailability::LocalOnly
+                }
+            }
+            _ => GitAvailability::None,
+        };
+
+        if let Some(listener) = self.git_listener.borrow().as_ref() {
+            listener(availability);
+        }
+    }
+
+    /// Subscribe to the active tab's location as breadcrumb segments
+    /// (`["src", "app", "main.rs"]`) — empty when no file is open.
+    pub fn set_nav_listener(&self, listener: impl Fn(Vec<String>) + 'static) {
+        self.nav_listener.replace(Some(Box::new(listener)));
+    }
+
+    /// Recompute the active tab's breadcrumb and notify the listener. The
+    /// workspace folder is always the first segment (when a workspace is
+    /// loaded); the rest are the active file's path relative to it.
+    pub fn refresh_nav(&self) {
+        let mut segments: Vec<String> = self
+            .root_path
+            .borrow()
+            .as_ref()
+            .and_then(|root| root.file_name().map(|n| n.to_string_lossy().into_owned()))
+            .into_iter()
+            .collect();
+
+        if let Some(path) = self
+            .get_workspace()
+            .and_then(|w| w.get_current_buffer())
+            .and_then(|(_, path)| path)
+        {
+            // A file outside the workspace (an opened external file, or a
+            // read-only source document staged to a temp file) shows just
+            // its name, not its whole absolute path.
+            let rel = self
+                .root_path
+                .borrow()
+                .as_ref()
+                .and_then(|root| path.strip_prefix(root).ok().map(PathBuf::from))
+                .unwrap_or_else(|| PathBuf::from(path.file_name().unwrap_or(path.as_os_str())));
+            let mut segs: Vec<String> = rel
+                .components()
+                .map(|c| c.as_os_str().to_string_lossy().into_owned())
+                .collect();
+            // Match the tab label — hide the implied `.txt`.
+            if let Some(last) = segs.last_mut()
+                && let Some(stripped) = last.strip_suffix(".txt")
+            {
+                *last = stripped.to_string();
+            }
+            segments.extend(segs);
+        }
+
+        if let Some(listener) = self.nav_listener.borrow().as_ref() {
+            listener(segments);
+        }
+    }
+
     /// Live-apply `settings` to every open tab, if a workspace is loaded.
     pub fn apply_settings(&self, settings: &crate::setting::Settings) {
         if let Some(workspace) = self.get_workspace() {
             workspace.apply_settings_to_open_tabs(settings);
+        }
+        // Re-notify the root listener so the external-sources panel picks
+        // up a changed Apple Notes cache scope (workspace vs user).
+        if let Some(listener) = self.root_listener.borrow().as_ref() {
+            listener(self.root_path.borrow().clone());
         }
     }
 
@@ -70,13 +235,25 @@ impl WorkspaceController {
         self.workspace.borrow().clone()
     }
 
+    /// Subscribe to the loaded workspace folder — notified on every
+    /// `set_root_path`. The external-sources panel uses this to point its
+    /// per-workspace cache at the new project's `.rhymr/`.
+    pub fn set_root_listener(&self, listener: impl Fn(Option<PathBuf>) + 'static) {
+        self.root_listener.replace(Some(Box::new(listener)));
+    }
+
     /// Point the file tree at the loaded workspace folder.
     pub fn set_root_path(&self, path: PathBuf) {
         self.root_path.replace(Some(path.clone()));
         if let Some(workspace) = self.get_workspace()
             && let Some(ref file_tree) = workspace.file_tree
         {
-            file_tree.set_root_path(path);
+            file_tree.set_root_path(path.clone());
+        }
+        self.refresh_branch();
+        self.refresh_git_availability();
+        if let Some(listener) = self.root_listener.borrow().as_ref() {
+            listener(Some(path));
         }
     }
 

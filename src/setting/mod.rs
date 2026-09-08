@@ -29,12 +29,67 @@ impl Theme {
     }
 }
 
+/// Which bundled icon set to draw the UI with (see `crate::app::icons`).
+/// `Color` is the JetBrains "NetIcons" colour set; `Monochrome` is the flat
+/// grey set, which then tracks [`Theme`] (dark greys vs light greys).
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum IconTheme {
+    Color,
+    Monochrome,
+}
+
+impl IconTheme {
+    fn as_str(self) -> &'static str {
+        match self {
+            IconTheme::Color => "color",
+            IconTheme::Monochrome => "monochrome",
+        }
+    }
+
+    fn parse(s: &str) -> Option<Self> {
+        match s {
+            "color" => Some(IconTheme::Color),
+            "monochrome" => Some(IconTheme::Monochrome),
+            _ => None,
+        }
+    }
+}
+
+/// Where the Apple Notes snapshot cache is stored (see
+/// `crate::source::apple_notes`).
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum NotesCacheScope {
+    /// `<workspace>/.rhymr/apple-notes.json` — per project.
+    Workspace,
+    /// `<config dir>/rhymr/apple-notes.json` — one copy shared by every
+    /// workspace.
+    User,
+}
+
+impl NotesCacheScope {
+    fn as_str(self) -> &'static str {
+        match self {
+            NotesCacheScope::Workspace => "workspace",
+            NotesCacheScope::User => "user",
+        }
+    }
+
+    fn parse(s: &str) -> Option<Self> {
+        match s {
+            "workspace" => Some(NotesCacheScope::Workspace),
+            "user" => Some(NotesCacheScope::User),
+            _ => None,
+        }
+    }
+}
+
 /// User-configurable app behavior, persisted across launches. New
 /// `TextEditor`s read this at construction time — changing a setting takes
 /// effect for tabs opened afterward, not ones already open.
 #[derive(Clone, PartialEq)]
 pub struct Settings {
     pub show_syllable_gutter: bool,
+    pub show_vcs_gutter: bool,
     pub rhyme_highlighting: bool,
     /// Whether the rhyme highlighter treats a blank line as a stanza
     /// boundary it won't compare across, even if the other line is within
@@ -46,7 +101,9 @@ pub struct Settings {
     pub auto_indent: bool,
     pub tab_width: u32,
     pub git_autostage: bool,
+    pub notes_cache_scope: NotesCacheScope,
     pub theme: Theme,
+    pub icon_theme: IconTheme,
     pub font_family: String,
     pub font_size: u32,
 }
@@ -55,6 +112,7 @@ impl Default for Settings {
     fn default() -> Self {
         Self {
             show_syllable_gutter: true,
+            show_vcs_gutter: true,
             rhyme_highlighting: false,
             rhyme_stop_at_blank_line: true,
             // Off by default: dictionary-only completion misses most
@@ -64,7 +122,9 @@ impl Default for Settings {
             auto_indent: true,
             tab_width: 4,
             git_autostage: true,
+            notes_cache_scope: NotesCacheScope::Workspace,
             theme: Theme::Dark,
+            icon_theme: IconTheme::Color,
             // JetBrains Mono, 13px — matches the JetBrains IDE look the
             // rest of the app's styling is chasing. Falls back to whatever
             // Pango's normal font matching picks if it isn't installed
@@ -101,13 +161,21 @@ impl Settings {
             };
             match key {
                 "show_syllable_gutter" => settings.show_syllable_gutter = value == "true",
+                "show_vcs_gutter" => settings.show_vcs_gutter = value == "true",
                 "rhyme_highlighting" => settings.rhyme_highlighting = value == "true",
                 "rhyme_stop_at_blank_line" => settings.rhyme_stop_at_blank_line = value == "true",
                 "word_completion" => settings.word_completion = value == "true",
                 "auto_indent" => settings.auto_indent = value == "true",
                 "tab_width" => settings.tab_width = value.parse().unwrap_or(settings.tab_width),
                 "git_autostage" => settings.git_autostage = value == "true",
+                "notes_cache_scope" => {
+                    settings.notes_cache_scope =
+                        NotesCacheScope::parse(value).unwrap_or(settings.notes_cache_scope)
+                }
                 "theme" => settings.theme = Theme::parse(value).unwrap_or(settings.theme),
+                "icon_theme" => {
+                    settings.icon_theme = IconTheme::parse(value).unwrap_or(settings.icon_theme)
+                }
                 "font_family" if !value.is_empty() => settings.font_family = value.to_string(),
                 "font_size" => settings.font_size = value.parse().unwrap_or(settings.font_size),
                 _ => {}
@@ -125,15 +193,18 @@ impl Settings {
         // free-text field so a pasted font name can't corrupt the file.
         let font_family = self.font_family.replace(['\n', '\r'], "");
         let contents = format!(
-            "show_syllable_gutter={}\nrhyme_highlighting={}\nrhyme_stop_at_blank_line={}\nword_completion={}\nauto_indent={}\ntab_width={}\ngit_autostage={}\ntheme={}\nfont_family={}\nfont_size={}\n",
+            "show_syllable_gutter={}\nshow_vcs_gutter={}\nrhyme_highlighting={}\nrhyme_stop_at_blank_line={}\nword_completion={}\nauto_indent={}\ntab_width={}\ngit_autostage={}\nnotes_cache_scope={}\ntheme={}\nicon_theme={}\nfont_family={}\nfont_size={}\n",
             self.show_syllable_gutter,
+            self.show_vcs_gutter,
             self.rhyme_highlighting,
             self.rhyme_stop_at_blank_line,
             self.word_completion,
             self.auto_indent,
             self.tab_width,
             self.git_autostage,
+            self.notes_cache_scope.as_str(),
             self.theme.as_str(),
+            self.icon_theme.as_str(),
             font_family,
             self.font_size,
         );

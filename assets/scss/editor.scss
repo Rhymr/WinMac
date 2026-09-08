@@ -1,118 +1,115 @@
-/* Source view styling. Font family/size come from the app-wide `* {}` rule
-   in base.scss, but `SourceView::monospace(true)` (see editor/mod.rs) adds
-   GTK's built-in `.monospace` class, whose bundled theme rule pins
-   `font-family: Monospace` at the same selector specificity as `* {}` —
-   restated explicitly here so the app's own font setting always wins. */
+/* Source view styling.
+
+   Editor *colours* (text, background, current line, selection, gutter fg)
+   are owned entirely by the GtkSourceView style scheme — assets/styles/
+   rhymr.xml / rhymr-light.xml — NOT by CSS. Setting `color` / `background`
+   on the `text` node here fights the scheme and produces inconsistent
+   rendering, so this file only handles the font, spacing, and the gutter
+   renderer layout. */
 sourceview {
     background-color: var(--bg-darkest);
-    color: var(--text-dim);
     font-family: var(--app-font-family);
     font-size: var(--app-font-size);
     padding: 0;
     margin: 0;
 
     & text {
-        background-color: var(--bg-darkest);
-        color: var(--text-dim);
         font-family: var(--app-font-family);
         font-size: var(--app-font-size);
-        border: 1px solid var(--border-dark);
-
-        /* Both forms of "this text is selected" GTK exposes on a text
-           node — see base.scss's `selection`/`*:selected` comment for why
-           both are set rather than just one. */
-        &:selected {
-            background-color: var(--selection-bg);
-            color: var(--selection-fg);
-        }
-
-        & selection {
-            background-color: var(--selection-bg);
-            color: var(--selection-fg);
-        }
+        border: none;
     }
 }
 
-/* Gutter styling */
+/* Gutter — a shade off the editor background (JetBrains). Its column
+   spacing is kept tight so the line number, syllable count and VCS bar sit
+   close together. Colours come from the scheme, except the syllable count
+   which is forced green regardless of theme. */
 .rhyme-editor-gutter {
     padding: 0;
     margin: 0;
-    color: var(--text-muted);
     font-family: "Georgia", serif;
-    background-color: var(--bg-mid);
-
-    &:selected {
-        background-color: rgba(43, 82, 120, 0.4);
-    }
+    background-color: var(--gutter-bg);
+    /* the one vertical line in the editor area — between the gutter and the
+       text, JetBrains-style */
+    border-right: 1px solid var(--border-light);
 }
 
 .syllable-count {
-    color: var(--text-green);
+    color: var(--syllable-green);
     font-size: 10px;
     padding: 0;
-    margin-left: 6px;
-    margin-right: 8px;
-    background-color: var(--bg-mid);
-    font-family: monospace;
-    text-align: center;
-
-    &:selected {
-        background-color: rgba(43, 82, 120, 0.4);
-    }
+    margin-left: 3px;
+    margin-right: 3px;
+    background-color: var(--gutter-bg);
+    font-family: var(--app-font-family);
 }
 
 .line-numbers {
-    background-color: var(--bg-mid);
-    color: var(--text-number);
-    border-right: 1px solid var(--bg-darkest);
-    padding: 0;
+    background-color: var(--gutter-bg);
+    padding: 0 2px;
     margin: 0;
-    font-family: monospace;
-    text-align: center;
-
-    &:selected {
-        background-color: rgba(43, 82, 120, 0.4);
-    }
+    font-family: var(--app-font-family);
 
     & + .syllable-count {
-        margin-top: 4px;
+        margin-top: 0;
     }
 }
 
 .rhyme-editor {
-    line-height: 1.6;
-    border: 1px solid var(--border-dark);
+    border: none;
 }
 
-/* base.scss's `scrolledwindow`/`frame` rules already zero out
-   border/margin/padding — only the background genuinely needs overriding
-   here, to the editor's (darker) background rather than the app's. */
+/* Sticky line — the current stanza's first line pinned to the top of the
+   editor while you scroll inside it (JetBrains sticky-scroll analog). */
+.sticky-line {
+    background-color: var(--bg-darkest);
+    /* left inset (gutter width) is set per scroll tick in Rust;
+       `padding-left` here matches `.rhyme-editor-view textview text` so the
+       pinned text lines up with the editor's text column. */
+    padding: 1px 8px 2px 6px;
+    border-bottom: 1px solid var(--border-dark);
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.35);
+}
+
+.sticky-line-text {
+    color: var(--sticky-fg);
+    background: none;
+    font-family: var(--app-font-family);
+    font-size: var(--app-font-size);
+}
+
+/* VCS change bar column — painted in Rust (src/editor/vcs_gutter.rs),
+   rightmost in the gutter so the bar butts against the text. */
+.vcs-gutter {
+    padding: 0;
+    margin: 0 0 0 1px;
+    min-width: 4px;
+    background-color: var(--gutter-bg);
+}
+
 scrolledwindow {
     background-color: var(--bg-darkest);
+}
+
+/* The editor's scrollbar sits directly on the text — its trough takes the
+   editor background instead of the chrome's `--bg-dark` slab
+   (base.scss `scrollbar`). The slider keeps its own contrast. */
+.rhyme-editor-frame scrollbar,
+.rhyme-editor-frame scrollbar > range > trough {
+    background-color: var(--bg-darkest);
+    background-image: none;
+    border: none;
 }
 
 .rhyme-editor-frame {
     background-color: var(--bg-darkest);
 }
 
-textview {
-    background-color: var(--bg-mid);
-
-    & text {
-        background-color: var(--bg-mid);
-    }
-}
-
-/* Fix gutter border */
 .rhyme-editor-view {
-    background-color: var(--bg-darkest);
-    color: var(--text-bright);
     border: none;
 
     & textview text {
-        background-color: var(--bg-darkest);
-        color: var(--text-bright);
         border: none;
-        padding-left: 8px;
+        padding-left: 6px;
     }
-} 
+}

@@ -5,12 +5,20 @@
     background: var(--bg-mid);
     padding: 0;
 
-    @include list-row-hover-select(var(--bg-hover), var(--bg-light));
+    // Classic tool-window tree: full-bleed flat accent-blue selection bar
+    // (no rounded pill), light text on it — but git-status labels keep their
+    // own color.
+    @include list-row-hover-select(
+        var(--bg-hover),
+        var(--selection-bg),
+        $radius: none,
+        $fg-except-status: true
+    );
 
     & > row {
         padding: 0;
         margin: 0;
-        min-height: 16px;
+        min-height: 20px;
         background-color: var(--bg-mid);
     }
 
@@ -21,24 +29,25 @@
     }
 
     & label {
-        padding: 4px 4px 4px 0;
+        padding: 2px 4px 2px 0;
         margin: 0 0 0 4px;
-        text-align: left;
         background-color: inherit;
     }
 }
 
 .file-icon {
     margin: 0;
-    //padding-left: 5px;
-    min-width: 16px;
-    min-height: 16px;
+    padding: 0;
+    min-width: 0;
+    min-height: 0;
     background-color: inherit;
 }
 
 .file-tree-container {
     background-color: var(--bg-darkest);
-    border-right: 1px solid var(--border-dark);
+    /* The panel/editor divider now lives on `.left-panel-scroller` (the
+       project tree + source trees share one scroller). */
+    border-right: none;
 }
 
 .file-tree-outer {
@@ -53,12 +62,13 @@
 .file-tree-header {
     background: var(--bg-dark);
     color: var(--text-bright);
-    padding: 4px 5px;
+    padding: 2px 6px;
 }
 
 .file-tree-panel-header {
-    background-color: var(--bg-darkest);
-    padding: 8px;
+    background-color: var(--bg-dark);
+    padding: 3px 6px;
+    border-bottom: 1px solid var(--border-dark);
 }
 
 .file-tree-panel-title {
@@ -73,21 +83,25 @@
 }
 
 .file-list-row {
-    padding: 2px 5px;
+    padding: 1px 6px;
     margin: 0;
-    min-height: 16px;
+    min-height: 20px;
     background-color: inherit;
 }
 
 .dir-chevron {
-    min-width: 12px;
-    padding-left: 5px;
+    min-width: 10px;
+    padding-left: 2px;
     color: var(--text-muted);
     background-color: inherit;
 }
 
+/* Open-file dot — a small solid circle. White by default; a `.file-modified`
+   / `.file-new` / `.file-renamed` class (added alongside this one) overrides
+   the colour, since those rules come later in this file. */
 .active-chevron {
-    color: var(--text-bright);
+    color: #ffffff;
+    font-size: 9px;
 }
 
 .dir-label {
@@ -132,9 +146,27 @@
 
 .drop-target-active {
     background-color: var(--selection-bg);
-    border-radius: 4px;
+    border-radius: 0;
 }
 
 .drop-target-active * {
     background-color: var(--selection-bg);
 } 
+/* Read-only external-source trees (Apple Notes, …) stacked under the
+   project tree — no rule between them (they read as one panel); each
+   source's header row reuses `.file-tree-header`. */
+.source-panel,
+.source-list {
+    background-color: var(--bg-mid);
+}
+
+/* The whole left panel (project tree + source trees) scrolls as one; a
+   single 1px divider on its right edge separates it from the editor. */
+.left-panel-scroller {
+    border-right: 1px solid var(--border-dark);
+}
+
+/* Git-ignored entries — muted goldenrod, JetBrains-style. */
+.file-ignored {
+    color: var(--text-ignored);
+}

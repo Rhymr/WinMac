@@ -1,8 +1,9 @@
-/* Rounded-chip tabs (modern IDE convention — JetBrains/VS Code): each tab
-   is its own floating rounded rectangle over the header's flat background,
-   with a small gap between tabs, rather than a continuous boxed/underlined
-   strip. The active tab reads via the app's accent color, same as a
-   selected row anywhere else. */
+/* Classic JetBrains tabs: one continuous rectangular strip, no gaps, thin
+   separators between tabs. The active tab drops to the editor's background
+   (so it "merges" into the editor below) and carries a 2px accent bar
+   along its top edge as its indicator. The band stays a consistent height
+   regardless of how many tabs are open; the space after the last tab is a
+   plain empty strip. */
 notebook {
     background-color: var(--bg-darkest);
 
@@ -16,39 +17,54 @@ notebook {
 
     & > header {
         background-color: var(--bg-dark);
-        padding: 6px 6px 0 6px;
+        padding: 0;
         margin: 0;
+        min-height: 26px;
         border-bottom: 1px solid var(--border-dark);
+
+        /* Paging arrows, shown only when the tabs overflow. */
+        & > button {
+            background: none;
+            border: none;
+            border-radius: 0;
+            min-height: 0;
+            min-width: 0;
+            padding: 0 4px;
+        }
 
         & > tabs {
             background-color: var(--bg-dark);
 
             & > tab {
-                background-color: var(--bg-mid);
-                // Reserve the same 1px every tab would get outlined with,
-                // even when not checked — otherwise gaining/losing the
-                // border on selection shifts every tab's size by 2px.
-                padding: 4px 7px;
-                border: 1px solid transparent;
-                border-radius: var(--radius-md);
-                margin: 0 3px 6px 0;
-                transition: background-color var(--transition-fast), border-color var(--transition-fast);
+                background-color: var(--bg-dark);
+                /* left/right padding == the tab_box `spacing(6)` so the
+                   whole tab is evenly padded around icon / name / × */
+                padding: 3px 6px;
+                min-height: 24px;
+                /* tabs size to their content; `build_tab_widget` caps the
+                   name length. No hard divider between tabs — the active
+                   tab's top accent bar is the only separator. */
+                border: none;
+                border-radius: 0;
+                margin: 0;
+                transition:
+                    background-color var(--transition-fast),
+                    box-shadow var(--transition-fast);
 
                 &:checked {
-                    background-color: var(--bg-mid);
-                    border-color: var(--selection-hover);
+                    background-color: var(--bg-darkest);
+                    box-shadow: inset 0 2px 0 var(--selection-hover);
 
-                    // `:backdrop` = the window isn't focused (e.g. another
-                    // app is active) — the accent outline reads as "not
-                    // actually your focus right now" if it stays the vivid
-                    // accent color, so it drops to a neutral gray instead,
-                    // same convention GNOME/Adwaita apps use for backdrop
-                    // header bars.
+                    // `:backdrop` = the window isn't focused — the accent
+                    // bar drops to a neutral gray, same convention Adwaita
+                    // apps use for backdrop chrome.
                     &:backdrop {
-                        border-color: var(--border-active);
+                        box-shadow: inset 0 2px 0 var(--border-active);
                     }
 
-                    & label {
+                    // `.tab-label` only — NOT the close button's own label,
+                    // so the × keeps its own red/red-hover colour.
+                    & .tab-label {
                         color: var(--text-bright);
                         background-color: inherit;
                     }
@@ -62,10 +78,10 @@ notebook {
                     background-color: var(--bg-hover);
                 }
 
-                & label {
+                & .tab-label {
                     color: var(--text-not-so-dim);
                     background-color: inherit;
-                    font-size: 12px;
+                    font-size: 11px;
                 }
             }
         }
@@ -90,32 +106,31 @@ notebook {
     background: none;
 }
 
-/* Hidden (zero-size, not just invisible, so an inactive/unhovered tab
-   doesn't reserve dead space for it) except on the active tab or whichever
-   tab the pointer is currently over — matches JetBrains, where every other
-   tab shows just its icon and (possibly truncated) name. */
+/* Always visible on every tab (so a tab never resizes when the pointer
+   enters it), tight against the name. Neutral grey by default; the only
+   hover feedback is the glyph turning red — and only when the pointer is
+   on the × itself, not anywhere on the tab. */
 .tab-close-button {
     padding: 0;
-    margin: 0 0 0 4px;
+    margin: 0;
     background: none;
     border: none;
-    border-radius: var(--radius-sm);
-    opacity: 0;
-    min-width: 0;
-    min-height: 0;
-    transition:
-        background-color var(--transition-fast),
-        opacity var(--transition-fast);
-
-    &:hover {
-        background-color: var(--destructive);
-        color: var(--selection-fg);
-    }
-}
-
-tab:checked .tab-close-button,
-tab:hover .tab-close-button {
-    opacity: 1;
+    border-radius: 0;
     min-width: 16px;
     min-height: 16px;
+    color: var(--text-muted);
+    font-size: 11px;
+    transition: color var(--transition-fast);
+
+    & label {
+        background: none;
+        color: inherit;
+        padding: 0;
+        margin: 0;
+    }
+
+    &:hover {
+        background: none;
+        color: var(--destructive-hover);
+    }
 }

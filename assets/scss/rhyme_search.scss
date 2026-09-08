@@ -1,57 +1,68 @@
-/* Rhyme search styling */
-.rhyme-search-container-bg {
-    background: var(--bg-darkest);
-}
-
-.rhyme-search-container-margin {
-    margin: 0 5px 5px;
-}
+/* Rhyme Search — a bottom-docked JetBrains-style tool window: a flat header
+   strip, a compact search row, then a flush results list. No card margins,
+   no rounded corners. */
 
 frame.rhyme-search-container {
     background: var(--bg-darkest);
     border-top: 1px solid var(--border-dark);
-    border-right: 1px solid var(--border-dark);
-    border-left: 1px solid var(--border-dark);
+    margin: 0;
 }
 
-/* Matches .file-tree-panel-header so both panels' headers read as one system */
+/* The frame's label widget = the tool-window header strip. */
 .rhyme-search-header {
-    background-color: var(--bg-darkest);
-    padding: 8px;
-
-    &:hover {
-        background-color: var(--bg-hover);
-    }
-
-    &:hover * {
-        background-color: var(--bg-hover);
-    }
+    background-color: var(--bg-dark);
+    border-bottom: 1px solid var(--border-dark);
+    padding: 3px 8px;
+    min-height: 24px;
 }
 
 .rhyme-search-title {
-    color: var(--text-bright);
+    color: var(--text-not-so-dim);
     font-weight: bold;
-    background-color: inherit;
+    font-size: 11px;
+    background-color: transparent;
+}
+
+.rhyme-search-body {
+    background: var(--bg-darkest);
+    padding: 0;
+}
+
+.rhyme-search-input {
+    background-color: var(--bg-dark);
+    border-bottom: 1px solid var(--border-dark);
+    padding: 4px 8px;
+
+    & entry,
+    & entry > text {
+        background: var(--bg-mid);
+    }
+}
+
+.rhyme-search-container-bg {
+    background: var(--bg-darkest);
 }
 
 .rhyme-results {
-    background-color: var(--bg-mid);
+    background-color: var(--bg-darkest);
     margin: 0;
-    padding: 0;
+    padding: 4px 0;
 
     & > row {
-        padding: 0;
+        padding: 1px 8px;
         margin: 0;
-        background-color: var(--bg-mid);
+        min-height: 20px;
+        background-color: var(--bg-darkest);
     }
 
     & .syllable-header {
-        background-color: var(--bg-mid) !important;
-        padding-bottom: 5px !important;
+        background-color: var(--bg-darkest);
+        color: var(--text-not-so-dim);
+        font-weight: bold;
+        padding: 4px 8px 2px;
     }
 
     & label {
-        word-wrap: break-word;
-        background-color: var(--bg-mid);
+        background-color: var(--bg-darkest);
     }
-} 
+}

@@ -6,7 +6,11 @@
 //! popdown-on-click boilerplate.
 use gtk::gdk;
 use gtk::prelude::*;
-use gtk::{Align, Box as GtkBox, Button, Label, Orientation, Popover, Separator, Widget};
+use gtk::{
+    Align, Box as GtkBox, Button, Image, Label, MenuButton, Orientation, Popover, Separator, Widget,
+};
+use std::cell::Cell;
+use std::rc::Rc;
 
 /// Shortcut hints shown next to a menu item's label — ⌘ on macOS, "Ctrl+"
 /// elsewhere, so the menu never shows a Mac-only symbol on Windows/Linux
@@ -72,19 +76,23 @@ impl ContextMenu {
         }
     }
 
-    /// A left-aligned, full-width menu row with an optional right-aligned
+    /// A left-aligned, full-width menu row with an optional leading `icon`
+    /// (a bundled `crate::app::icons` name), an optional right-aligned
     /// shortcut hint and an optional extra CSS class (e.g. for a
-    /// destructive action). The menu pops down before `on_click` runs.
-    /// Returns the row's `Button` so a caller can `set_sensitive(false)`
-    /// it (e.g. "Cut" with nothing selected) — most callers just ignore it.
+    /// destructive action). Rows without an icon keep a blank slot so every
+    /// label in the menu stays aligned. The menu pops down before
+    /// `on_click` runs. Returns the row's `Button` so a caller can
+    /// `set_sensitive(false)` it (e.g. "Cut" with nothing selected) — most
+    /// callers just ignore it.
     pub fn add_item(
         &self,
+        icon: Option<&str>,
         text: &str,
         shortcut: Option<&str>,
         extra_class: Option<&str>,
         on_click: impl Fn() + 'static,
     ) -> Button {
-        let button = item_button(text, shortcut, extra_class);
+        let button = item_button(icon, text, shortcut, extra_class);
         self.menu_box.append(&button);
 
         let popover = self.popover.clone();
@@ -100,8 +108,8 @@ impl ContextMenu {
     /// down itself (typically right before opening the submenu) — the two
     /// menus can't both be open at once, but the submenu needs this one
     /// gone first, not after.
-    pub fn add_submenu_item(&self, text: &str, on_click: impl Fn() + 'static) {
-        let button = submenu_button(text);
+    pub fn add_submenu_item(&self, icon: Option<&str>, text: &str, on_click: impl Fn() + 'static) {
+        let button = submenu_button(icon, text);
         self.menu_box.append(&button);
         button.connect_clicked(move |_| on_click());
     }
@@ -109,6 +117,71 @@ impl ContextMenu {
     pub fn add_separator(&self) {
         self.menu_box
             .append(&Separator::new(Orientation::Horizontal));
+    }
+
+    /// Build a dropdown button (toolbar gear, sidebar "Configure"/"Help",
+    /// …) whose popover *is* this same styled menu, so every dropdown and
+    /// context menu in the app is visually identical. Populate the returned
+    /// `ContextMenu` with `add_item` / `add_separator` exactly as for a
+    /// right-click menu.
+    pub fn dropdown(icon: Option<&str>, label: Option<&str>) -> (MenuButton, Self) {
+        let popover = Popover::new();
+        popover.set_has_arrow(false);
+
+        let menu_box = GtkBox::new(Orientation::Vertical, 0);
+        menu_box.set_css_classes(&["context-menu"]);
+        popover.set_child(Some(&menu_box));
+
+        let button = MenuButton::builder().valign(Align::Center).build();
+        // Every dropdown trigger in the app carries this class so one rule
+        // set (see context_menu.scss) owns the button chrome — not whatever
+        // container the dropdown happens to land in.
+        button.add_css_class("app-dropdown");
+        if let Some(icon) = icon {
+            button.set_icon_name(icon);
+        }
+        if let Some(label) = label {
+            button.set_label(label);
+        }
+        // The MenuButton owns the popover's lifetime — no self-unparenting.
+        button.set_popover(Some(&popover));
+
+        let menu = Self {
+            popover,
+            menu_box,
+            parent: button.clone().upcast(),
+        };
+        (button, menu)
+    }
+
+    /// A simple value picker built on the same styled `.context-menu`
+    /// popover as every other dropdown (rather than a `gtk::DropDown`):
+    /// `options` become menu items, choosing one relabels the button,
+    /// stores its index in the returned cell and calls `on_change`.
+    pub fn select_dropdown(
+        options: &[&str],
+        initial: usize,
+        on_change: impl Fn(usize) + 'static,
+    ) -> (MenuButton, Rc<Cell<usize>>) {
+        let (button, menu) = Self::dropdown(None, options.get(initial).copied());
+        button.set_always_show_arrow(true);
+
+        let selected = Rc::new(Cell::new(initial));
+        let on_change = Rc::new(on_change);
+        for (index, option) in options.iter().enumerate() {
+            let button = button.clone();
+            let selected = selected.clone();
+            let on_change = on_change.clone();
+            let label = (*option).to_string();
+            menu.add_item(None, option, None, None, move || {
+                button.set_label(&label);
+                if selected.replace(index) != index {
+                    on_change(index);
+                }
+            });
+        }
+
+        (button, selected)
     }
 
     pub fn popdown(&self) {
@@ -156,8 +229,27 @@ impl ContextMenu {
     }
 }
 
-fn item_button(text: &str, shortcut: Option<&str>, extra_class: Option<&str>) -> Button {
+/// The leading icon column — an `Image` (empty when `icon` is `None`) with
+/// class `menu-item-icon`, whose fixed CSS width keeps every label in the
+/// menu aligned whether or not the row has a glyph.
+fn icon_slot(icon: Option<&str>) -> Image {
+    let image = match icon {
+        Some(name) => crate::app::icons::img(name, 14),
+        None => Image::new(),
+    };
+    image.add_css_class("menu-item-icon");
+    image
+}
+
+fn item_button(
+    icon: Option<&str>,
+    text: &str,
+    shortcut: Option<&str>,
+    extra_class: Option<&str>,
+) -> Button {
     let hbox = GtkBox::new(Orientation::Horizontal, 0);
+
+    hbox.append(&icon_slot(icon));
 
     let label = Label::new(Some(text));
     label.set_halign(Align::Start);
@@ -183,7 +275,7 @@ fn item_button(text: &str, shortcut: Option<&str>, extra_class: Option<&str>) ->
     button
 }
 
-fn submenu_button(text: &str) -> Button {
+fn submenu_button(icon: Option<&str>, text: &str) -> Button {
     let hbox = GtkBox::new(Orientation::Horizontal, 0);
 
     let label = Label::new(Some(text));
@@ -194,6 +286,7 @@ fn submenu_button(text: &str) -> Button {
     arrow.set_halign(Align::End);
     arrow.set_css_classes(&["dim-label"]);
 
+    hbox.append(&icon_slot(icon));
     hbox.append(&label);
     hbox.append(&arrow);
 

@@ -1,4 +1,3 @@
-use crate::platform::fetch_apple_notes;
 use crate::workspace::manager::WorkspaceManager;
 use crate::workspace::recent::load_recent_workspaces;
 use gio::prelude::FileExt;
@@ -42,9 +41,9 @@ where
     brand_box.set_margin_start(16);
     brand_box.set_margin_end(16);
 
-    let logo_icon = Image::from_resource("/org/gtk_rs/rhymr/icons/clipboard.svg");
-    logo_icon.set_css_classes(&["brand-icon"]);
+    let logo_icon = Image::from_resource("/org/gtk_rs/rhymr/icons/rhymr-icon.svg");
     logo_icon.set_pixel_size(28);
+    logo_icon.set_css_classes(&["brand-icon"]);
 
     let title_vbox = Box::new(Orientation::Vertical, 0);
     let app_title = Label::builder()
@@ -53,7 +52,7 @@ where
         .css_classes(vec!["title-3", "bold"])
         .build();
     let app_version = Label::builder()
-        .label("2026.1")
+        .label(crate::version::display())
         .halign(Align::Start)
         .css_classes(vec!["caption", "dim-label"])
         .build();
@@ -80,26 +79,61 @@ where
     nav_list.append(&projects_label);
     nav_list.select_row(nav_list.row_at_index(0).as_ref());
 
-    // Settings — pinned to the bottom of the sidebar (nav_list above it is
-    // vexpand, so this sits flush against the sidebar's bottom edge).
-    let settings_btn = Button::builder()
-        .label("\u{2699}")
-        .tooltip_text("Preferences")
-        .halign(Align::Start)
-        .css_classes(vec!["flat", "welcome-settings-button"])
-        .margin_start(12)
-        .margin_end(12)
-        .margin_top(8)
-        .margin_bottom(12)
+    // Configure / Help dropdowns — pinned to the bottom of the sidebar
+    // (nav_list above is vexpand), matching the JetBrains welcome window.
+    let footer = Box::builder()
+        .orientation(Orientation::Horizontal)
+        .spacing(2)
+        .css_classes(vec!["welcome-sidebar-footer"])
+        .margin_start(8)
+        .margin_end(8)
+        .margin_top(6)
+        .margin_bottom(10)
         .build();
-    let app_for_settings = app.clone();
-    settings_btn.connect_clicked(move |_| {
-        crate::setting::dialog::show_settings_dialog(&app_for_settings, None);
-    });
+
+    let (configure_btn, configure_menu) =
+        crate::app::context_menu::ContextMenu::dropdown(None, Some("Configure"));
+    configure_btn.set_always_show_arrow(true);
+    {
+        let app = app.clone();
+        configure_menu.add_item(
+            Some("settings"),
+            "Settings\u{2026}",
+            None,
+            None,
+            move || {
+                crate::setting::dialog::show_settings_dialog(&app, None);
+            },
+        );
+    }
+
+    let (help_btn, help_menu) = crate::app::context_menu::ContextMenu::dropdown(None, Some("Help"));
+    help_btn.set_always_show_arrow(true);
+    {
+        let w = window.clone();
+        help_menu.add_item(None, "Documentation", None, None, move || {
+            crate::app::open_uri(&w, crate::app::DOCS_URL)
+        });
+    }
+    {
+        let w = window.clone();
+        help_menu.add_item(None, "Report an Issue", None, None, move || {
+            crate::app::open_uri(&w, crate::app::ISSUES_URL)
+        });
+    }
+    {
+        let w = window.clone();
+        help_menu.add_item(None, "About Rhymr", None, None, move || {
+            crate::app::about::show(&w)
+        });
+    }
+
+    footer.append(&configure_btn);
+    footer.append(&help_btn);
 
     sidebar.append(&brand_box);
     sidebar.append(&nav_list);
-    sidebar.append(&settings_btn);
+    sidebar.append(&footer);
 
     // ==========================================
     // 2. MAIN CONTENT AREA (Projects View)
@@ -165,10 +199,9 @@ where
             hbox.set_margin_start(12);
             hbox.set_margin_end(12);
 
-            // Avatar icon with first letter
-            let initial = name.chars().next().unwrap_or('W').to_string();
+            // Avatar with up to two initials, JetBrains-style.
             let avatar_label = Label::builder()
-                .label(&initial)
+                .label(avatar_initials(&name))
                 .css_classes(vec!["project-avatar"])
                 .width_request(32)
                 .height_request(32)
@@ -191,10 +224,10 @@ where
             details_vbox.append(&path_label);
 
             let menu_btn = Button::builder()
-                .label("\u{22EE}")
                 .valign(Align::Center)
                 .css_classes(vec!["flat", "project-menu-button"])
                 .build();
+            menu_btn.set_child(Some(&crate::app::icons::img("more", 16)));
 
             hbox.append(&avatar_label);
             hbox.append(&details_vbox);
@@ -305,7 +338,7 @@ fn show_project_menu<F>(
     let window_for_open = window.clone();
     let path_for_open = workspace_path.clone();
     let callback_for_open = on_workspace_ready.clone();
-    menu.add_item("Open Selected", None, None, move || {
+    menu.add_item(None, "Open Selected", None, None, move || {
         window_for_open.close();
         callback_for_open(path_for_open.clone());
     });
@@ -313,13 +346,13 @@ fn show_project_menu<F>(
     menu.add_separator();
 
     let path_for_reveal = workspace_path.clone();
-    menu.add_item("Reveal in Finder", None, None, move || {
+    menu.add_item(None, "Reveal in Finder", None, None, move || {
         let uri = format!("file://{}", path_for_reveal.display());
         let _ = gio::AppInfo::launch_default_for_uri(&uri, gio::AppLaunchContext::NONE);
     });
 
     let path_for_copy = workspace_path.to_string_lossy().to_string();
-    menu.add_item("Copy Path", None, None, move || {
+    menu.add_item(None, "Copy Path", None, None, move || {
         if let Some(display) = gtk::gdk::Display::default() {
             display.clipboard().set_text(&path_for_copy);
         }
@@ -331,6 +364,7 @@ fn show_project_menu<F>(
     let row_for_remove = row.clone();
     let projects_list_for_remove = projects_list.clone();
     menu.add_item(
+        None,
         "Remove from Recent Projects\u{2026}",
         None,
         Some("destructive-menu-item"),
@@ -415,12 +449,6 @@ where
         .active(true)
         .build();
     grid.attach(&git_toggle, 1, 3, 2, 1);
-
-    let notes_toggle = CheckButton::builder()
-        .label("Import Apple Notes as text files")
-        .active(false)
-        .build();
-    grid.attach(&notes_toggle, 1, 4, 2, 1);
 
     // Buttons Row
     let action_box = Box::new(Orientation::Horizontal, 12);
@@ -508,16 +536,6 @@ where
         if let Ok(manager) =
             WorkspaceManager::init_workspace(&workspace_path, git_toggle.is_active())
         {
-            if notes_toggle.is_active()
-                && let Ok(notes) = fetch_apple_notes()
-            {
-                for (title, body) in notes {
-                    let note_path = manager.root_path.join(format!("{title}.txt"));
-                    let _ = std::fs::write(note_path, body);
-                }
-                let git = crate::git::ops::GitController::new(&manager.root_path);
-                let _ = git.commit_all("Initial import from Apple Notes");
-            }
             dialog_for_create.close();
             // Also close the welcome window behind this dialog — otherwise
             // it lingers alongside the newly opened workspace window.
@@ -527,4 +545,43 @@ where
     });
 
     dialog.present();
+}
+
+/// Up to two initials for a project avatar — the first alphanumeric char and
+/// the first one after a word boundary (space / `_` / `-` / a camelCase
+/// hump), e.g. `TBM_Example` → `TE`, `carProject` → `CP`. Falls back to the
+/// first two characters.
+fn avatar_initials(name: &str) -> String {
+    let mut out = String::new();
+    let mut prev: Option<char> = None;
+    for ch in name.chars() {
+        if !ch.is_alphanumeric() {
+            prev = Some(ch);
+            continue;
+        }
+        let at_boundary = match prev {
+            None => true,
+            Some(' ' | '_' | '-' | '.') => true,
+            Some(p) => p.is_lowercase() && ch.is_uppercase(),
+        };
+        if at_boundary {
+            out.extend(ch.to_uppercase());
+            if out.chars().count() == 2 {
+                return out;
+            }
+        }
+        prev = Some(ch);
+    }
+    if out.is_empty() {
+        out = name
+            .chars()
+            .filter(|c| c.is_alphanumeric())
+            .take(2)
+            .flat_map(char::to_uppercase)
+            .collect();
+    }
+    if out.is_empty() {
+        out.push('?');
+    }
+    out
 }

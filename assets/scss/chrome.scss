@@ -1,0 +1,207 @@
+/* Classic window chrome — a compact top toolbar, a left tool-window stripe
+   and a bottom stripe (src/app/chrome.rs). Flat, square, JetBrains-tight. */
+
+.main-toolbar {
+    background-color: var(--bg-dark);
+    border-bottom: 1px solid var(--border-dark);
+    padding: 1px 4px;
+    min-height: 24px;
+
+    & button {
+        background: none;
+        border: none;
+        border-radius: 0;
+        /* fixed square cell: the 16px icon centres in it, so the gap
+           between any two icons is uniform regardless of how each SVG's
+           artwork sits inside its own box */
+        padding: 0;
+        min-height: 22px;
+        min-width: 22px;
+        margin: 0;
+        color: var(--text-not-so-dim);
+        transition: background-color var(--transition-fast);
+
+        /* icon follows the button colour, not `* {}` */
+        & image {
+            color: inherit;
+        }
+
+        &:hover {
+            background-color: var(--bg-hover);
+        }
+
+        &:active {
+            background-color: var(--bg-light);
+        }
+
+        &:disabled {
+            background: none;
+            color: var(--text-muted);
+        }
+    }
+
+    & > menubutton > button,
+    & .app-dropdown > button {
+        padding: 0;
+        min-width: 22px;
+        min-height: 22px;
+    }
+
+    & separator {
+        background-color: var(--border-dark);
+        min-width: 1px;
+        margin: 4px 3px;
+    }
+}
+
+/* Active-file breadcrumb on the left, pushing the action groups right — a
+   row of `[folder icon] name  ›  …  ›  [file icon] name`. */
+.nav-breadcrumb {
+    margin: 0 4px;
+
+    & label {
+        color: var(--text-muted);
+        font-size: 11px;
+        background: none;
+    }
+
+    & image {
+        color: var(--text-muted);
+        opacity: 0.8;
+        background: none;
+    }
+
+    & .nav-sep {
+        color: var(--text-muted);
+        opacity: 0.6;
+        margin: 0 1px;
+    }
+}
+
+/* "Git:" label before the VCS action group. */
+.toolbar-group-label {
+    color: var(--text-muted);
+    font-size: 11px;
+    margin: 0 2px 0 4px;
+}
+
+/* base.scss's `* { color }` paints the inner GtkImage directly, so tinting
+   has to target the image node (and beat `*`). */
+.main-toolbar button.run-action image {
+    color: var(--vcs-added);
+}
+
+.main-toolbar button.git-pull image,
+.main-toolbar button.git-fetch image {
+    color: var(--vcs-modified);
+}
+
+.main-toolbar button.git-commit image,
+.main-toolbar button.git-push image {
+    color: var(--vcs-added);
+}
+
+.settings-gear image {
+    color: var(--text-not-so-dim);
+}
+
+/* --- Left tool-window stripe ---------------------------------------- */
+.tool-stripe {
+    background-color: var(--bg-dark);
+    border-right: 1px solid var(--border-dark);
+    padding: 4px 0 0 0;
+    min-width: 24px;
+}
+
+/* The button fills the strip cell, but only its inner icon+label box is
+   ever tinted — hover/checked never paint the whole cell. */
+.tool-stripe-button {
+    background: none;
+    border: none;
+    border-radius: 0;
+    padding: 0;
+    min-width: 0;
+    min-height: 0;
+    color: var(--text-not-so-dim);
+
+    & > box {
+        padding: 4px 0;
+        margin: 2px 0;
+        transition: background-color var(--transition-fast);
+    }
+
+    & label,
+    & image {
+        color: inherit;
+        background: none;
+    }
+
+    /* small breathing room around the icon that sits below the label */
+    & image {
+        padding: 4px 2px 2px 2px;
+    }
+
+    &:hover {
+        color: var(--text-bright);
+    }
+
+    &:hover > box {
+        background-color: var(--bg-hover);
+    }
+
+    &:checked {
+        color: var(--text-bright);
+    }
+
+    &:checked > box {
+        background-color: var(--bg-mid);
+        box-shadow: inset 2px 0 0 var(--selection-hover);
+    }
+}
+
+/* --- Bottom stripe ------------------------------------------------- */
+.bottom-stripe {
+    background-color: var(--bg-dark);
+    border-top: 1px solid var(--border-dark);
+    padding: 0 4px;
+    min-height: 22px;
+}
+
+.bottom-stripe-button {
+    background: none;
+    border: none;
+    border-radius: 0;
+    padding: 0;
+    min-height: 0;
+    color: var(--text-not-so-dim);
+    font-size: 11px;
+
+    & > box {
+        padding: 2px 6px;
+        margin: 2px 0;
+        transition: background-color var(--transition-fast);
+    }
+
+    & label,
+    & image {
+        color: inherit;
+        background: none;
+    }
+
+    &:hover {
+        color: var(--text-bright);
+    }
+
+    &:hover > box {
+        background-color: var(--bg-hover);
+    }
+
+    &:checked {
+        color: var(--text-bright);
+    }
+
+    &:checked > box {
+        background-color: var(--bg-mid);
+        box-shadow: inset 0 2px 0 var(--selection-hover);
+    }
+}

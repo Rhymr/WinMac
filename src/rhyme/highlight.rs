@@ -306,12 +306,20 @@ fn rhyme_units(word: &str) -> Vec<RhymeUnit> {
         }
         prev_vowel = v;
     }
-    let tail: String = lower.chars().skip(start).collect();
-    if tail.is_empty() {
+    // `rphonetic`'s double-metaphone is ASCII-only and byte-slices its
+    // input — feeding it a diacritic (`café`) or non-Latin script panics.
+    // Key on just the ASCII-letter tail; if nothing's left, there's no
+    // metaphone to compute.
+    let ascii_tail: String = lower
+        .chars()
+        .skip(start)
+        .filter(|c| c.is_ascii_alphabetic())
+        .collect();
+    if ascii_tail.is_empty() {
         return Vec::new();
     }
     vec![RhymeUnit {
-        key: format!("dm:{}", DoubleMetaphone::default().encode(&tail)),
+        key: format!("dm:{}", DoubleMetaphone::default().encode(&ascii_tail)),
         start,
         end: lower.chars().count(),
     }]
@@ -712,6 +720,29 @@ pub fn attach(buffer: &SourceBuffer) -> RhymeHighlight {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn rhyme_units_handles_non_ascii_words_without_panicking() {
+        // `rphonetic`'s double-metaphone byte-slices its input; accented
+        // and non-Latin words used to panic here (café → inside 'é').
+        for word in [
+            "café",
+            "naïve",
+            "façade",
+            "résumé",
+            "émeute",
+            "Montréal",
+            "двойной",
+            "переносе",
+            "🔥bars🔥",
+            "señor",
+        ] {
+            for unit in rhyme_units(word) {
+                assert!(unit.start <= unit.end);
+                assert!(unit.end <= word.chars().count());
+            }
+        }
+    }
 
     #[test]
     fn rhyme_units_never_panics_or_produces_invalid_spans_across_the_dictionary() {

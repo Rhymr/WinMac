@@ -21,33 +21,91 @@ popover {
     }
 }
 
+/* Dropdown TRIGGER buttons — ONE flat style for every `MenuButton` built
+   via `ContextMenu::dropdown` (toolbar gear, welcome Configure/Help,
+   settings Theme/Icons), so every dropdown in the app matches the toolbar
+   one: no box, tight, a hover background as the only affordance. */
+.app-dropdown {
+    background: none;
+    min-height: 0;
+
+    & > button {
+        background: none;
+        border: none;
+        box-shadow: none;
+        border-radius: 0;
+        padding: 2px 6px;
+        min-height: 0;
+        min-width: 0;
+        color: var(--text-not-so-dim);
+        transition: background-color var(--transition-fast);
+    }
+
+    /* the universal `box { background }` reset paints the button's content
+       box otherwise; it also carries an intrinsic min-height that would
+       bubble through */
+    & > button > box {
+        background: none;
+        min-height: 0;
+    }
+
+    & arrow,
+    & > button image,
+    & > button label {
+        color: inherit;
+        background: none;
+    }
+
+    & > button:hover,
+    & > button:checked {
+        background-color: var(--bg-hover);
+        color: var(--text-bright);
+    }
+}
+
 .context-menu {
     background-color: var(--popover-bg-color);
     border: 1px solid var(--border-light);
-    border-radius: var(--radius-lg);
-    padding: 4px;
+    border-radius: 0;
+    /* small vertical inset inside the border, JetBrains-style */
+    padding: 4px 0;
     min-width: 220px;
-    box-shadow: 0 6px 16px rgba(0, 0, 0, 0.45);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
 }
 
+/* Compact, uniform rows — every item is the same height whether or not it
+   carries an icon, a shortcut hint or a submenu arrow (JetBrains menus). */
 .context-menu-item {
-    padding: 6px 10px;
-    margin: 0 2px;
-    border-radius: var(--radius-md);
+    padding: 3px 12px 3px 8px;
+    margin: 0;
+    border-radius: 0;
     background-color: transparent;
     border: none;
     color: var(--popover-fg-color);
-    min-height: 20px;
-    font-size: 13px;
+    min-height: 22px;
+    font-size: 12px;
     transition: background-color var(--transition-fast);
 
-    /* The row's label/hint sit inside an unclassed Box, which would
-       otherwise still pick up the app-wide `box { background: ... }`
-       rule and show through as a mismatched rectangle. */
-    & box,
+    /* The row's label/hint sit inside an unclassed Box — clear its
+       background (the app-wide `box {}` reset) and its intrinsic
+       min-height so row height is driven solely by `min-height` above. */
+    & box {
+        background-color: transparent;
+        color: inherit;
+        min-height: 0;
+    }
+
     & label {
         background-color: transparent;
         color: inherit;
+    }
+
+    /* Leading icon column — a fixed width so every label lines up whether
+       or not its row carries a glyph (empty slot for rows without one). */
+    & .menu-item-icon {
+        min-width: 16px;
+        margin-right: 8px;
+        background-color: transparent;
     }
 
     &:hover,
@@ -83,7 +141,7 @@ popover {
 .menu-shortcut {
     color: var(--text-muted);
     font-size: 11px;
-    margin-left: 16px;
+    margin-left: 12px;
 }
 
 .context-menu-item:hover .menu-shortcut {
@@ -91,8 +149,8 @@ popover {
 }
 
 .context-menu separator {
-    background-color: var(--border-light);
-    margin: 4px 2px;
+    background-color: var(--border-dark);
+    margin: 4px 0;
     min-height: 1px;
 }
 

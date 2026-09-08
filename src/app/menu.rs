@@ -128,13 +128,7 @@ fn help(app: &Application) -> Menu {
         if let Some(app) = app_weak.upgrade()
             && let Some(window) = app.active_window()
         {
-            let launcher = gtk::UriLauncher::new("https://github.com/rhymr/win-mac");
-            let ctx = glib::MainContext::default();
-            ctx.spawn_local(async move {
-                if let Err(e) = launcher.launch_future(Some(&window)).await {
-                    eprintln!("Failed to open docs: {}", e);
-                }
-            });
+            crate::app::open_uri(&window, crate::app::DOCS_URL);
         }
     });
     app.add_action(&docs_action);
@@ -146,13 +140,7 @@ fn help(app: &Application) -> Menu {
         if let Some(app) = app_weak.upgrade()
             && let Some(window) = app.active_window()
         {
-            let launcher = gtk::UriLauncher::new("https://github.com/rhymr/win-mac/issues");
-            let ctx = glib::MainContext::default();
-            ctx.spawn_local(async move {
-                if let Err(e) = launcher.launch_future(Some(&window)).await {
-                    eprintln!("Failed to open issue tracker: {}", e);
-                }
-            });
+            crate::app::open_uri(&window, crate::app::ISSUES_URL);
         }
     });
     app.add_action(&report_action);
@@ -164,18 +152,7 @@ fn help(app: &Application) -> Menu {
         if let Some(app) = app_weak.upgrade()
             && let Some(window) = app.active_window()
         {
-            let dialog = gtk::AboutDialog::builder()
-                .program_name("Rhymr")
-                .version("2026.1")
-                .website("https://rhymr.app")
-                .website_label("Visit Website")
-                .authors(vec!["Rhymr Team".to_string()])
-                .logo_icon_name("text.svg")
-                .modal(true)
-                .transient_for(&window)
-                .build();
-
-            dialog.present();
+            crate::app::about::show(&window);
         }
     });
     app.add_action(&about_action);
