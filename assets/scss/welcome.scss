@@ -77,6 +77,19 @@
     & box {
         background-color: transparent;
     }
+
+    /* The mixin's `:hover *` / `:selected *` wash would flatten the
+       avatar's accent fill and the `…` button — keep them as they are. */
+    & > row:hover .project-avatar,
+    & > row:selected .project-avatar {
+        background-color: var(--selection-bg);
+        color: var(--selection-fg);
+    }
+
+    & > row:hover .project-menu-button,
+    & > row:selected .project-menu-button {
+        background-color: transparent;
+    }
 }
 
 /* GTK's global reset (border:none/background:none on `*`) otherwise leaves
