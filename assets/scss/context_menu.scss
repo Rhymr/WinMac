@@ -71,8 +71,8 @@ popover {
     border: 1px solid var(--border-light);
     border-radius: 0;
     /* small vertical inset inside the border, JetBrains-style */
-    padding: 4px 0;
-    min-width: 220px;
+    padding: 3px 0;
+    min-width: 200px;
     box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
 }
 
@@ -82,13 +82,13 @@ popover {
    the accent blue) — the same affordance as the toolbar dropdown, so
    every dropdown and right-click menu in the app reads identically. */
 .context-menu-item {
-    padding: 3px 8px;
+    padding: 1px 8px;
     margin: 0;
     border-radius: 0;
     background-color: transparent;
     border: none;
     color: var(--popover-fg-color);
-    min-height: 22px;
+    min-height: 19px;
     font-size: 12px;
     transition: background-color var(--transition-fast);
 
@@ -156,7 +156,7 @@ popover {
 
 .context-menu separator {
     background-color: var(--border-dark);
-    margin: 4px 0;
+    margin: 3px 0;
     min-height: 1px;
 }
 
