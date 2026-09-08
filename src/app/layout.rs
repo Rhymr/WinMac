@@ -103,6 +103,19 @@ pub fn create_main_layout() -> (GtkBox, Rc<WorkspaceController>) {
     let rhyme_frame = rhyme_search.get_widget().clone();
     rhyme_search.set_expanded(true);
 
+    // Selecting one word in the editor seeds the Rhyme Search box — but
+    // only while the panel is open (no lookup runs; the user hits Enter).
+    {
+        let rhyme_search = rhyme_search.clone();
+        workspace_controller.set_selection_listener(move |word| {
+            if !rhyme_search.is_collapsed()
+                && let Some(w) = word
+            {
+                rhyme_search.set_query(&w);
+            }
+        });
+    }
+
     // Read-only "Apple Notes" (and future external sources) tree, stacked
     // under the project tree in the left column. Workspace-independent:
     // it's re-pointed at each project's `.rhymr/` cache via the controller.

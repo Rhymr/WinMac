@@ -16,6 +16,7 @@ pub struct RhymeSearch {
     frame: Frame,
     collapsed: Rc<Cell<bool>>,
     on_toggle: ToggleCallback,
+    word_input: SearchEntry,
 }
 
 impl Default for RhymeSearch {
@@ -163,6 +164,7 @@ impl RhymeSearch {
             frame,
             collapsed,
             on_toggle,
+            word_input,
         }
     }
 
@@ -172,6 +174,13 @@ impl RhymeSearch {
 
     pub fn is_collapsed(&self) -> bool {
         self.collapsed.get()
+    }
+
+    /// Put `word` in the search box (does not run the lookup — the user
+    /// presses Enter). Used to seed it from the editor's current
+    /// selection while the panel is open.
+    pub fn set_query(&self, word: &str) {
+        self.word_input.set_text(word);
     }
 
     /// Show or hide the panel's body (the input + results), independent of

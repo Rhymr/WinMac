@@ -494,6 +494,35 @@ impl TextEditor {
     pub fn connect_cursor_notify(&self, f: impl Fn() + 'static) {
         self.buffer.connect_cursor_position_notify(move |_| f());
     }
+
+    /// Notify `f` when the selection changes: `Some(word)` when exactly one
+    /// word is selected, `None` otherwise. Used to seed the Rhyme Search
+    /// box from the editor selection.
+    pub fn connect_selection_notify(&self, f: impl Fn(Option<String>) + 'static) {
+        let f = Rc::new(f);
+        let selected_word = {
+            let buffer = self.buffer.clone();
+            move || {
+                buffer.selection_bounds().and_then(|(start, end)| {
+                    let text = buffer.text(&start, &end, false).to_string();
+                    let trimmed = text.trim();
+                    let one_word = !trimmed.is_empty()
+                        && trimmed
+                            .chars()
+                            .all(|c| c.is_alphanumeric() || c == '\'' || c == '-');
+                    one_word.then(|| trimmed.to_string())
+                })
+            }
+        };
+        // `mark-set` fires as the selection is dragged; `changed` covers a
+        // selection cleared by an edit.
+        {
+            let (f, selected_word) = (f.clone(), selected_word.clone());
+            self.buffer
+                .connect_mark_set(move |_, _, _| f(selected_word()));
+        }
+        self.buffer.connect_changed(move |_| f(selected_word()));
+    }
 }
 
 /// The GtkSourceView style scheme id (see assets/styles/*.xml) matching

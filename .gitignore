@@ -35,4 +35,7 @@ Cargo.lock
 # Ignore the macOS .app bundle produced by Build/bundle-mac.sh
 /dist/
 
+# Rhymr's per-workspace config/cache (this repo is itself a workspace)
+/.rhymr/
+
 .env

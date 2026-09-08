@@ -589,6 +589,15 @@ fn add_new_tab(
             }
         });
 
+        // Active tab's selection seeds the Rhyme Search box (when it's open).
+        let notebook_for_sel = notebook.clone();
+        let controller_for_sel = controller.clone();
+        text_editor.connect_selection_notify(move |word| {
+            if notebook_for_sel.current_page() == Some(page_num) {
+                controller_for_sel.notify_selection(word);
+            }
+        });
+
         wire_tab_close_button(&close_button, &controller);
         wire_tab_context_menu(&tab_box, notebook, &page_widget, &controller, path);
     }
