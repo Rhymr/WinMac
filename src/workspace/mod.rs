@@ -592,7 +592,13 @@ fn build_tab_widget(path: &Path) -> (Box, Button) {
     // in `Workspace::new`.
     label.set_width_chars(6);
     label.set_max_width_chars(24);
+    // The name expands into the tab's slack (the tab has a 90px CSS floor)
+    // and left-aligns in it, so the close button ends up at the tab's right
+    // edge. `tab_box` below sets `hexpand(false)` explicitly so this doesn't
+    // propagate up and make GtkNotebook stretch the tab across the strip.
+    label.set_hexpand(true);
     label.set_halign(gtk::Align::Start);
+    label.set_xalign(0.0);
 
     // Visibility is handled entirely by CSS (`tab:checked`/`tab:hover` in
     // notebook.scss) rather than tracked here — GTK's own `:checked` state
@@ -605,6 +611,9 @@ fn build_tab_widget(path: &Path) -> (Box, Button) {
         .build();
     close_button.set_child(Some(&Label::new(Some("\u{2715}"))));
 
+    // Explicit: the label's hexpand must not bubble up here, or GtkNotebook
+    // stretches the whole tab across the header.
+    tab_box.set_hexpand(false);
     tab_box.append(&icon);
     tab_box.append(&label);
     tab_box.append(&close_button);
@@ -652,7 +661,10 @@ fn wire_tab_context_menu(
         let index = index as usize;
         let tab_count = notebook.n_pages() as usize;
 
-        let menu = ContextMenu::new(&tab_box_for_popup);
+        // Parent the popover to the notebook, not the tab's own box: a
+        // popover parented into the horizontal `tab_box` gets counted by
+        // `GtkBox::measure` and visibly balloons the tab while open.
+        let menu = ContextMenu::new(&notebook);
 
         let c = controller.clone();
         menu.add_item(None, "Close", None, None, move || {
