@@ -283,6 +283,18 @@ impl SourcePanel {
         menu.popup_at(&self.frame, x, y);
     }
 
+    /// The one-item menu shown on a source that has nothing loaded yet —
+    /// "Install" kicks off a load (for Apple Notes on macOS, the first run
+    /// triggers the OS automation-permission prompt).
+    fn source_menu_unloaded(&self, idx: usize, x: f64, y: f64) {
+        let menu = ContextMenu::new(&self.frame);
+        let p = self.clone();
+        menu.add_item(Some("search"), "Install", None, None, move || {
+            p.request_reload(idx)
+        });
+        menu.popup_at(&self.frame, x, y);
+    }
+
     /// Rebuild every row from `trees` + `collapsed`.
     fn rebuild(&self) {
         while let Some(child) = self.list.first_child() {
@@ -299,10 +311,16 @@ impl SourcePanel {
             }
             any = true;
 
+            // "Not ready" = nothing has loaded into this source's tree yet
+            // (never synced, cache empty, or offline). It renders as a
+            // single collapsed row with the unloaded-folder icon and an
+            // Install-only menu, never a bare header over empty space.
+            let ready = trees.get(idx).is_some_and(|t| !t.is_empty());
+
             let section_key = format!("\u{1}{}", source.id());
-            let expanded = !self.is_collapsed(&section_key);
+            let expanded = ready && !self.is_collapsed(&section_key);
             self.list
-                .append(&self.section_row(idx, source, expanded, &section_key));
+                .append(&self.section_row(idx, source, ready, expanded, &section_key));
             if !expanded {
                 continue;
             }
@@ -369,14 +387,29 @@ impl SourcePanel {
         &self,
         idx: usize,
         source: &Arc<dyn TextSource>,
+        ready: bool,
         expanded: bool,
         key: &str,
     ) -> gtk::ListBoxRow {
         let hbox = Self::row_box(0);
         hbox.add_css_class("file-tree-header");
-        hbox.append(&Self::chevron(expanded));
+        if ready {
+            hbox.append(&Self::chevron(expanded));
+        } else {
+            // Keep the icon column aligned with a loaded source's rows.
+            let spacer = Label::new(None);
+            spacer.set_css_classes(&["dir-chevron"]);
+            hbox.append(&spacer);
+        }
         {
-            let icon = icons::img(source.icon(), 16);
+            // Nothing loaded yet → the "unloaded folder" glyph, JetBrains's
+            // cue for a dependency root that hasn't been resolved.
+            let icon_name = if ready {
+                source.icon()
+            } else {
+                "folder-unloaded"
+            };
+            let icon = icons::img(icon_name, 16);
             icon.set_css_classes(&["file-icon"]);
             hbox.append(&icon);
         }
@@ -386,24 +419,33 @@ impl SourcePanel {
         label.set_css_classes(&["dir-label"]);
         hbox.append(&label);
 
-        let panel = self.clone();
-        let key = key.to_string();
-        let click = GestureClick::new();
-        click.set_button(1);
-        click.connect_released(move |_, _, _, _| panel.toggle_collapsed(key.clone()));
-        hbox.add_controller(click);
-        self.attach_source_menu(&hbox, idx);
+        if ready {
+            let panel = self.clone();
+            let key = key.to_string();
+            let click = GestureClick::new();
+            click.set_button(1);
+            click.connect_released(move |_, _, _, _| panel.toggle_collapsed(key.clone()));
+            hbox.add_controller(click);
+        }
+        self.attach_source_menu(&hbox, idx, ready);
 
         Self::wrap(hbox)
     }
 
-    /// Right-click on a section / folder row → Expand All / Collapse All /
-    /// Refresh for that source.
-    fn attach_source_menu(&self, hbox: &GtkBox, idx: usize) {
+    /// Right-click on a section / folder row → the full Expand All /
+    /// Collapse All / Refresh menu once the source has content, or just
+    /// "Install" while it hasn't.
+    fn attach_source_menu(&self, hbox: &GtkBox, idx: usize, ready: bool) {
         let panel = self.clone();
         let menu_click = GestureClick::new();
         menu_click.set_button(3);
-        menu_click.connect_pressed(move |_, _, x, y| panel.source_menu(idx, x, y));
+        menu_click.connect_pressed(move |_, _, x, y| {
+            if ready {
+                panel.source_menu(idx, x, y);
+            } else {
+                panel.source_menu_unloaded(idx, x, y);
+            }
+        });
         hbox.add_controller(menu_click);
     }
 
@@ -432,7 +474,8 @@ impl SourcePanel {
         click.set_button(1);
         click.connect_released(move |_, _, _, _| panel.toggle_collapsed(key.clone()));
         hbox.add_controller(click);
-        self.attach_source_menu(&hbox, idx);
+        // A folder row only exists once the source has loaded content.
+        self.attach_source_menu(&hbox, idx, true);
 
         Self::wrap(hbox)
     }
