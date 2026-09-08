@@ -29,6 +29,14 @@ own rap-lyrics workflow first, then generalised.
   on the settings dialog's Apply/OK (`css::reload`). A new stylesheet's stem
   goes in `CSS_FILES` in **both** `src/css.rs` and `build.rs`.
 - **Resources**: GResources compiled at build time via `build.rs`.
+- **Icons**: bundled subset of JetBrains' "NetIcons" set under
+  `assets/icons/{color,dark,light}/<name>-<variant>.svg` (Apache-2.0 — keep
+  `assets/icons/NOTICE`; some are repurposed for actions that differ from
+  their JetBrains meaning). Build every icon widget through
+  `crate::app::icons::img` / `paintable` — never `Image::from_resource`
+  directly — so it picks the variant set by `icons::set_variant` from
+  `Settings::icon_theme` (`Color`, or `Monochrome` following the light/dark
+  `Theme`). Not `clipboard.svg` (the splash/welcome brand mark).
 - **Rhyme/pronunciation**: Datamuse API + CMUdict + advanced/simple
   fallbacks, layered — never a single lookup. Scoring is syllable-level
   local alignment (Hirjee & Brown); `rhyme/highlight.rs` cycles a 24-hue

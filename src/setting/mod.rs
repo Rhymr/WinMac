@@ -29,6 +29,32 @@ impl Theme {
     }
 }
 
+/// Which bundled icon set to draw the UI with (see `crate::app::icons`).
+/// `Color` is the JetBrains "NetIcons" colour set; `Monochrome` is the flat
+/// grey set, which then tracks [`Theme`] (dark greys vs light greys).
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum IconTheme {
+    Color,
+    Monochrome,
+}
+
+impl IconTheme {
+    fn as_str(self) -> &'static str {
+        match self {
+            IconTheme::Color => "color",
+            IconTheme::Monochrome => "monochrome",
+        }
+    }
+
+    fn parse(s: &str) -> Option<Self> {
+        match s {
+            "color" => Some(IconTheme::Color),
+            "monochrome" => Some(IconTheme::Monochrome),
+            _ => None,
+        }
+    }
+}
+
 /// User-configurable app behavior, persisted across launches. New
 /// `TextEditor`s read this at construction time — changing a setting takes
 /// effect for tabs opened afterward, not ones already open.
@@ -48,6 +74,7 @@ pub struct Settings {
     pub tab_width: u32,
     pub git_autostage: bool,
     pub theme: Theme,
+    pub icon_theme: IconTheme,
     pub font_family: String,
     pub font_size: u32,
 }
@@ -67,6 +94,7 @@ impl Default for Settings {
             tab_width: 4,
             git_autostage: true,
             theme: Theme::Dark,
+            icon_theme: IconTheme::Color,
             // JetBrains Mono, 13px — matches the JetBrains IDE look the
             // rest of the app's styling is chasing. Falls back to whatever
             // Pango's normal font matching picks if it isn't installed
@@ -111,6 +139,9 @@ impl Settings {
                 "tab_width" => settings.tab_width = value.parse().unwrap_or(settings.tab_width),
                 "git_autostage" => settings.git_autostage = value == "true",
                 "theme" => settings.theme = Theme::parse(value).unwrap_or(settings.theme),
+                "icon_theme" => {
+                    settings.icon_theme = IconTheme::parse(value).unwrap_or(settings.icon_theme)
+                }
                 "font_family" if !value.is_empty() => settings.font_family = value.to_string(),
                 "font_size" => settings.font_size = value.parse().unwrap_or(settings.font_size),
                 _ => {}
@@ -128,7 +159,7 @@ impl Settings {
         // free-text field so a pasted font name can't corrupt the file.
         let font_family = self.font_family.replace(['\n', '\r'], "");
         let contents = format!(
-            "show_syllable_gutter={}\nshow_vcs_gutter={}\nrhyme_highlighting={}\nrhyme_stop_at_blank_line={}\nword_completion={}\nauto_indent={}\ntab_width={}\ngit_autostage={}\ntheme={}\nfont_family={}\nfont_size={}\n",
+            "show_syllable_gutter={}\nshow_vcs_gutter={}\nrhyme_highlighting={}\nrhyme_stop_at_blank_line={}\nword_completion={}\nauto_indent={}\ntab_width={}\ngit_autostage={}\ntheme={}\nicon_theme={}\nfont_family={}\nfont_size={}\n",
             self.show_syllable_gutter,
             self.show_vcs_gutter,
             self.rhyme_highlighting,
@@ -138,6 +169,7 @@ impl Settings {
             self.tab_width,
             self.git_autostage,
             self.theme.as_str(),
+            self.icon_theme.as_str(),
             font_family,
             self.font_size,
         );

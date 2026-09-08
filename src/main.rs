@@ -77,6 +77,7 @@ fn main() -> glib::ExitCode {
 
     let apply_theme = || {
         let settings = Settings::load();
+        app::icons::set_variant(&settings);
         let css_provider = css::init(&settings);
         css::apply_css_to_app(&css_provider);
         css::sync_style_manager(&settings);

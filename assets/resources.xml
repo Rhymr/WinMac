@@ -3,21 +3,57 @@
   <gresource prefix="/org/gtk_rs/rhymr">
     <file>styles/rhymr.xml</file>
     <file>styles/rhymr-light.xml</file>
-    <file compressed="true" preprocess="xml-stripblanks">icons/text_dark.svg</file>
-    <file compressed="true" preprocess="xml-stripblanks">icons/folder.svg</file>
-    <file compressed="true" preprocess="xml-stripblanks">icons/note-active.svg</file>
     <file compressed="true" preprocess="xml-stripblanks">icons/clipboard.svg</file>
-    <file compressed="true" preprocess="xml-stripblanks">icons/gg-new-file.svg</file>
-    <file compressed="true" preprocess="xml-stripblanks">icons/gg-new-folder.svg</file>
-    <file compressed="true" preprocess="xml-stripblanks">icons/gg-save-all.svg</file>
-    <file compressed="true" preprocess="xml-stripblanks">icons/gg-git-pull.svg</file>
-    <file compressed="true" preprocess="xml-stripblanks">icons/gg-git-commit.svg</file>
-    <file compressed="true" preprocess="xml-stripblanks">icons/gg-git-push.svg</file>
-    <file compressed="true" preprocess="xml-stripblanks">icons/gg-git-fetch.svg</file>
-    <file compressed="true" preprocess="xml-stripblanks">icons/gg-settings.svg</file>
-    <file compressed="true" preprocess="xml-stripblanks">icons/gg-tree-folder.svg</file>
-    <file compressed="true" preprocess="xml-stripblanks">icons/gg-tree-file.svg</file>
-    <file compressed="true" preprocess="xml-stripblanks">icons/gg-search.svg</file>
-    <file compressed="true" preprocess="xml-stripblanks">icons/gg-more.svg</file>
+    <file compressed="true" preprocess="xml-stripblanks">icons/color/new-file-color.svg</file>
+    <file compressed="true" preprocess="xml-stripblanks">icons/color/new-folder-color.svg</file>
+    <file compressed="true" preprocess="xml-stripblanks">icons/color/save-all-color.svg</file>
+    <file compressed="true" preprocess="xml-stripblanks">icons/color/git-pull-color.svg</file>
+    <file compressed="true" preprocess="xml-stripblanks">icons/color/git-commit-color.svg</file>
+    <file compressed="true" preprocess="xml-stripblanks">icons/color/git-push-color.svg</file>
+    <file compressed="true" preprocess="xml-stripblanks">icons/color/git-fetch-color.svg</file>
+    <file compressed="true" preprocess="xml-stripblanks">icons/color/settings-color.svg</file>
+    <file compressed="true" preprocess="xml-stripblanks">icons/color/search-color.svg</file>
+    <file compressed="true" preprocess="xml-stripblanks">icons/color/more-color.svg</file>
+    <file compressed="true" preprocess="xml-stripblanks">icons/color/copy-color.svg</file>
+    <file compressed="true" preprocess="xml-stripblanks">icons/color/paste-color.svg</file>
+    <file compressed="true" preprocess="xml-stripblanks">icons/color/rename-color.svg</file>
+    <file compressed="true" preprocess="xml-stripblanks">icons/color/delete-color.svg</file>
+    <file compressed="true" preprocess="xml-stripblanks">icons/color/directory-color.svg</file>
+    <file compressed="true" preprocess="xml-stripblanks">icons/color/file-color.svg</file>
+    <file compressed="true" preprocess="xml-stripblanks">icons/color/folder-ios-color.svg</file>
+    <file compressed="true" preprocess="xml-stripblanks">icons/dark/new-file-dark.svg</file>
+    <file compressed="true" preprocess="xml-stripblanks">icons/dark/new-folder-dark.svg</file>
+    <file compressed="true" preprocess="xml-stripblanks">icons/dark/save-all-dark.svg</file>
+    <file compressed="true" preprocess="xml-stripblanks">icons/dark/git-pull-dark.svg</file>
+    <file compressed="true" preprocess="xml-stripblanks">icons/dark/git-commit-dark.svg</file>
+    <file compressed="true" preprocess="xml-stripblanks">icons/dark/git-push-dark.svg</file>
+    <file compressed="true" preprocess="xml-stripblanks">icons/dark/git-fetch-dark.svg</file>
+    <file compressed="true" preprocess="xml-stripblanks">icons/dark/settings-dark.svg</file>
+    <file compressed="true" preprocess="xml-stripblanks">icons/dark/search-dark.svg</file>
+    <file compressed="true" preprocess="xml-stripblanks">icons/dark/more-dark.svg</file>
+    <file compressed="true" preprocess="xml-stripblanks">icons/dark/copy-dark.svg</file>
+    <file compressed="true" preprocess="xml-stripblanks">icons/dark/paste-dark.svg</file>
+    <file compressed="true" preprocess="xml-stripblanks">icons/dark/rename-dark.svg</file>
+    <file compressed="true" preprocess="xml-stripblanks">icons/dark/delete-dark.svg</file>
+    <file compressed="true" preprocess="xml-stripblanks">icons/dark/directory-dark.svg</file>
+    <file compressed="true" preprocess="xml-stripblanks">icons/dark/file-dark.svg</file>
+    <file compressed="true" preprocess="xml-stripblanks">icons/dark/folder-ios-dark.svg</file>
+    <file compressed="true" preprocess="xml-stripblanks">icons/light/new-file-light.svg</file>
+    <file compressed="true" preprocess="xml-stripblanks">icons/light/new-folder-light.svg</file>
+    <file compressed="true" preprocess="xml-stripblanks">icons/light/save-all-light.svg</file>
+    <file compressed="true" preprocess="xml-stripblanks">icons/light/git-pull-light.svg</file>
+    <file compressed="true" preprocess="xml-stripblanks">icons/light/git-commit-light.svg</file>
+    <file compressed="true" preprocess="xml-stripblanks">icons/light/git-push-light.svg</file>
+    <file compressed="true" preprocess="xml-stripblanks">icons/light/git-fetch-light.svg</file>
+    <file compressed="true" preprocess="xml-stripblanks">icons/light/settings-light.svg</file>
+    <file compressed="true" preprocess="xml-stripblanks">icons/light/search-light.svg</file>
+    <file compressed="true" preprocess="xml-stripblanks">icons/light/more-light.svg</file>
+    <file compressed="true" preprocess="xml-stripblanks">icons/light/copy-light.svg</file>
+    <file compressed="true" preprocess="xml-stripblanks">icons/light/paste-light.svg</file>
+    <file compressed="true" preprocess="xml-stripblanks">icons/light/rename-light.svg</file>
+    <file compressed="true" preprocess="xml-stripblanks">icons/light/delete-light.svg</file>
+    <file compressed="true" preprocess="xml-stripblanks">icons/light/directory-light.svg</file>
+    <file compressed="true" preprocess="xml-stripblanks">icons/light/file-light.svg</file>
+    <file compressed="true" preprocess="xml-stripblanks">icons/light/folder-ios-light.svg</file>
   </gresource>
-</gresources> 
+</gresources>

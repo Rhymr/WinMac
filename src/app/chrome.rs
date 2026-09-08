@@ -9,8 +9,7 @@ use crate::app::vertical_label::VerticalLabel;
 use crate::workspace::controller::WorkspaceController;
 use gtk::prelude::*;
 use gtk::{
-    Align, Box as GtkBox, Button, Label, MenuButton, Orientation, Separator, ToggleButton,
-    pango,
+    Align, Box as GtkBox, Button, Label, MenuButton, Orientation, Separator, ToggleButton, pango,
 };
 use std::rc::Rc;
 
@@ -24,8 +23,8 @@ fn activate_app(name: &str) {
 /// Toolbar icon size, matching JetBrains.
 const TOOLBAR_ICON: i32 = 16;
 
-/// A flat toolbar button showing bundled css.gg icon `icon`, wired to an
-/// `app.*` action, with `class` (`run-action` / `git-*`) for its tint.
+/// A flat toolbar button showing bundled icon `icon`, wired to an `app.*`
+/// action, with `class` (`run-action` / `git-*`) for its tint.
 fn tool_button(icon: &str, action: &str, tooltip: &str, class: &str) -> Button {
     let button = Button::builder()
         .action_name(action)
@@ -154,7 +153,7 @@ pub fn left_stripe<F: Fn(bool) + 'static>(project_visible: bool, on_toggle: F) -
 
     let content = GtkBox::new(Orientation::Vertical, 3);
     content.set_halign(Align::Center);
-    content.append(&img("tree-folder", 13));
+    content.append(&img("directory", 13));
     content.append(&VerticalLabel::new("Project"));
 
     let btn = ToggleButton::builder()

@@ -1,0 +1,17 @@
+Rhymr bundles a subset of JetBrains' "NetIcons" icon collection, obtained
+from https://intellij-icons.jetbrains.design/ and stored under
+assets/icons/{color,dark,light}/.
+
+  NetIcons are copyright © JetBrains s.r.o. and are distributed under the
+  Apache License, Version 2.0. A copy of the license is available at
+  https://www.apache.org/licenses/LICENSE-2.0
+
+This notice is retained as required by section 4 of that license. The
+icons have been renamed and, in some places, repurposed for actions that
+differ from their original JetBrains meaning.
+
+JetBrains product names and logos are trademarks of JetBrains s.r.o.
+Their presence in this icon set does not imply any affiliation with,
+sponsorship by, or endorsement from JetBrains.
+
+assets/icons/clipboard.svg is not part of this set.

@@ -1,4 +1,4 @@
-use super::{Settings, Theme};
+use super::{IconTheme, Settings, Theme};
 use crate::workspace::controller::WorkspaceController;
 use gtk::prelude::*;
 use gtk::{
@@ -146,6 +146,15 @@ pub fn show_settings_dialog(app: &Application, controller: Option<Rc<WorkspaceCo
     let theme_dropdown = DropDown::from_strings(&["Dark", "Light"]);
     theme_dropdown.set_selected(if settings.theme == Theme::Dark { 0 } else { 1 });
 
+    // Icon set: "Color" is the JetBrains NetIcons colour glyphs; "Monochrome"
+    // is the flat grey set, which then follows the light/dark theme.
+    let icon_theme_dropdown = DropDown::from_strings(&["Color", "Monochrome"]);
+    icon_theme_dropdown.set_selected(if settings.icon_theme == IconTheme::Color {
+        0
+    } else {
+        1
+    });
+
     let font_button = FontDialogButton::builder()
         .dialog(&FontDialog::builder().title("Font").build())
         .valign(Align::Center)
@@ -164,6 +173,7 @@ pub fn show_settings_dialog(app: &Application, controller: Option<Rc<WorkspaceCo
         .margin_end(24)
         .build();
     appearance_page.append(&field_row("Theme:", &theme_dropdown));
+    appearance_page.append(&field_row("Icons:", &icon_theme_dropdown));
     appearance_page.append(&field_row("Editor font:", &font_button));
     stack.add_named(&appearance_page, Some("appearance"));
 
@@ -307,6 +317,7 @@ pub fn show_settings_dialog(app: &Application, controller: Option<Rc<WorkspaceCo
         let completion_toggle = completion_toggle.clone();
         let git_toggle = git_toggle.clone();
         let theme_dropdown = theme_dropdown.clone();
+        let icon_theme_dropdown = icon_theme_dropdown.clone();
         let font_button = font_button.clone();
         move || {
             let font_desc = font_button.font_desc().unwrap_or_else(|| {
@@ -334,6 +345,11 @@ pub fn show_settings_dialog(app: &Application, controller: Option<Rc<WorkspaceCo
                     Theme::Dark
                 } else {
                     Theme::Light
+                },
+                icon_theme: if icon_theme_dropdown.selected() == 0 {
+                    IconTheme::Color
+                } else {
+                    IconTheme::Monochrome
                 },
                 font_family,
                 font_size,
@@ -373,6 +389,8 @@ pub fn show_settings_dialog(app: &Application, controller: Option<Rc<WorkspaceCo
     let f = update_apply_sensitivity.clone();
     theme_dropdown.connect_selected_notify(move |_| f());
     let f = update_apply_sensitivity.clone();
+    icon_theme_dropdown.connect_selected_notify(move |_| f());
+    let f = update_apply_sensitivity.clone();
     font_button.connect_font_desc_notify(move |_| f());
 
     let apply: Rc<dyn Fn()> = Rc::new({
@@ -382,6 +400,10 @@ pub fn show_settings_dialog(app: &Application, controller: Option<Rc<WorkspaceCo
         move || {
             let current = read_current();
             current.save();
+            // Chrome/tree already on screen keep their current icons; the
+            // new variant applies to widgets built after this point (new
+            // tabs, a rebuilt tree) and fully on next launch.
+            crate::app::icons::set_variant(&current);
             crate::css::reload(&current);
             crate::css::sync_style_manager(&current);
             if let Some(controller) = &controller {

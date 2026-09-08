@@ -9,17 +9,13 @@ use crate::file::tree::FileTree;
 use controller::WorkspaceController;
 use gtk::prelude::*;
 use gtk::{
-    Box, Button, EventSequenceState, Frame, GestureClick, Image, Label, Notebook, TextBuffer,
-    TextView, Widget, Window, gdk, pango,
+    Box, Button, EventSequenceState, Frame, GestureClick, Label, Notebook, TextBuffer, TextView,
+    Widget, Window, gdk, pango,
 };
 use std::cell::RefCell;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
-
-/// Same file icon the file tree uses for an "open" row — reused here so a
-/// tab's icon matches what the user sees in the tree.
-const TAB_ICON_RESOURCE: &str = "/org/gtk_rs/rhymr/icons/gg-tree-file.svg";
 
 pub struct Workspace {
     frame: Frame,
@@ -585,9 +581,10 @@ fn build_tab_widget(path: &Path) -> (Box, Button) {
         .tooltip_text(display_path)
         .build();
 
-    let icon = Image::from_resource(TAB_ICON_RESOURCE);
+    // Same file icon the file tree uses for an "open" row, so a tab's icon
+    // matches what the user sees in the tree.
+    let icon = crate::app::icons::img("file", 16);
     icon.set_css_classes(&["tab-icon"]);
-    icon.set_pixel_size(16);
 
     let display_name = path
         .file_name()
