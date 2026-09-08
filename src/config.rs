@@ -35,3 +35,7 @@ pub fn apple_notes_cache(workspace_root: Option<&Path>, scope: NotesCacheScope) 
 
 /// How often the "Apple Notes" tree re-reads from the Notes app.
 pub const APPLE_NOTES_REFRESH: Duration = Duration::from_secs(300);
+
+/// Cap on a single Rhyme Search lookup (the Datamuse round-trips). Past
+/// this the lookup is abandoned and the panel shows an error state.
+pub const RHYME_LOOKUP_TIMEOUT: Duration = Duration::from_secs(8);
