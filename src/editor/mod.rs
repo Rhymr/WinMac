@@ -50,9 +50,13 @@ pub struct TextEditor {
     // can hold its own clone alongside `apply_settings`.
     rhyme_highlight: Rc<RefCell<Option<RhymeHighlight>>>,
     // Strip under the editor listing the active rhyme groups (swatch +
-    // representative word); hidden when highlighting is off or there are
-    // no groups. Rebuilt from `RhymeHighlight::connect_groups_changed`.
+    // representative word); hidden when highlighting is off, the legend
+    // setting is off, or there are no groups.
     rhyme_legend: GtkBox,
+    // Live copies of the two rhyme-view settings, read by the legend
+    // rebuild and the hover handler.
+    rhyme_legend_on: Rc<Cell<bool>>,
+    rhyme_hover_on: Rc<Cell<bool>>,
 }
 
 impl Default for TextEditor {
@@ -258,6 +262,8 @@ impl TextEditor {
             word_provider: RefCell::new(None),
             rhyme_highlight: Rc::new(RefCell::new(None)),
             rhyme_legend,
+            rhyme_legend_on: Rc::new(Cell::new(settings.show_rhyme_legend)),
+            rhyme_hover_on: Rc::new(Cell::new(settings.rhyme_hover_emphasis)),
         };
 
         editor.setup_context_menu();
@@ -280,9 +286,13 @@ impl TextEditor {
         // the pointer changes; never recomputes.
         {
             let rhyme = editor.rhyme_highlight.clone();
+            let hover_on = editor.rhyme_hover_on.clone();
             let view = editor.source_view.clone();
             let motion = gtk::EventControllerMotion::new();
             motion.connect_motion(move |_, x, y| {
+                if !hover_on.get() {
+                    return;
+                }
                 let slot = rhyme.borrow();
                 let Some(handle) = slot.as_ref() else {
                     return;
@@ -475,13 +485,19 @@ impl TextEditor {
         }
         drop(provider_slot);
 
+        self.rhyme_legend_on.set(settings.show_rhyme_legend);
+        self.rhyme_hover_on.set(settings.rhyme_hover_emphasis);
+
         let mut rhyme_slot = self.rhyme_highlight.borrow_mut();
         match (rhyme_slot.is_some(), settings.rhyme_highlighting) {
             (false, true) => {
                 log::debug!("rhyme highlight: attaching");
                 let handle = crate::rhyme::highlight::attach(&self.buffer, settings.theme);
                 let legend = self.rhyme_legend.clone();
-                handle.connect_groups_changed(move |groups| rebuild_legend(&legend, groups));
+                let legend_on = self.rhyme_legend_on.clone();
+                handle.connect_groups_changed(move |groups| {
+                    rebuild_legend(&legend, groups, legend_on.get())
+                });
                 *rhyme_slot = Some(handle);
             }
             (true, false) => {
@@ -499,6 +515,16 @@ impl TextEditor {
                 }
             }
             (false, false) => {}
+        }
+
+        // Live-apply the two view toggles: hide the legend if it's off (or
+        // repaint at current visibility), and clear any hover emphasis if
+        // hover was just turned off.
+        rebuild_legend_visibility(&self.rhyme_legend, settings.show_rhyme_legend);
+        if !settings.rhyme_hover_emphasis
+            && let Some(handle) = rhyme_slot.as_ref()
+        {
+            handle.emphasise_group(None);
         }
     }
 
@@ -589,8 +615,8 @@ impl TextEditor {
 
 /// Repaint the rhyme-group legend strip: a colored swatch + representative
 /// word per active group, left to right in color-assignment order. Hidden
-/// when there are no groups (highlighting off, or nothing rhymes yet).
-fn rebuild_legend(row: &GtkBox, groups: &[crate::rhyme::highlight::RhymeGroup]) {
+/// when `enabled` is off, there are no groups, or highlighting is off.
+fn rebuild_legend(row: &GtkBox, groups: &[crate::rhyme::highlight::RhymeGroup], enabled: bool) {
     while let Some(child) = row.first_child() {
         row.remove(&child);
     }
@@ -625,7 +651,13 @@ fn rebuild_legend(row: &GtkBox, groups: &[crate::rhyme::highlight::RhymeGroup]) 
 
         row.append(&item);
     }
-    row.set_visible(!groups.is_empty());
+    row.set_visible(enabled && !groups.is_empty());
+}
+
+/// Re-apply just the legend's visibility to `enabled` (used when the
+/// setting toggles while the group list hasn't changed).
+fn rebuild_legend_visibility(row: &GtkBox, enabled: bool) {
+    row.set_visible(enabled && row.first_child().is_some());
 }
 
 /// The GtkSourceView style scheme id (see assets/styles/*.xml) matching
@@ -669,7 +701,10 @@ fn create_syllable_renderer(
     let syllable_renderer = GutterRendererText::new();
     syllable_renderer.set_css_classes(&["syllable-count"]);
     syllable_renderer.set_xalign(0.5);
-    syllable_renderer.set_yalign(0.5);
+    // Top-align (like the line numbers) so on a soft-wrapped line the count
+    // sits beside the line's first visual row, not floating in the middle
+    // of the wrapped block.
+    syllable_renderer.set_yalign(0.0);
 
     let buffer_clone = buffer.clone();
     syllable_renderer.connect_query_data(move |renderer, _line_obj, line_num| {
