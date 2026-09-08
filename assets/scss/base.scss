@@ -50,10 +50,8 @@ frame {
     }
 
     & > label {
-        text-align: left;
         padding: 2px 6px;
         color: var(--text-bright);
-        word-wrap: break-word;
         background-color: var(--bg-mid);
     }
 }
@@ -142,7 +140,6 @@ entry {
     // Classic blue focus ring, no fill change.
     &:focus {
         border-color: var(--selection-bg);
-        outline: none;
         background: var(--bg-mid);
     }
 }
@@ -155,7 +152,6 @@ button {
     min-height: 22px;
     padding: 2px 12px;
     margin: 0;
-    cursor: pointer;
     transition: background-color var(--transition-fast);
 
     // Classic buttons shift only their fill on hover/active — the 1px border
@@ -172,7 +168,6 @@ button {
         background: var(--button-disabled);
         color: var(--text-muted);
         border: 1px solid var(--border-light);
-        cursor: not-allowed;
     }
 }
 
@@ -200,10 +195,8 @@ listbox {
     }
 
     & label {
-        text-align: left;
         padding: 2px 6px;
         color: var(--text-bright);
-        word-wrap: break-word;
         background-color: var(--bg-mid);
     }
 }
@@ -234,24 +227,6 @@ scrollbar {
 
     & > range > trough > slider:hover {
         background-color: var(--border-hover);
-    }
-}
-
-/* GtkDropDown (settings theme picker) — its button + its popup list. */
-dropdown {
-    & > button {
-        border-radius: 0;
-        background: var(--bg-mid);
-        border: 1px solid var(--border-light);
-        padding: 2px 8px;
-        min-height: 22px;
-    }
-
-    & > popover > contents {
-        background-color: var(--popover-bg-color);
-        border: 1px solid var(--border-light);
-        border-radius: 0;
-        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
     }
 }
 
