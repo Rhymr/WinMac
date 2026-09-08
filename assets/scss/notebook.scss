@@ -109,8 +109,11 @@ notebook {
         color: inherit;
     }
 
+    /* Hovering the × itself: a full grey circle behind a brighter-red
+       glyph, JetBrains-style. */
     &:hover {
-        background: none;
+        background-color: var(--bg-light);
+        border-radius: 50%;
         color: var(--destructive-hover);
     }
 }
@@ -118,6 +121,6 @@ notebook {
 tab:checked .tab-close-button,
 tab:hover .tab-close-button {
     opacity: 1;
-    min-width: 14px;
-    min-height: 14px;
+    min-width: 16px;
+    min-height: 16px;
 }
