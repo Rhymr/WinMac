@@ -22,15 +22,10 @@ notebook {
         min-height: 26px;
         border-bottom: 1px solid var(--border-dark);
 
-        /* Paging arrows, shown only when the tabs overflow — boxed on both
-           sides so each one is divided from the tab strip (a lone tab
-           `border-right` otherwise divides only the right arrow). */
+        /* Paging arrows, shown only when the tabs overflow. */
         & > button {
             background: none;
-            border-top: none;
-            border-bottom: none;
-            border-left: 1px solid var(--border-dark);
-            border-right: 1px solid var(--border-dark);
+            border: none;
             border-radius: 0;
             min-height: 0;
             min-width: 0;
@@ -46,11 +41,10 @@ notebook {
                    whole tab is evenly padded around icon / name / × */
                 padding: 3px 6px;
                 min-height: 24px;
-                /* tabs size to their content; the name's own
-                   `max_width_chars` caps how wide a long filename can push
-                   a tab before it ellipsizes (build_tab_widget) */
+                /* tabs size to their content; `build_tab_widget` caps the
+                   name length. No hard divider between tabs — the active
+                   tab's top accent bar is the only separator. */
                 border: none;
-                border-right: 1px solid var(--border-dark);
                 border-radius: 0;
                 margin: 0;
                 transition:
