@@ -53,7 +53,7 @@ where
         .css_classes(vec!["title-3", "bold"])
         .build();
     let app_version = Label::builder()
-        .label("2026.1")
+        .label(crate::version::display())
         .halign(Align::Start)
         .css_classes(vec!["caption", "dim-label"])
         .build();
@@ -111,17 +111,17 @@ where
         vec![
             (
                 "Documentation",
-                menu_action(move || open_uri(&window_for_docs, "https://github.com/rhymr/win-mac")),
+                menu_action(move || crate::app::open_uri(&window_for_docs, crate::app::DOCS_URL)),
             ),
             (
                 "Report an Issue",
                 menu_action(move || {
-                    open_uri(&window_for_issue, "https://github.com/rhymr/win-mac/issues")
+                    crate::app::open_uri(&window_for_issue, crate::app::ISSUES_URL)
                 }),
             ),
             (
                 "About Rhymr",
-                menu_action(move || show_about(&window_for_about)),
+                menu_action(move || crate::app::about::show(&window_for_about)),
             ),
         ],
     );
@@ -601,31 +601,6 @@ fn sidebar_dropdown(label: &str, items: Vec<(&str, MenuAction)>) -> MenuButton {
         .build();
     button.set_popover(Some(&popover));
     button
-}
-
-fn open_uri(parent: &ApplicationWindow, uri: &str) {
-    let launcher = gtk::UriLauncher::new(uri);
-    let parent = parent.clone();
-    let uri = uri.to_string();
-    glib::MainContext::default().spawn_local(async move {
-        if let Err(e) = launcher.launch_future(Some(&parent)).await {
-            eprintln!("Failed to open {uri}: {e}");
-        }
-    });
-}
-
-fn show_about(parent: &ApplicationWindow) {
-    let dialog = gtk::AboutDialog::builder()
-        .program_name("Rhymr")
-        .version("2026.1")
-        .website("https://rhymr.app")
-        .website_label("Visit Website")
-        .authors(vec!["Rhymr Team".to_string()])
-        .logo_icon_name("text.svg")
-        .modal(true)
-        .transient_for(parent)
-        .build();
-    dialog.present();
 }
 
 /// Up to two initials for a project avatar — the first alphanumeric char and

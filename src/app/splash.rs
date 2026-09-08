@@ -40,7 +40,7 @@ pub fn show(app: &Application) -> ApplicationWindow {
     );
     head.append(
         &Label::builder()
-            .label("2026.1")
+            .label(crate::version::display())
             .halign(Align::Start)
             .css_classes(["splash-version"])
             .build(),

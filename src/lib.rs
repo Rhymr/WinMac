@@ -1,5 +1,6 @@
 // Root
 pub mod css;
+pub mod version;
 // Folders
 pub mod app;
 pub mod editor;

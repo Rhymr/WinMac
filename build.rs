@@ -1,6 +1,7 @@
 use grass::Options;
 use std::fs;
 use std::path::Path;
+use std::process::Command;
 
 // Kept in sync with `CSS_FILES` in src/css.rs — build.rs precompiles these
 // to assets/css/*.css (unused by the app itself, which recompiles from
@@ -22,7 +23,37 @@ const CSS_FILES: [&str; 14] = [
     "assets/{1}/welcome.{1}",
 ];
 
+/// Ask `Build/version.sh` for the git-derived version; fall back to
+/// `CARGO_PKG_VERSION` if git or the script isn't available (e.g. a source
+/// tarball). Exposed to the crate as `RHYMR_VERSION` / `RHYMR_VERSION_FULL`
+/// (see `src/version.rs`).
+fn emit_version() {
+    let run = |args: &[&str]| -> Option<String> {
+        let out = Command::new("bash")
+            .arg("Build/version.sh")
+            .args(args)
+            .output()
+            .ok()?;
+        out.status
+            .success()
+            .then(|| String::from_utf8_lossy(&out.stdout).trim().to_string())
+            .filter(|s| !s.is_empty())
+    };
+
+    let pkg = std::env::var("CARGO_PKG_VERSION").unwrap_or_else(|_| "0.0.0".into());
+    let core = run(&[]).unwrap_or_else(|| pkg.clone());
+    let full = run(&["--full"]).unwrap_or_else(|| core.clone());
+    println!("cargo:rustc-env=RHYMR_VERSION={core}");
+    println!("cargo:rustc-env=RHYMR_VERSION_FULL={full}");
+    // Re-run when the commit or working-tree state changes.
+    println!("cargo:rerun-if-changed=.git/HEAD");
+    println!("cargo:rerun-if-changed=.git/index");
+    println!("cargo:rerun-if-changed=Build/version.sh");
+}
+
 fn main() {
+    emit_version();
+
     // Tell cargo to re-run this build script if any asset changes
     println!("cargo:rerun-if-changed=assets");
 
