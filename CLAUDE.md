@@ -191,9 +191,10 @@ clearly-labeled step, not silently mixed into a feature change.
 ## Branching & releases
 
 - **`release`** — stable, protected. Only merges land here; direct pushes are
-  blocked. A push to `release` triggers `.github/workflows/release.yml`,
-  which builds macOS + Windows binaries, tags `v<version>`, and publishes a
-  GitHub Release.
+  blocked. There is no automated release: Rhymr is open source and free to
+  build from source. Distributable macOS + Windows binaries are built and
+  published manually (sold on the project website); the source and this repo
+  stay MIT-licensed and buildable by anyone.
 - **`beta`** — the working branch. Feature work branches off `beta` and
   merges back into it; `beta` merges into `release` for a cut.
 - `.github/workflows/ci.yml` runs `fmt --check`, `clippy -D warnings`,
