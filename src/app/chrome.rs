@@ -1,15 +1,14 @@
-//! Classic JetBrains-style window chrome the app didn't originally have: a
-//! thin top toolbar of icon buttons, and a left tool-window stripe that
-//! toggles the Project / Rhyme Search panels.
-//!
-//! The toolbar buttons drive existing `app.*` actions by name (registered
-//! in [`crate::app::menu`]), so the row is functional rather than
-//! decorative. The stripe buttons just flip a panel widget's visibility —
-//! `GtkPaned` hands the freed space to the editor on its own.
+//! Classic JetBrains-style window chrome: a top toolbar (file actions on the
+//! left, a colour-coded `Git:` group on the right), a left tool-window
+//! stripe with a vertical "Project" label, and a bottom stripe for the
+//! Rhyme Search panel — the way a JetBrains IDE arranges its tool windows.
 
+use crate::app::vertical_label::VerticalLabel;
 use gtk::gio;
 use gtk::prelude::*;
-use gtk::{Align, Box as GtkBox, Button, MenuButton, Orientation, Separator, ToggleButton, Widget};
+use gtk::{
+    Align, Box as GtkBox, Button, Image, Label, MenuButton, Orientation, Separator, ToggleButton,
+};
 
 /// A flat icon button wired to an `app.*` action by name.
 fn tool_button(icon: &str, action: &str, tooltip: &str) -> Button {
@@ -20,11 +19,17 @@ fn tool_button(icon: &str, action: &str, tooltip: &str) -> Button {
         .build()
 }
 
-/// The "Configure" dropdown at the right of the toolbar — Settings first,
-/// then the Help entries. Replaces the old bare gear icon.
+/// Same, plus an extra CSS class (used to colour the Git actions).
+fn git_button(icon: &str, action: &str, tooltip: &str, class: &str) -> Button {
+    let b = tool_button(icon, action, tooltip);
+    b.add_css_class(class);
+    b
+}
+
+/// The "Configure" dropdown — Settings first, then Help.
 fn configure_button() -> MenuButton {
     let menu = gio::Menu::new();
-    menu.append(Some("Settings…"), Some("app.preferences"));
+    menu.append(Some("Settings\u{2026}"), Some("app.preferences"));
 
     let help = gio::Menu::new();
     help.append(Some("Documentation"), Some("app.docs"));
@@ -34,15 +39,13 @@ fn configure_button() -> MenuButton {
 
     MenuButton::builder()
         .label("Configure")
-        .icon_name("preferences-system-symbolic")
         .always_show_arrow(true)
         .menu_model(&menu)
         .tooltip_text("Configure")
         .build()
 }
 
-/// The top toolbar row: file ops, a separator, VCS ops, then (pushed to the
-/// right) the Configure dropdown.
+/// The top toolbar row.
 pub fn main_toolbar() -> GtkBox {
     let bar = GtkBox::builder()
         .orientation(Orientation::Horizontal)
@@ -51,40 +54,63 @@ pub fn main_toolbar() -> GtkBox {
         .build();
 
     bar.append(&tool_button("document-new-symbolic", "app.new", "New File"));
-    bar.append(&tool_button("document-open-symbolic", "app.open", "Open…"));
+    bar.append(&tool_button(
+        "document-open-symbolic",
+        "app.open",
+        "Open\u{2026}",
+    ));
     bar.append(&tool_button(
         "document-save-symbolic",
         "app.save-all",
         "Save All",
     ));
 
-    bar.append(&Separator::new(Orientation::Vertical));
-
-    bar.append(&tool_button(
-        "object-select-symbolic",
-        "app.git-commit",
-        "Commit…",
-    ));
-    bar.append(&tool_button("go-up-symbolic", "app.git-push", "Push…"));
-    bar.append(&tool_button("go-down-symbolic", "app.git-pull", "Pull…"));
-    bar.append(&tool_button(
-        "view-refresh-symbolic",
-        "app.git-fetch",
-        "Fetch",
-    ));
-
     let spacer = GtkBox::new(Orientation::Horizontal, 0);
     spacer.set_hexpand(true);
     bar.append(&spacer);
 
+    // Git: <pull> <commit> <push> <fetch> — JetBrains colours (blue update,
+    // green commit/push).
+    bar.append(
+        &Label::builder()
+            .label("Git:")
+            .css_classes(["toolbar-group-label"])
+            .build(),
+    );
+    bar.append(&git_button(
+        "go-down-symbolic",
+        "app.git-pull",
+        "Pull\u{2026}",
+        "git-pull",
+    ));
+    bar.append(&git_button(
+        "object-select-symbolic",
+        "app.git-commit",
+        "Commit\u{2026}",
+        "git-commit",
+    ));
+    bar.append(&git_button(
+        "go-up-symbolic",
+        "app.git-push",
+        "Push\u{2026}",
+        "git-push",
+    ));
+    bar.append(&git_button(
+        "view-refresh-symbolic",
+        "app.git-fetch",
+        "Fetch",
+        "git-fetch",
+    ));
+
+    bar.append(&Separator::new(Orientation::Vertical));
     bar.append(&configure_button());
 
     bar
 }
 
-/// The left tool-window stripe: one toggle per dockable panel. `active`
-/// tracks the panel's current visibility; toggling flips it.
-pub fn left_stripe(project_panel: Widget, rhyme_panel: Widget) -> GtkBox {
+/// The left tool-window stripe — a narrow column of vertical-text toggles.
+/// Currently just "Project"; `on_toggle(active)` flips the file tree.
+pub fn left_stripe<F: Fn(bool) + 'static>(project_visible: bool, on_toggle: F) -> GtkBox {
     let stripe = GtkBox::builder()
         .orientation(Orientation::Vertical)
         .css_classes(["tool-stripe"])
@@ -92,26 +118,49 @@ pub fn left_stripe(project_panel: Widget, rhyme_panel: Widget) -> GtkBox {
         .valign(Align::Fill)
         .build();
 
-    let project_btn = stripe_button("folder-symbolic", "Project", project_panel.is_visible());
-    let rhyme_btn = stripe_button(
-        "system-search-symbolic",
-        "Rhyme Search",
-        rhyme_panel.is_visible(),
-    );
+    let content = GtkBox::new(Orientation::Vertical, 3);
+    content.set_halign(Align::Center);
+    let icon = Image::from_icon_name("folder-symbolic");
+    icon.set_pixel_size(14);
+    content.append(&icon);
+    content.append(&VerticalLabel::new("Project"));
 
-    project_btn.connect_toggled(move |b| project_panel.set_visible(b.is_active()));
-    rhyme_btn.connect_toggled(move |b| rhyme_panel.set_visible(b.is_active()));
+    let btn = ToggleButton::builder()
+        .css_classes(["tool-stripe-button"])
+        .active(project_visible)
+        .tooltip_text("Project")
+        .valign(Align::Start)
+        .build();
+    btn.set_child(Some(&content));
+    btn.connect_toggled(move |b| on_toggle(b.is_active()));
 
-    stripe.append(&project_btn);
-    stripe.append(&rhyme_btn);
+    stripe.append(&btn);
     stripe
 }
 
-fn stripe_button(icon: &str, tooltip: &str, active: bool) -> ToggleButton {
-    ToggleButton::builder()
-        .icon_name(icon)
-        .tooltip_text(tooltip)
-        .css_classes(["tool-stripe-button"])
-        .active(active)
-        .build()
+/// The bottom stripe — horizontal toggles for bottom-docked tool windows.
+/// Currently just "Rhyme Search"; `on_toggle(active)` shows/hides it.
+pub fn bottom_stripe<F: Fn(bool) + 'static>(rhyme_visible: bool, on_toggle: F) -> GtkBox {
+    let stripe = GtkBox::builder()
+        .orientation(Orientation::Horizontal)
+        .css_classes(["bottom-stripe"])
+        .spacing(1)
+        .build();
+
+    let content = GtkBox::new(Orientation::Horizontal, 4);
+    let icon = Image::from_icon_name("system-search-symbolic");
+    icon.set_pixel_size(14);
+    content.append(&icon);
+    content.append(&Label::new(Some("Rhyme Search")));
+
+    let btn = ToggleButton::builder()
+        .css_classes(["bottom-stripe-button"])
+        .active(rhyme_visible)
+        .tooltip_text("Rhyme Search")
+        .build();
+    btn.set_child(Some(&content));
+    btn.connect_toggled(move |b| on_toggle(b.is_active()));
+
+    stripe.append(&btn);
+    stripe
 }

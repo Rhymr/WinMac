@@ -312,8 +312,10 @@ impl TextEditor {
             (false, true) => {
                 let renderer = vcs_gutter::VcsGutterRenderer::new();
                 renderer.set_colors(vcs_colors.0, vcs_colors.1, vcs_colors.2);
-                // Left of the line numbers (-30) and the syllable count (-20).
-                self.gutter.insert(&renderer, -40);
+                // Rightmost in the gutter — after line numbers (-30) and the
+                // syllable count (-20) — so the change bar sits flush against
+                // the text edge, JetBrains-style.
+                self.gutter.insert(&renderer, 10);
                 *vcs_slot = Some(renderer);
             }
             (true, false) => {

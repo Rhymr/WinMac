@@ -4,8 +4,18 @@ use gtk::{gio, glib};
 use libadwaita as adw;
 use rhymr_rs::setting::Settings;
 use rhymr_rs::{app, css};
+use std::path::PathBuf;
 
 pub const APP_ID: &str = "org.gtk_rs.Rhymr";
+
+/// Build the main editor window for `workspace_path` and remember it as a
+/// recent project. Shared by the welcome picker and `open` (a folder passed
+/// on the command line or via the OS "Open With").
+fn open_workspace(app: &adw::Application, workspace_path: PathBuf) {
+    rhymr_rs::workspace::recent::record_recent_workspace(&workspace_path);
+    let (_window, controller) = app::layout::build_ui(app);
+    controller.set_root_path(workspace_path);
+}
 
 fn main() -> glib::ExitCode {
     // Register the resource bundle from the compiled resource file
@@ -29,30 +39,37 @@ fn main() -> glib::ExitCode {
         .flags(gio::ApplicationFlags::HANDLES_OPEN)
         .build();
 
-    // Connect activate signal
-    app.connect_activate(|app| {
-        // Load CSS + theme once, up front — the welcome window is shown
-        // before the main layout is ever built, so it needs both applied
-        // here too.
+    let apply_theme = || {
         let settings = Settings::load();
         let css_provider = css::init(&settings);
         css::apply_css_to_app(&css_provider);
         css::sync_style_manager(&settings);
+    };
 
-        // Classic product splash, held for a beat, then the workspace picker
-        // (the main editor layout is only built once a workspace is chosen).
+    // No path given: splash, then the workspace picker.
+    app.connect_activate(move |app| {
+        apply_theme();
+
         let splash = rhymr_rs::app::splash::show(app);
         let app_for_welcome = app.clone();
         glib::timeout_add_local_once(std::time::Duration::from_millis(1600), move || {
             let app_for_workspace = app_for_welcome.clone();
             rhymr_rs::app::welcome::show_welcome_dialog(&app_for_welcome, move |workspace_path| {
-                println!("Loaded workspace at: {:?}", workspace_path);
-                rhymr_rs::workspace::recent::record_recent_workspace(&workspace_path);
-                let (_window, controller) = app::layout::build_ui(&app_for_workspace);
-                controller.set_root_path(workspace_path);
+                open_workspace(&app_for_workspace, workspace_path);
             });
             splash.close();
         });
+    });
+
+    // A folder passed on the command line / via "Open With": go straight to
+    // the editor for it.
+    app.connect_open(move |app, files, _| {
+        apply_theme();
+        if let Some(path) = files.first().and_then(|f| f.path()) {
+            open_workspace(app, path);
+        } else {
+            app.activate();
+        }
     });
 
     // Run application!

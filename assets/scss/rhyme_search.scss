@@ -1,58 +1,64 @@
-/* Rhyme search styling */
-.rhyme-search-container-bg {
-    background: var(--bg-darkest);
-}
-
-.rhyme-search-container-margin {
-    margin: 0 5px 5px;
-}
+/* Rhyme Search — a bottom-docked tool window, styled like a JetBrains tool
+   window (flat header strip + content area, no card margins). */
 
 frame.rhyme-search-container {
     background: var(--bg-darkest);
     border-top: 1px solid var(--border-dark);
-    border-right: 1px solid var(--border-dark);
-    border-left: 1px solid var(--border-dark);
+    margin: 0;
 }
 
-/* Matches .file-tree-panel-header so both panels' headers read as one system */
+/* The frame's label widget is the header strip. */
 .rhyme-search-header {
-    background-color: var(--bg-darkest);
-    padding: 8px;
+    background-color: var(--bg-dark);
+    border-bottom: 1px solid var(--border-dark);
+    padding: 3px 8px;
+    min-height: 24px;
 
     &:hover {
         background-color: var(--bg-hover);
     }
 
     &:hover * {
-        background-color: var(--bg-hover);
+        background-color: transparent;
     }
 }
 
 .rhyme-search-title {
-    color: var(--text-bright);
+    color: var(--text-not-so-dim);
     font-weight: bold;
-    background-color: inherit;
+    font-size: 11px;
+    background-color: transparent;
+}
+
+.rhyme-search-body {
+    background: var(--bg-darkest);
+    padding: 6px 8px;
+}
+
+.rhyme-search-container-bg {
+    background: var(--bg-darkest);
 }
 
 .rhyme-results {
-    background-color: var(--bg-mid);
+    background-color: var(--bg-darkest);
     margin: 0;
     padding: 0;
 
     & > row {
-        padding: 0;
+        padding: 1px 6px;
         margin: 0;
         min-height: 20px;
-        background-color: var(--bg-mid);
+        background-color: var(--bg-darkest);
     }
 
     & .syllable-header {
-        background-color: var(--bg-mid) !important;
-        padding-bottom: 5px !important;
+        background-color: var(--bg-darkest) !important;
+        color: var(--text-not-so-dim);
+        padding-bottom: 4px !important;
     }
 
     & label {
         word-wrap: break-word;
-        background-color: var(--bg-mid);
+        background-color: var(--bg-darkest);
     }
-} 
+}

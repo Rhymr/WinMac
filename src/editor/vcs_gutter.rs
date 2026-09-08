@@ -69,9 +69,14 @@ mod imp {
                 lines.line_yrange(line, sourceview5::GutterRendererAlignmentMode::Cell);
             let (y, height) = (y as f32, height as f32);
 
+            // Flush against the gutter's right edge, so the bar butts up
+            // against the text (JetBrains-style) rather than sitting far left.
+            let x = (self.obj().width() as f32 - BAR_WIDTH).max(0.0);
             let rect = match change {
-                LineChange::Deleted => graphene::Rect::new(0.0, y, BAR_WIDTH + 1.0, SEAM_HEIGHT),
-                _ => graphene::Rect::new(0.0, y, BAR_WIDTH, height),
+                LineChange::Deleted => {
+                    graphene::Rect::new(x - 1.0, y, BAR_WIDTH + 1.0, SEAM_HEIGHT)
+                }
+                _ => graphene::Rect::new(x, y, BAR_WIDTH, height),
             };
             let color = match change {
                 LineChange::Added => self.added.get(),

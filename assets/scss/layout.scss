@@ -3,6 +3,18 @@
     background-color: var(--bg-dark);
 }
 
+/* No visible gap between panes — the Paned handle is a 1px hairline, and
+   the only separator between file tree and editor is the tree's own
+   right border. */
+paned > separator {
+    min-width: 1px;
+    min-height: 1px;
+    margin: 0;
+    padding: 0;
+    background: none;
+    -gtk-icon-source: none;
+}
+
 .left-panel {
     background-color: var(--bg-dark);
     border-right: 1px solid var(--border-dark);

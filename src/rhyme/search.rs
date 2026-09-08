@@ -32,10 +32,7 @@ impl RhymeSearch {
         // Create a vertical container for the input field and results
         let container = GtkBox::builder()
             .orientation(Orientation::Vertical)
-            .css_classes(vec![
-                "rhyme-search-container-margin",
-                "rhyme-search-container-bg",
-            ])
+            .css_classes(vec!["rhyme-search-body"])
             .spacing(5)
             .build();
 
@@ -210,6 +207,16 @@ impl RhymeSearch {
 
     pub fn is_collapsed(&self) -> bool {
         self.collapsed.get()
+    }
+
+    /// Show or hide the panel's body (the input + results), independent of
+    /// the frame itself — used when the panel is docked at the bottom and
+    /// its whole frame is toggled by the bottom stripe.
+    pub fn set_expanded(&self, expanded: bool) {
+        self.collapsed.set(!expanded);
+        if let Some(container) = self.frame.child() {
+            container.set_visible(expanded);
+        }
     }
 
     /// Fires whenever the panel is collapsed/expanded, so the surrounding
