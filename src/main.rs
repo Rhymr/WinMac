@@ -69,11 +69,25 @@ fn main() -> glib::ExitCode {
         panic!("{e}");
     }
 
+    glib::set_application_name("Rhymr");
+
     // adw::Application initializes both GTK and libadwaita on startup.
     let app = adw::Application::builder()
         .application_id(APP_ID)
         .flags(gio::ApplicationFlags::HANDLES_OPEN)
         .build();
+
+    // Once GTK is up, point the icon theme at the bundled resources and
+    // name the app's icon by its id so `rhymr-icon.svg` (aliased to
+    // `org.gtk_rs.Rhymr.svg` in resources.xml) is the window / app icon.
+    // A real macOS Dock icon still needs the `.app` bundle from
+    // `Build/bundle-mac.sh`.
+    app.connect_startup(|_| {
+        if let Some(display) = gtk::gdk::Display::default() {
+            gtk::IconTheme::for_display(&display).add_resource_path("/org/gtk_rs/rhymr/icons");
+        }
+        gtk::Window::set_default_icon_name(APP_ID);
+    });
 
     let apply_theme = || {
         let settings = Settings::load();

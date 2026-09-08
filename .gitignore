@@ -32,4 +32,7 @@ Cargo.lock
 # Ignore compiled css
 /assets/css/
 
+# Ignore the macOS .app bundle produced by Build/bundle-mac.sh
+/dist/
+
 .env
