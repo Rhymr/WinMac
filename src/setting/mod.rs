@@ -35,6 +35,7 @@ impl Theme {
 #[derive(Clone, PartialEq)]
 pub struct Settings {
     pub show_syllable_gutter: bool,
+    pub show_vcs_gutter: bool,
     pub rhyme_highlighting: bool,
     /// Whether the rhyme highlighter treats a blank line as a stanza
     /// boundary it won't compare across, even if the other line is within
@@ -55,6 +56,7 @@ impl Default for Settings {
     fn default() -> Self {
         Self {
             show_syllable_gutter: true,
+            show_vcs_gutter: true,
             rhyme_highlighting: false,
             rhyme_stop_at_blank_line: true,
             // Off by default: dictionary-only completion misses most
@@ -101,6 +103,7 @@ impl Settings {
             };
             match key {
                 "show_syllable_gutter" => settings.show_syllable_gutter = value == "true",
+                "show_vcs_gutter" => settings.show_vcs_gutter = value == "true",
                 "rhyme_highlighting" => settings.rhyme_highlighting = value == "true",
                 "rhyme_stop_at_blank_line" => settings.rhyme_stop_at_blank_line = value == "true",
                 "word_completion" => settings.word_completion = value == "true",
@@ -125,8 +128,9 @@ impl Settings {
         // free-text field so a pasted font name can't corrupt the file.
         let font_family = self.font_family.replace(['\n', '\r'], "");
         let contents = format!(
-            "show_syllable_gutter={}\nrhyme_highlighting={}\nrhyme_stop_at_blank_line={}\nword_completion={}\nauto_indent={}\ntab_width={}\ngit_autostage={}\ntheme={}\nfont_family={}\nfont_size={}\n",
+            "show_syllable_gutter={}\nshow_vcs_gutter={}\nrhyme_highlighting={}\nrhyme_stop_at_blank_line={}\nword_completion={}\nauto_indent={}\ntab_width={}\ngit_autostage={}\ntheme={}\nfont_family={}\nfont_size={}\n",
             self.show_syllable_gutter,
+            self.show_vcs_gutter,
             self.rhyme_highlighting,
             self.rhyme_stop_at_blank_line,
             self.word_completion,
