@@ -70,6 +70,8 @@ impl TextEditor {
             .auto_indent(settings.auto_indent)
             .indent_width(settings.tab_width as i32)
             .highlight_current_line(true)
+            .pixels_above_lines(1)
+            .pixels_below_lines(1)
             .background_pattern(sourceview5::BackgroundPatternType::None)
             .smart_backspace(true)
             .smart_home_end(sourceview5::SmartHomeEndType::After)
