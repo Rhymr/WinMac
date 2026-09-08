@@ -1,6 +1,7 @@
 pub mod about;
 pub mod chrome;
 pub mod context_menu;
+pub mod icons;
 pub mod layout;
 pub mod menu;
 pub mod splash;

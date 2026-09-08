@@ -19,7 +19,7 @@ use std::rc::Rc;
 
 /// Same file icon the file tree uses for an "open" row — reused here so a
 /// tab's icon matches what the user sees in the tree.
-const TAB_ICON_RESOURCE: &str = "/org/gtk_rs/rhymr/icons/note-active.svg";
+const TAB_ICON_RESOURCE: &str = "/org/gtk_rs/rhymr/icons/gg-tree-file.svg";
 
 pub struct Workspace {
     frame: Frame,

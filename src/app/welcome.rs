@@ -219,10 +219,10 @@ where
             details_vbox.append(&path_label);
 
             let menu_btn = Button::builder()
-                .label("\u{22EE}")
                 .valign(Align::Center)
                 .css_classes(vec!["flat", "project-menu-button"])
                 .build();
+            menu_btn.set_child(Some(&crate::app::icons::img("more", 14)));
 
             hbox.append(&avatar_label);
             hbox.append(&details_vbox);

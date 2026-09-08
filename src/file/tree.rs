@@ -117,8 +117,9 @@ impl FileTree {
             collapsed: Rc::new(RefCell::new(HashSet::new())),
             clipboard: Rc::new(RefCell::new(None)),
             git_statuses: Rc::new(RefCell::new(HashMap::new())),
-            folder_icon: Image::from_resource("/org/gtk_rs/rhymr/icons/folder.svg").paintable(),
-            file_icon: Image::from_resource("/org/gtk_rs/rhymr/icons/note-active.svg").paintable(),
+            folder_icon: Image::from_resource("/org/gtk_rs/rhymr/icons/gg-tree-folder.svg")
+                .paintable(),
+            file_icon: Image::from_resource("/org/gtk_rs/rhymr/icons/gg-tree-file.svg").paintable(),
         };
 
         // F2/Delete/Cut/Copy/Paste for the selected row (see tree_menu.rs)

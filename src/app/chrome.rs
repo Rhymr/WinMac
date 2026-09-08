@@ -4,11 +4,12 @@
 //! "Project" label, and a bottom stripe for the Rhyme Search panel.
 
 use crate::app::context_menu::ContextMenu;
+use crate::app::icons::img;
 use crate::app::vertical_label::VerticalLabel;
 use crate::workspace::controller::WorkspaceController;
 use gtk::prelude::*;
 use gtk::{
-    Align, Box as GtkBox, Button, Image, Label, MenuButton, Orientation, Separator, ToggleButton,
+    Align, Box as GtkBox, Button, Label, MenuButton, Orientation, Separator, ToggleButton,
     pango,
 };
 use std::rc::Rc;
@@ -23,45 +24,24 @@ fn activate_app(name: &str) {
 /// Toolbar icon size, matching JetBrains.
 const TOOLBAR_ICON: i32 = 16;
 
-/// A flat icon button wired to an `app.*` action by name.
-fn tool_button(icon: &str, action: &str, tooltip: &str) -> Button {
-    let image = Image::from_icon_name(icon);
-    image.set_pixel_size(TOOLBAR_ICON);
-    let button = Button::builder()
-        .action_name(action)
-        .tooltip_text(tooltip)
-        .valign(Align::Center)
-        .build();
-    button.set_child(Some(&image));
-    button
-}
-
-/// Same, plus an extra CSS class (used to colour the Git / run actions).
-fn tinted_button(icon: &str, action: &str, tooltip: &str, class: &str) -> Button {
-    let b = tool_button(icon, action, tooltip);
-    b.add_css_class(class);
-    b
-}
-
-/// A toolbar button using a bundled SVG (for icons the system theme is
-/// missing — `document-new-symbolic` isn't present everywhere).
-fn resource_button(resource: &str, action: &str, tooltip: &str, class: &str) -> Button {
-    let image = Image::from_resource(resource);
-    image.set_pixel_size(TOOLBAR_ICON);
+/// A flat toolbar button showing bundled css.gg icon `icon`, wired to an
+/// `app.*` action, with `class` (`run-action` / `git-*`) for its tint.
+fn tool_button(icon: &str, action: &str, tooltip: &str, class: &str) -> Button {
     let button = Button::builder()
         .action_name(action)
         .tooltip_text(tooltip)
         .valign(Align::Center)
         .css_classes([class])
         .build();
-    button.set_child(Some(&image));
+    button.set_child(Some(&img(icon, TOOLBAR_ICON)));
     button
 }
 
 /// The settings gear (JetBrains-style) — Settings first, then Help. Uses the
 /// same styled dropdown as every context menu.
 fn settings_button() -> MenuButton {
-    let (button, menu) = ContextMenu::dropdown(Some("emblem-system-symbolic"), None);
+    let (button, menu) = ContextMenu::dropdown(None, None);
+    button.set_child(Some(&img("settings", TOOLBAR_ICON)));
     button.set_tooltip_text(Some("Settings"));
     button.add_css_class("settings-gear");
 
@@ -103,22 +83,21 @@ pub fn main_toolbar(controller: &Rc<WorkspaceController>) -> GtkBox {
     controller.refresh_nav();
     bar.append(&breadcrumb);
 
-    // File actions, sitting where a JetBrains toolbar puts the run controls —
-    // tinted like run buttons, but keeping their own action icons.
-    bar.append(&resource_button(
-        "/org/gtk_rs/rhymr/icons/document-new.svg",
+    // File actions, sitting where a JetBrains toolbar puts the run controls.
+    bar.append(&tool_button(
+        "new-file",
         "app.new",
         "New File",
         "run-action",
     ));
-    bar.append(&tinted_button(
-        "folder-new-symbolic",
+    bar.append(&tool_button(
+        "new-folder",
         "app.new-folder",
         "New Folder",
         "run-action",
     ));
-    bar.append(&tinted_button(
-        "document-save-symbolic",
+    bar.append(&tool_button(
+        "save-all",
         "app.save-all",
         "Save All",
         "run-action",
@@ -133,26 +112,26 @@ pub fn main_toolbar(controller: &Rc<WorkspaceController>) -> GtkBox {
             .css_classes(["toolbar-group-label"])
             .build(),
     );
-    bar.append(&tinted_button(
-        "go-down-symbolic",
+    bar.append(&tool_button(
+        "git-pull",
         "app.git-pull",
         "Pull\u{2026}",
         "git-pull",
     ));
-    bar.append(&tinted_button(
-        "object-select-symbolic",
+    bar.append(&tool_button(
+        "git-commit",
         "app.git-commit",
         "Commit\u{2026}",
         "git-commit",
     ));
-    bar.append(&tinted_button(
-        "go-up-symbolic",
+    bar.append(&tool_button(
+        "git-push",
         "app.git-push",
         "Push\u{2026}",
         "git-push",
     ));
-    bar.append(&tinted_button(
-        "view-refresh-symbolic",
+    bar.append(&tool_button(
+        "git-fetch",
         "app.git-fetch",
         "Fetch",
         "git-fetch",
@@ -175,9 +154,7 @@ pub fn left_stripe<F: Fn(bool) + 'static>(project_visible: bool, on_toggle: F) -
 
     let content = GtkBox::new(Orientation::Vertical, 3);
     content.set_halign(Align::Center);
-    let icon = Image::from_icon_name("folder-symbolic");
-    icon.set_pixel_size(13);
-    content.append(&icon);
+    content.append(&img("tree-folder", 13));
     content.append(&VerticalLabel::new("Project"));
 
     let btn = ToggleButton::builder()
@@ -203,9 +180,7 @@ pub fn bottom_stripe<F: Fn(bool) + 'static>(rhyme_visible: bool, on_toggle: F) -
         .build();
 
     let content = GtkBox::new(Orientation::Horizontal, 4);
-    let icon = Image::from_icon_name("system-search-symbolic");
-    icon.set_pixel_size(13);
-    content.append(&icon);
+    content.append(&img("search", 13));
     content.append(&Label::new(Some("Rhyme Search")));
 
     let btn = ToggleButton::builder()
