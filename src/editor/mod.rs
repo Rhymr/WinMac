@@ -245,24 +245,25 @@ impl TextEditor {
             let has_selection = buffer.has_selection();
 
             let sv = source_view.clone();
-            let cut_btn = menu.add_item("Cut", Some(hint::CUT), None, move || {
+            let cut_btn = menu.add_item(None, "Cut", Some(hint::CUT), None, move || {
                 sv.emit_cut_clipboard();
             });
             cut_btn.set_sensitive(has_selection);
 
             let sv = source_view.clone();
-            let copy_btn = menu.add_item("Copy", Some(hint::COPY), None, move || {
+            let copy_btn = menu.add_item(Some("copy"), "Copy", Some(hint::COPY), None, move || {
                 sv.emit_copy_clipboard();
             });
             copy_btn.set_sensitive(has_selection);
 
             let sv = source_view.clone();
-            menu.add_item("Paste", Some(hint::PASTE), None, move || {
+            menu.add_item(Some("paste"), "Paste", Some(hint::PASTE), None, move || {
                 sv.emit_paste_clipboard();
             });
 
             let buffer_for_delete = buffer.clone();
             let delete_btn = menu.add_item(
+                Some("delete"),
                 "Delete",
                 Some(hint::DELETE),
                 Some("destructive-menu-item"),
@@ -275,13 +276,19 @@ impl TextEditor {
             menu.add_separator();
 
             let buffer_for_select_all = buffer.clone();
-            menu.add_item("Select All", Some(hint::SELECT_ALL), None, move || {
-                let (start, end) = (
-                    buffer_for_select_all.start_iter(),
-                    buffer_for_select_all.end_iter(),
-                );
-                buffer_for_select_all.select_range(&start, &end);
-            });
+            menu.add_item(
+                None,
+                "Select All",
+                Some(hint::SELECT_ALL),
+                None,
+                move || {
+                    let (start, end) = (
+                        buffer_for_select_all.start_iter(),
+                        buffer_for_select_all.end_iter(),
+                    );
+                    buffer_for_select_all.select_range(&start, &end);
+                },
+            );
 
             menu.popup_at(&source_view, x, y);
         });

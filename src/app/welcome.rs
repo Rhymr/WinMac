@@ -97,28 +97,34 @@ where
     configure_btn.add_css_class("welcome-sidebar-menu");
     {
         let app = app.clone();
-        configure_menu.add_item("Settings\u{2026}", None, None, move || {
-            crate::setting::dialog::show_settings_dialog(&app, None);
-        });
+        configure_menu.add_item(
+            Some("settings"),
+            "Settings\u{2026}",
+            None,
+            None,
+            move || {
+                crate::setting::dialog::show_settings_dialog(&app, None);
+            },
+        );
     }
 
     let (help_btn, help_menu) = crate::app::context_menu::ContextMenu::dropdown(None, Some("Help"));
     help_btn.add_css_class("welcome-sidebar-menu");
     {
         let w = window.clone();
-        help_menu.add_item("Documentation", None, None, move || {
+        help_menu.add_item(None, "Documentation", None, None, move || {
             crate::app::open_uri(&w, crate::app::DOCS_URL)
         });
     }
     {
         let w = window.clone();
-        help_menu.add_item("Report an Issue", None, None, move || {
+        help_menu.add_item(None, "Report an Issue", None, None, move || {
             crate::app::open_uri(&w, crate::app::ISSUES_URL)
         });
     }
     {
         let w = window.clone();
-        help_menu.add_item("About Rhymr", None, None, move || {
+        help_menu.add_item(None, "About Rhymr", None, None, move || {
             crate::app::about::show(&w)
         });
     }
@@ -333,7 +339,7 @@ fn show_project_menu<F>(
     let window_for_open = window.clone();
     let path_for_open = workspace_path.clone();
     let callback_for_open = on_workspace_ready.clone();
-    menu.add_item("Open Selected", None, None, move || {
+    menu.add_item(None, "Open Selected", None, None, move || {
         window_for_open.close();
         callback_for_open(path_for_open.clone());
     });
@@ -341,13 +347,13 @@ fn show_project_menu<F>(
     menu.add_separator();
 
     let path_for_reveal = workspace_path.clone();
-    menu.add_item("Reveal in Finder", None, None, move || {
+    menu.add_item(None, "Reveal in Finder", None, None, move || {
         let uri = format!("file://{}", path_for_reveal.display());
         let _ = gio::AppInfo::launch_default_for_uri(&uri, gio::AppLaunchContext::NONE);
     });
 
     let path_for_copy = workspace_path.to_string_lossy().to_string();
-    menu.add_item("Copy Path", None, None, move || {
+    menu.add_item(None, "Copy Path", None, None, move || {
         if let Some(display) = gtk::gdk::Display::default() {
             display.clipboard().set_text(&path_for_copy);
         }
@@ -359,6 +365,7 @@ fn show_project_menu<F>(
     let row_for_remove = row.clone();
     let projects_list_for_remove = projects_list.clone();
     menu.add_item(
+        None,
         "Remove from Recent Projects\u{2026}",
         None,
         Some("destructive-menu-item"),

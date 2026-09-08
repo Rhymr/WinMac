@@ -769,14 +769,14 @@ fn wire_tab_context_menu(
         let menu = ContextMenu::new(&tab_box_for_popup);
 
         let c = controller.clone();
-        menu.add_item("Close", None, None, move || {
+        menu.add_item(None, "Close", None, None, move || {
             if let Some(ws) = c.get_workspace() {
                 ws.close_tab_at(index);
             }
         });
 
         let c = controller.clone();
-        let other_btn = menu.add_item("Close Other Tabs", None, None, move || {
+        let other_btn = menu.add_item(None, "Close Other Tabs", None, None, move || {
             if let Some(ws) = c.get_workspace() {
                 ws.close_other_tabs(index);
             }
@@ -784,7 +784,7 @@ fn wire_tab_context_menu(
         other_btn.set_sensitive(tab_count > 1);
 
         let c = controller.clone();
-        menu.add_item("Close All Tabs", None, None, move || {
+        menu.add_item(None, "Close All Tabs", None, None, move || {
             if let Some(ws) = c.get_workspace() {
                 ws.close_all_tabs();
             }
@@ -795,7 +795,7 @@ fn wire_tab_context_menu(
             .get_workspace()
             .map(|ws| ws.any_unmodified_tabs())
             .unwrap_or(false);
-        let unmodified_btn = menu.add_item("Close Unmodified Tabs", None, None, move || {
+        let unmodified_btn = menu.add_item(None, "Close Unmodified Tabs", None, None, move || {
             if let Some(ws) = c.get_workspace() {
                 ws.close_unmodified_tabs();
             }
@@ -803,7 +803,7 @@ fn wire_tab_context_menu(
         unmodified_btn.set_sensitive(any_unmodified);
 
         let c = controller.clone();
-        let left_btn = menu.add_item("Close Tabs to the Left", None, None, move || {
+        let left_btn = menu.add_item(None, "Close Tabs to the Left", None, None, move || {
             if let Some(ws) = c.get_workspace() {
                 ws.close_tabs_to_left(index);
             }
@@ -814,7 +814,7 @@ fn wire_tab_context_menu(
 
         let widget_for_clipboard = tab_box_for_popup.clone();
         let path_for_copy = path.clone();
-        menu.add_item("Copy Path/Reference...", None, None, move || {
+        menu.add_item(None, "Copy Path/Reference...", None, None, move || {
             widget_for_clipboard
                 .clipboard()
                 .set_text(&path_for_copy.to_string_lossy());

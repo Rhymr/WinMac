@@ -105,7 +105,7 @@ impl FileTree {
         let file_tree_ref = self.clone();
         let hbox_ref = hbox.clone();
         let target_dir_for_new = target_dir.clone();
-        menu.add_submenu_item("New", move || {
+        menu.add_submenu_item(Some("new-file"), "New", move || {
             menu_ref.popdown();
             file_tree_ref.show_new_submenu(&hbox_ref, target_dir_for_new.clone());
         });
@@ -115,24 +115,30 @@ impl FileTree {
 
             let clipboard_ref = self.clipboard.clone();
             let path_for_cut = path.clone();
-            menu.add_item("Cut", Some(hint::CUT), None, move || {
+            menu.add_item(None, "Cut", Some(hint::CUT), None, move || {
                 clipboard_ref.replace(Some((path_for_cut.clone(), true)));
             });
 
             let clipboard_ref = self.clipboard.clone();
             let path_for_copy = path.clone();
-            menu.add_item("Copy", Some(hint::COPY), None, move || {
+            menu.add_item(Some("copy"), "Copy", Some(hint::COPY), None, move || {
                 clipboard_ref.replace(Some((path_for_copy.clone(), false)));
             });
 
             let path_for_copy_path = path.clone();
-            menu.add_item("Copy Path", Some(hint::COPY_PATH), None, move || {
-                if let Some(display) = gdk::Display::default() {
-                    display
-                        .clipboard()
-                        .set_text(&path_for_copy_path.to_string_lossy());
-                }
-            });
+            menu.add_item(
+                Some("copy"),
+                "Copy Path",
+                Some(hint::COPY_PATH),
+                None,
+                move || {
+                    if let Some(display) = gdk::Display::default() {
+                        display
+                            .clipboard()
+                            .set_text(&path_for_copy_path.to_string_lossy());
+                    }
+                },
+            );
         }
 
         // Available for files too, not just folders — pastes as a sibling,
@@ -140,7 +146,7 @@ impl FileTree {
         if self.clipboard.borrow().is_some() {
             let file_tree_ref = self.clone();
             let target_dir_for_paste = target_dir.clone();
-            menu.add_item("Paste", Some(hint::PASTE), None, move || {
+            menu.add_item(Some("paste"), "Paste", Some(hint::PASTE), None, move || {
                 file_tree_ref.paste_into(target_dir_for_paste.clone());
             });
         }
@@ -153,7 +159,7 @@ impl FileTree {
             let hbox_ref = hbox.clone();
             let label_ref = label.clone();
             let path_for_rename = path.clone();
-            menu.add_item("Rename", None, None, move || {
+            menu.add_item(Some("rename"), "Rename", None, None, move || {
                 file_tree_ref.start_rename(&hbox_ref, &label_ref, path_for_rename.clone());
             });
 
@@ -163,6 +169,7 @@ impl FileTree {
             let hbox_ref = hbox.clone();
             let path_for_delete = path.clone();
             menu.add_item(
+                Some("delete"),
                 "Delete\u{2026}",
                 Some(hint::DELETE),
                 Some("destructive-menu-item"),
@@ -180,12 +187,12 @@ impl FileTree {
 
         let file_tree_ref = self.clone();
         let dir_for_file = parent_dir.clone();
-        menu.add_item("New File", None, None, move || {
+        menu.add_item(Some("new-file"), "New File", None, None, move || {
             file_tree_ref.create_new_entry(dir_for_file.clone(), false);
         });
 
         let file_tree_ref = self.clone();
-        menu.add_item("New Folder", None, None, move || {
+        menu.add_item(Some("new-folder"), "New Folder", None, None, move || {
             file_tree_ref.create_new_entry(parent_dir.clone(), true);
         });
 

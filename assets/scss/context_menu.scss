@@ -50,6 +50,14 @@ popover {
         color: inherit;
     }
 
+    /* Leading icon column — a fixed width so every label lines up whether
+       or not its row carries a glyph (empty slot for rows without one). */
+    & .menu-item-icon {
+        min-width: 18px;
+        margin-right: 8px;
+        background-color: transparent;
+    }
+
     &:hover,
     &:hover box,
     &:hover label {

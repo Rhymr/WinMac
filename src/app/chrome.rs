@@ -44,15 +44,17 @@ fn settings_button() -> MenuButton {
     button.set_tooltip_text(Some("Settings"));
     button.add_css_class("settings-gear");
 
-    menu.add_item("Settings\u{2026}", None, None, || {
+    menu.add_item(Some("settings"), "Settings\u{2026}", None, None, || {
         activate_app("app.preferences")
     });
     menu.add_separator();
-    menu.add_item("Documentation", None, None, || activate_app("app.docs"));
-    menu.add_item("Report Issue", None, None, || {
+    menu.add_item(None, "Documentation", None, None, || {
+        activate_app("app.docs")
+    });
+    menu.add_item(None, "Report Issue", None, None, || {
         activate_app("app.report-issue")
     });
-    menu.add_item("About", None, None, || activate_app("app.about"));
+    menu.add_item(None, "About", None, None, || activate_app("app.about"));
 
     button
 }
