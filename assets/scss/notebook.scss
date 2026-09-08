@@ -22,14 +22,19 @@ notebook {
         min-height: 26px;
         border-bottom: 1px solid var(--border-dark);
 
-        /* Paging arrows, shown only when the tabs overflow. */
-        & button {
+        /* Paging arrows, shown only when the tabs overflow — boxed on both
+           sides so each one is divided from the tab strip (a lone tab
+           `border-right` otherwise divides only the right arrow). */
+        & > button {
             background: none;
-            border: none;
+            border-top: none;
+            border-bottom: none;
+            border-left: 1px solid var(--border-dark);
+            border-right: 1px solid var(--border-dark);
             border-radius: 0;
             min-height: 0;
             min-width: 0;
-            padding: 0 2px;
+            padding: 0 4px;
         }
 
         & > tabs {
@@ -37,11 +42,13 @@ notebook {
 
             & > tab {
                 background-color: var(--bg-dark);
-                padding: 2px 8px;
+                /* left/right padding == the tab_box `spacing(6)` so the
+                   whole tab is evenly padded around icon / name / × */
+                padding: 3px 6px;
                 min-height: 24px;
-                /* floor width so a short filename still gets a usable tab;
-                   the label (hexpand, xalign 0) left-aligns in the slack */
-                min-width: 90px;
+                /* tabs size to their content; the name's own
+                   `max_width_chars` caps how wide a long filename can push
+                   a tab before it ellipsizes (build_tab_widget) */
                 border: none;
                 border-right: 1px solid var(--border-dark);
                 border-radius: 0;
@@ -105,40 +112,31 @@ notebook {
     background: none;
 }
 
-/* Hidden (zero-size, not just invisible, so an inactive/unhovered tab
-   doesn't reserve dead space for it) except on the active tab or whichever
-   tab the pointer is currently over — matches JetBrains, where every other
-   tab shows just its icon and (possibly truncated) name. */
+/* Always visible on every tab (so a tab never resizes when the pointer
+   enters it), tight against the name. Neutral grey by default; the only
+   hover feedback is the glyph turning red — and only when the pointer is
+   on the × itself, not anywhere on the tab. */
 .tab-close-button {
     padding: 0;
     margin: 0;
     background: none;
     border: none;
     border-radius: 0;
-    opacity: 0;
-    min-width: 0;
-    min-height: 0;
-    color: var(--destructive);
+    min-width: 16px;
+    min-height: 16px;
+    color: var(--text-muted);
     font-size: 11px;
-    transition: opacity var(--transition-fast);
+    transition: color var(--transition-fast);
 
     & label {
         background: none;
         color: inherit;
+        padding: 0;
+        margin: 0;
     }
 
-    /* Hovering the × itself: a full grey circle behind a brighter-red
-       glyph, JetBrains-style. */
     &:hover {
-        background-color: var(--bg-light);
-        border-radius: 50%;
+        background: none;
         color: var(--destructive-hover);
     }
-}
-
-tab:checked .tab-close-button,
-tab:hover .tab-close-button {
-    opacity: 1;
-    min-width: 16px;
-    min-height: 16px;
 }

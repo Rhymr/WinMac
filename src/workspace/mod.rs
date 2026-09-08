@@ -10,7 +10,7 @@ use controller::WorkspaceController;
 use gtk::prelude::*;
 use gtk::{
     Box, Button, EventSequenceState, Frame, GestureClick, Label, Notebook, TextBuffer, TextView,
-    Widget, Window, gdk, pango,
+    Widget, Window, gdk,
 };
 use std::cell::RefCell;
 use std::fs;
@@ -562,9 +562,10 @@ fn build_tab_widget(path: &Path) -> (Box, Button) {
     let tab_box = Box::builder()
         .orientation(gtk::Orientation::Horizontal)
         .css_classes(vec!["tab-box"])
-        .spacing(3)
-        // Shown on hover so a tab ellipsized down to a few characters
-        // still identifies itself.
+        // Even gap between icon, name and × — the tab's own left/right
+        // padding (notebook.scss) matches it so the whole tab reads evenly.
+        .spacing(6)
+        // Shown on hover so a truncated name still identifies itself.
         .tooltip_text(display_path)
         .build();
 
@@ -579,24 +580,22 @@ fn build_tab_widget(path: &Path) -> (Box, Button) {
         .map(crate::file::tree::strip_txt_extension)
         .unwrap_or("Untitled");
 
-    let label = Label::new(Some(display_name));
+    // Tabs size to their content, capped at MAX_TAB_CHARS: a plain
+    // non-ellipsizing label makes min == natural == text width, so
+    // GtkNotebook (which allocates non-expand tabs their minimum) still
+    // shows the whole name. The cap is applied here in Rust rather than via
+    // Pango ellipsize, whose "natural width" would collapse to just "…".
+    // The full path is always on the tab's tooltip.
+    const MAX_TAB_CHARS: usize = 24;
+    let shown_name = if display_name.chars().count() > MAX_TAB_CHARS {
+        let head: String = display_name.chars().take(MAX_TAB_CHARS - 1).collect();
+        format!("{head}\u{2026}")
+    } else {
+        display_name.to_string()
+    };
+
+    let label = Label::new(Some(&shown_name));
     label.set_css_classes(&["tab-label"]);
-    label.set_ellipsize(pango::EllipsizeMode::End);
-    // A `Label` with ellipsize on but no explicit width hint requests only
-    // its *minimum* size (just enough for "…") as its natural size too —
-    // there's otherwise no basis for GTK to know it should ask for more.
-    // `max_width_chars` gives it a generous natural-size ceiling instead
-    // (comfortably past any real filename, so a tab shows its full name by
-    // default), while `width_chars` sets the actual minimum it ellipsizes
-    // down toward once the strip is crowded — see `Notebook::scrollable`
-    // in `Workspace::new`.
-    label.set_width_chars(6);
-    label.set_max_width_chars(24);
-    // The name expands into the tab's slack (the tab has a 90px CSS floor)
-    // and left-aligns in it, so the close button ends up at the tab's right
-    // edge. `tab_box` below sets `hexpand(false)` explicitly so this doesn't
-    // propagate up and make GtkNotebook stretch the tab across the strip.
-    label.set_hexpand(true);
     label.set_halign(gtk::Align::Start);
     label.set_xalign(0.0);
 
@@ -611,8 +610,8 @@ fn build_tab_widget(path: &Path) -> (Box, Button) {
         .build();
     close_button.set_child(Some(&Label::new(Some("\u{2715}"))));
 
-    // Explicit: the label's hexpand must not bubble up here, or GtkNotebook
-    // stretches the whole tab across the header.
+    // Explicit non-expand so GtkNotebook never stretches a tab past its
+    // content width.
     tab_box.set_hexpand(false);
     tab_box.append(&icon);
     tab_box.append(&label);
