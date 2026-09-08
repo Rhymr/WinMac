@@ -10,6 +10,19 @@
     background-color: var(--bg-dark);
 }
 
+/* Borderless search field in the top bar — just the magnifier + placeholder,
+   flowing into the row, like the JetBrains welcome window. */
+.welcome-content searchentry {
+    background: none;
+    border: none;
+    box-shadow: none;
+    padding: 2px 0;
+
+    & > text {
+        background: none;
+    }
+}
+
 /* Bottom-of-sidebar Configure / Help dropdowns (JetBrains welcome window). */
 .welcome-sidebar-footer {
     background: none;
@@ -65,13 +78,14 @@
 
     @include list-row-hover-select(var(--bg-hover), var(--selection-bg), $force-fg: true);
 
+    /* Rows are flush with the pane — no card background, just the
+       hover/selection wash from the mixin above. */
     & > row {
-        background-color: var(--bg-mid);
-        border-bottom: 1px solid var(--border-dark);
+        background-color: transparent;
     }
 
     & box {
-        background-color: inherit;
+        background-color: transparent;
     }
 }
 

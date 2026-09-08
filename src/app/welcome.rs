@@ -197,10 +197,9 @@ where
             hbox.set_margin_start(12);
             hbox.set_margin_end(12);
 
-            // Avatar icon with first letter
-            let initial = name.chars().next().unwrap_or('W').to_string();
+            // Avatar with up to two initials, JetBrains-style.
             let avatar_label = Label::builder()
-                .label(&initial)
+                .label(avatar_initials(&name))
                 .css_classes(vec!["project-avatar"])
                 .width_request(32)
                 .height_request(32)
@@ -627,4 +626,43 @@ fn show_about(parent: &ApplicationWindow) {
         .transient_for(parent)
         .build();
     dialog.present();
+}
+
+/// Up to two initials for a project avatar — the first alphanumeric char and
+/// the first one after a word boundary (space / `_` / `-` / a camelCase
+/// hump), e.g. `TBM_Example` → `TE`, `carProject` → `CP`. Falls back to the
+/// first two characters.
+fn avatar_initials(name: &str) -> String {
+    let mut out = String::new();
+    let mut prev: Option<char> = None;
+    for ch in name.chars() {
+        if !ch.is_alphanumeric() {
+            prev = Some(ch);
+            continue;
+        }
+        let at_boundary = match prev {
+            None => true,
+            Some(' ' | '_' | '-' | '.') => true,
+            Some(p) => p.is_lowercase() && ch.is_uppercase(),
+        };
+        if at_boundary {
+            out.extend(ch.to_uppercase());
+            if out.chars().count() == 2 {
+                return out;
+            }
+        }
+        prev = Some(ch);
+    }
+    if out.is_empty() {
+        out = name
+            .chars()
+            .filter(|c| c.is_alphanumeric())
+            .take(2)
+            .flat_map(char::to_uppercase)
+            .collect();
+    }
+    if out.is_empty() {
+        out.push('?');
+    }
+    out
 }
