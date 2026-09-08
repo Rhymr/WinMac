@@ -46,7 +46,9 @@ pub struct TextEditor {
     vcs_renderer: Rc<RefCell<Option<vcs_gutter::VcsGutterRenderer>>>,
     completion: Completion,
     word_provider: RefCell<Option<WordCompletionProvider>>,
-    rhyme_highlight: RefCell<Option<RhymeHighlight>>,
+    // Rc so the pointer-motion handler (hover-to-emphasise a rhyme group)
+    // can hold its own clone alongside `apply_settings`.
+    rhyme_highlight: Rc<RefCell<Option<RhymeHighlight>>>,
     // Strip under the editor listing the active rhyme groups (swatch +
     // representative word); hidden when highlighting is off or there are
     // no groups. Rebuilt from `RhymeHighlight::connect_groups_changed`.
@@ -254,7 +256,7 @@ impl TextEditor {
             vcs_renderer,
             completion,
             word_provider: RefCell::new(None),
-            rhyme_highlight: RefCell::new(None),
+            rhyme_highlight: Rc::new(RefCell::new(None)),
             rhyme_legend,
         };
 
@@ -271,6 +273,34 @@ impl TextEditor {
                     gutter.queue_draw();
                 }
             });
+        }
+
+        // Hover a rhyming word to emphasise its group (dim the others).
+        // O(1) per motion event — only touches tags when the group under
+        // the pointer changes; never recomputes.
+        {
+            let rhyme = editor.rhyme_highlight.clone();
+            let view = editor.source_view.clone();
+            let motion = gtk::EventControllerMotion::new();
+            motion.connect_motion(move |_, x, y| {
+                let slot = rhyme.borrow();
+                let Some(handle) = slot.as_ref() else {
+                    return;
+                };
+                let (bx, by) =
+                    view.window_to_buffer_coords(gtk::TextWindowType::Widget, x as i32, y as i32);
+                let group = view
+                    .iter_at_location(bx, by)
+                    .and_then(|iter| handle.group_at_offset(iter.offset() as usize));
+                handle.emphasise_group(group);
+            });
+            let rhyme_leave = editor.rhyme_highlight.clone();
+            motion.connect_leave(move |_| {
+                if let Some(handle) = rhyme_leave.borrow().as_ref() {
+                    handle.emphasise_group(None);
+                }
+            });
+            editor.source_view.add_controller(motion);
         }
 
         // Set initial empty state

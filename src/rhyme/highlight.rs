@@ -60,6 +60,15 @@ fn rhyme_palette(theme: Theme) -> &'static [&'static str; 24] {
     }
 }
 
+/// Foreground applied to the *other* rhyme groups while one is hovered, so
+/// the hovered group stands out — a low-contrast grey that still reads.
+fn dim_grey(theme: Theme) -> &'static str {
+    match theme {
+        Theme::Dark => "#5c5c5c",
+        Theme::Light => "#b0b0b0",
+    }
+}
+
 /// Common function/filler words excluded from rhyme matching — nearly every
 /// document has *some* other word ending in the same sound as "of" or "is"
 /// purely by coincidence of English phonology, which buries genuine rhymes
@@ -637,13 +646,15 @@ fn apply_group(buffer: &SourceBuffer, tag: &TextTag, members: &[(usize, usize)])
     }
 }
 
-/// One rhyme group as the legend sees it: which palette slot colors it,
-/// that color's hex (for `theme`), and a representative word.
+/// One rhyme group: which palette slot colors it, that color's hex (for
+/// the current `theme`), a representative word (for the legend), and every
+/// character span it covers (for hover-to-emphasise).
 #[derive(Clone, Debug)]
 pub struct RhymeGroup {
     pub color_index: usize,
     pub color: String,
     pub label: String,
+    pub spans: Vec<(usize, usize)>,
 }
 
 /// The word `offset` falls inside, lower-cased — for the legend label. A
@@ -722,6 +733,7 @@ fn recompute(buffer: &SourceBuffer, tags: &[TextTag], theme: Theme) -> Vec<Rhyme
             color_index,
             color: palette[color_index].to_string(),
             label: word_at(buffer, anchor),
+            spans: members.clone(),
         });
     }
     groups
@@ -735,6 +747,16 @@ type GroupsCallback = Box<dyn Fn(&[RhymeGroup])>;
 pub struct RhymeHighlight {
     buffer: SourceBuffer,
     tags: Vec<TextTag>,
+    /// Painted over every *other* group's spans while one group is hovered
+    /// (see [`emphasise_group`]). Created after `tags`, so it out-prioritises
+    /// them where they overlap.
+    ///
+    /// [`emphasise_group`]: RhymeHighlight::emphasise_group
+    dim_tag: TextTag,
+    /// The group index currently emphasised, so repeated motion over the
+    /// same word is a no-op. Shared with the recompute closure, which
+    /// resets it (and clears the dim tag) when the groups change.
+    emphasised: Rc<Cell<Option<usize>>>,
     /// The theme the `tags` are currently colored for — see [`set_theme`].
     ///
     /// [`set_theme`]: RhymeHighlight::set_theme
@@ -758,6 +780,7 @@ impl RhymeHighlight {
         for tag in &self.tags {
             self.buffer.remove_tag(tag, &start, &end);
         }
+        self.buffer.remove_tag(&self.dim_tag, &start, &end);
         self.groups.borrow_mut().clear();
         if let Some(cb) = self.on_groups.borrow().as_ref() {
             cb(&[]);
@@ -776,10 +799,48 @@ impl RhymeHighlight {
         for (i, tag) in self.tags.iter().enumerate() {
             tag.set_foreground(Some(palette[i % palette.len()]));
         }
+        self.dim_tag.set_foreground(Some(dim_grey(theme)));
         for group in self.groups.borrow_mut().iter_mut() {
             group.color = palette[group.color_index].to_string();
         }
         self.notify_groups();
+    }
+
+    /// Emphasise one rhyme group by dimming every *other* group's spans;
+    /// `None` clears the emphasis. O(spans) only on a group transition —
+    /// repeated motion within the same word does nothing, and it never
+    /// recomputes. Call from a pointer-motion handler on the view.
+    pub fn emphasise_group(&self, group: Option<usize>) {
+        if self.emphasised.get() == group {
+            return;
+        }
+        self.emphasised.set(group);
+
+        let start = self.buffer.start_iter();
+        let end = self.buffer.end_iter();
+        self.buffer.remove_tag(&self.dim_tag, &start, &end);
+
+        if let Some(target) = group {
+            for (i, g) in self.groups.borrow().iter().enumerate() {
+                if i == target {
+                    continue;
+                }
+                for &(s, e) in &g.spans {
+                    let s = self.buffer.iter_at_offset(s as i32);
+                    let e = self.buffer.iter_at_offset(e as i32);
+                    self.buffer.apply_tag(&self.dim_tag, &s, &e);
+                }
+            }
+        }
+    }
+
+    /// Index of the rhyme group whose spans contain character `offset`, if
+    /// any — for turning a hover position into a group to emphasise.
+    pub fn group_at_offset(&self, offset: usize) -> Option<usize> {
+        self.groups
+            .borrow()
+            .iter()
+            .position(|g| g.spans.iter().any(|&(s, e)| offset >= s && offset < e))
     }
 
     /// Register `f` to receive the active rhyme groups whenever they
@@ -802,13 +863,20 @@ impl RhymeHighlight {
 /// [`RhymeHighlight::connect_groups_changed`].
 pub fn attach(buffer: &SourceBuffer, theme: Theme) -> RhymeHighlight {
     let tags = create_tags(buffer, theme);
+    // Created last, so it wins over the color tags where they overlap.
+    let dim_tag = buffer
+        .create_tag(Some("rhymr-rhyme-dim"), &[("foreground", &dim_grey(theme))])
+        .expect("tag name is unique per buffer");
     let theme = Rc::new(Cell::new(theme));
+    let emphasised = Rc::new(Cell::new(None));
     let groups = Rc::new(RefCell::new(recompute(buffer, &tags, theme.get())));
     let on_groups: Rc<RefCell<Option<GroupsCallback>>> = Rc::new(RefCell::new(None));
 
     let generation = Rc::new(Cell::new(0u64));
     let tags_for_signal = tags.clone();
+    let dim_for_signal = dim_tag.clone();
     let theme_for_signal = theme.clone();
+    let emphasised_for_signal = emphasised.clone();
     let groups_for_signal = groups.clone();
     let on_groups_for_signal = on_groups.clone();
     let handler_id = buffer.connect_changed(move |buf| {
@@ -818,7 +886,9 @@ pub fn attach(buffer: &SourceBuffer, theme: Theme) -> RhymeHighlight {
         let generation_for_timeout = generation.clone();
         let buf_owned = buf.clone();
         let tags_for_timeout = tags_for_signal.clone();
+        let dim_for_timeout = dim_for_signal.clone();
         let theme_for_timeout = theme_for_signal.clone();
+        let emphasised_for_timeout = emphasised_for_signal.clone();
         let groups_for_timeout = groups_for_signal.clone();
         let on_groups_for_timeout = on_groups_for_signal.clone();
         glib::timeout_add_local_once(RHYME_DEBOUNCE, move || {
@@ -827,6 +897,13 @@ pub fn attach(buffer: &SourceBuffer, theme: Theme) -> RhymeHighlight {
             }
             let fresh = recompute(&buf_owned, &tags_for_timeout, theme_for_timeout.get());
             groups_for_timeout.replace(fresh);
+            // The old hover-emphasis is now stale — clear it.
+            buf_owned.remove_tag(
+                &dim_for_timeout,
+                &buf_owned.start_iter(),
+                &buf_owned.end_iter(),
+            );
+            emphasised_for_timeout.set(None);
             if let Some(cb) = on_groups_for_timeout.borrow().as_ref() {
                 cb(&groups_for_timeout.borrow());
             }
@@ -836,6 +913,8 @@ pub fn attach(buffer: &SourceBuffer, theme: Theme) -> RhymeHighlight {
     RhymeHighlight {
         buffer: buffer.clone(),
         tags,
+        dim_tag,
+        emphasised,
         theme,
         groups,
         on_groups,
