@@ -1,4 +1,5 @@
 use super::score::{Syllable, Thresholds, find_rhymes, syllables_from_pronunciation};
+use crate::setting::Theme;
 use cmudict_fast::{Cmudict, Symbol};
 use gtk::TextTag;
 use gtk::prelude::*;
@@ -23,18 +24,41 @@ const RHYME_DEBOUNCE: std::time::Duration = std::time::Duration::from_millis(400
 
 const CMUDICT_TXT: &str = include_str!("../../assets/dictionary/cmudict.dict");
 
-/// Background colors cycled across rhyme groups, in the order groups first
-/// appear in the document. Darker/more saturated than a foreground palette
-/// would be, so the editor's light text (see `assets/styles/rhymr.xml`)
-/// stays readable sitting on top of them. 24 evenly-spaced hues so real
-/// documents (which can easily have 15-20+ distinct rhyme groups) mostly
-/// get a unique color instead of two unrelated groups coincidentally
-/// sharing one.
-const PALETTE: [&str; 24] = [
-    "#a32828", "#a34728", "#a36628", "#a38428", "#a3a328", "#84a328", "#66a328", "#47a328",
-    "#28a328", "#28a347", "#28a366", "#28a384", "#28a3a3", "#2884a3", "#2865a3", "#2847a3",
-    "#2828a3", "#4728a3", "#6528a3", "#8428a3", "#a328a3", "#a32884", "#a32866", "#a32847",
+/// Foreground colors cycled across rhyme groups, in the order groups first
+/// appear in the document — JetBrains-style, distinguishing rhyme groups
+/// by *text* color the way an IDE colors keyword vs string vs number,
+/// rather than a highlighter-pen background fill (issue #1). 24
+/// evenly-spaced hues so real documents (which can easily have 15-20+
+/// distinct rhyme groups) mostly get a unique color instead of two
+/// unrelated groups coincidentally sharing one; past 24 the assignment
+/// wraps (`color_cursor % tags.len()`).
+///
+/// Two hand-tuned sets: `DARK` is bright/pastel to sit on the Darcula
+/// editor background (`#2b2b2b`) next to its `#a9b7c6` body text; `LIGHT`
+/// is deeper and more saturated for the IntelliJ-Light background
+/// (`#ffffff`). These are `GtkTextTag` `foreground` values picked in Rust
+/// (like `editor::vcs_colors` / `syllable_green`), *not* CSS variables —
+/// the "three things stay in lockstep" rule in CLAUDE.md governs only the
+/// CSS palette / libadwaita / GtkSourceView-scheme triad, not this.
+const RHYME_PALETTE_DARK: [&str; 24] = [
+    "#d57b7b", "#d5927b", "#d5a87b", "#d5bf7b", "#d5d57b", "#bfd57b", "#a8d57b", "#92d57b",
+    "#7bd57b", "#7bd592", "#7bd5a8", "#7bd5bf", "#7bd5d5", "#7bbfd5", "#7ba8d5", "#7b92d5",
+    "#7b7bd5", "#927bd5", "#a87bd5", "#bf7bd5", "#d57bd5", "#d57bbf", "#d57ba8", "#d57b92",
 ];
+
+const RHYME_PALETTE_LIGHT: [&str; 24] = [
+    "#a32929", "#a34729", "#a36629", "#a38529", "#a3a329", "#85a329", "#66a329", "#47a329",
+    "#29a329", "#29a347", "#29a366", "#29a385", "#29a3a3", "#2985a3", "#2966a3", "#2947a3",
+    "#2929a3", "#4729a3", "#6629a3", "#8529a3", "#a329a3", "#a32985", "#a32966", "#a32947",
+];
+
+/// The rhyme-group foreground palette for `theme`.
+fn rhyme_palette(theme: Theme) -> &'static [&'static str; 24] {
+    match theme {
+        Theme::Dark => &RHYME_PALETTE_DARK,
+        Theme::Light => &RHYME_PALETTE_LIGHT,
+    }
+}
 
 /// Common function/filler words excluded from rhyme matching — nearly every
 /// document has *some* other word ending in the same sound as "of" or "is"
@@ -593,13 +617,13 @@ fn score_lines(lines: &[LineSyllables], stop_at_blank_line: bool) -> Vec<Vec<(us
     groups
 }
 
-fn create_tags(buffer: &SourceBuffer) -> Vec<TextTag> {
-    PALETTE
-        .into_iter()
+fn create_tags(buffer: &SourceBuffer, theme: Theme) -> Vec<TextTag> {
+    rhyme_palette(theme)
+        .iter()
         .enumerate()
-        .map(|(i, color)| {
+        .map(|(i, &color)| {
             buffer
-                .create_tag(Some(&format!("rhymr-rhyme-{i}")), &[("background", &color)])
+                .create_tag(Some(&format!("rhymr-rhyme-{i}")), &[("foreground", &color)])
                 .expect("tag name is unique per buffer")
         })
         .collect()
@@ -671,6 +695,10 @@ fn recompute(buffer: &SourceBuffer, tags: &[TextTag]) {
 pub struct RhymeHighlight {
     buffer: SourceBuffer,
     tags: Vec<TextTag>,
+    /// The theme the `tags` are currently colored for — see [`set_theme`].
+    ///
+    /// [`set_theme`]: RhymeHighlight::set_theme
+    theme: Cell<Theme>,
     handler_id: Option<glib::SignalHandlerId>,
 }
 
@@ -685,12 +713,26 @@ impl RhymeHighlight {
             self.buffer.remove_tag(tag, &start, &end);
         }
     }
+
+    /// Re-point every rhyme tag at `theme`'s palette. A `GtkTextTag`'s
+    /// `foreground` recolors every range it's already applied to, so a live
+    /// theme switch (Settings → Appearance) needs no recompute — just this.
+    pub fn set_theme(&self, theme: Theme) {
+        if self.theme.replace(theme) == theme {
+            return;
+        }
+        let palette = rhyme_palette(theme);
+        for (i, tag) in self.tags.iter().enumerate() {
+            tag.set_foreground(Some(palette[i % palette.len()]));
+        }
+    }
 }
 
 /// Recolors words in `buffer` by rhyme group, recomputing (debounced) on
-/// every edit.
-pub fn attach(buffer: &SourceBuffer) -> RhymeHighlight {
-    let tags = create_tags(buffer);
+/// every edit. `theme` picks the foreground palette; keep it current with
+/// [`RhymeHighlight::set_theme`].
+pub fn attach(buffer: &SourceBuffer, theme: Theme) -> RhymeHighlight {
+    let tags = create_tags(buffer, theme);
     recompute(buffer, &tags);
 
     let generation = Rc::new(Cell::new(0u64));
@@ -713,6 +755,7 @@ pub fn attach(buffer: &SourceBuffer) -> RhymeHighlight {
     RhymeHighlight {
         buffer: buffer.clone(),
         tags,
+        theme: Cell::new(theme),
         handler_id: Some(handler_id),
     }
 }

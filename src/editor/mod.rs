@@ -431,7 +431,10 @@ impl TextEditor {
         match (rhyme_slot.is_some(), settings.rhyme_highlighting) {
             (false, true) => {
                 log::debug!("rhyme highlight: attaching");
-                *rhyme_slot = Some(crate::rhyme::highlight::attach(&self.buffer));
+                *rhyme_slot = Some(crate::rhyme::highlight::attach(
+                    &self.buffer,
+                    settings.theme,
+                ));
             }
             (true, false) => {
                 if let Some(handle) = rhyme_slot.take() {
@@ -439,7 +442,14 @@ impl TextEditor {
                     handle.detach();
                 }
             }
-            _ => {}
+            // Already attached and staying on — push a live theme switch
+            // through so the rhyme colors follow light/dark.
+            (true, true) => {
+                if let Some(handle) = rhyme_slot.as_ref() {
+                    handle.set_theme(settings.theme);
+                }
+            }
+            (false, false) => {}
         }
     }
 
