@@ -8,7 +8,10 @@ use crate::setting::Settings;
 use completion::WordCompletionProvider;
 use gtk::gdk;
 use gtk::prelude::*;
-use gtk::{EventSequenceState, Frame, GestureClick, PropagationPhase, ScrolledWindow};
+use gtk::{
+    Align, EventSequenceState, Frame, GestureClick, Label, Overlay, PropagationPhase,
+    ScrolledWindow,
+};
 use sourceview5::GutterRendererText;
 use sourceview5::prelude::{BufferExt, GutterRendererExt, GutterRendererTextExt, ViewExt};
 use sourceview5::{Buffer as SourceBuffer, Completion, Gutter, View as SourceView};
@@ -175,8 +178,25 @@ impl TextEditor {
             .child(&source_view)
             .build();
 
+        // "Sticky line" (JetBrains sticky-scroll analog): the first line of
+        // the stanza/paragraph the top of the viewport is inside, pinned to
+        // the top of the editor once its real position has scrolled off.
+        let sticky = Label::builder()
+            .css_classes(["sticky-line"])
+            .halign(Align::Fill)
+            .valign(Align::Start)
+            .xalign(0.0)
+            .single_line_mode(true)
+            .build();
+        sticky.set_visible(false);
+
+        let overlay = Overlay::new();
+        overlay.set_child(Some(&scroll));
+        overlay.add_overlay(&sticky);
+        setup_sticky_line(&scroll, &source_view, &buffer, &sticky);
+
         let frame = Frame::builder()
-            .child(&scroll)
+            .child(&overlay)
             .css_classes(vec!["rhyme-editor-frame"])
             .build();
 
@@ -456,6 +476,83 @@ fn create_syllable_renderer(buffer: &SourceBuffer) -> GutterRendererText {
     });
 
     syllable_renderer
+}
+
+/// Wire the sticky-line label: on scroll or edit, show the first line of the
+/// stanza/paragraph the viewport's top is inside, pinned to the top, once
+/// that line's real position has scrolled off screen.
+fn setup_sticky_line(
+    scroll: &ScrolledWindow,
+    view: &SourceView,
+    buffer: &SourceBuffer,
+    sticky: &Label,
+) {
+    sticky.set_can_target(false);
+    let vadj = scroll.vadjustment();
+
+    let update = {
+        let vadj = vadj.clone();
+        let view = view.clone();
+        let buffer = buffer.clone();
+        let sticky = sticky.clone();
+        Rc::new(move || {
+            let y_top = vadj.value() as i32;
+            let (top_iter, _) = view.line_at_y(y_top);
+            let top_line = top_iter.line();
+
+            let is_blank = |line: i32| -> bool {
+                let Some(start) = buffer.iter_at_line(line) else {
+                    return true;
+                };
+                let end = buffer
+                    .iter_at_line(line + 1)
+                    .unwrap_or_else(|| buffer.end_iter());
+                buffer.text(&start, &end, false).trim().is_empty()
+            };
+
+            if top_line < 0 || is_blank(top_line) {
+                sticky.set_visible(false);
+                return;
+            }
+
+            // First line of the paragraph containing the top visible line.
+            let mut start_line = top_line;
+            while start_line > 0 && !is_blank(start_line - 1) {
+                start_line -= 1;
+            }
+            if start_line == top_line {
+                sticky.set_visible(false);
+                return;
+            }
+
+            let Some(start_iter) = buffer.iter_at_line(start_line) else {
+                sticky.set_visible(false);
+                return;
+            };
+            let (line_y, _) = view.line_yrange(&start_iter);
+            if line_y >= y_top {
+                sticky.set_visible(false);
+                return;
+            }
+
+            let end = buffer
+                .iter_at_line(start_line + 1)
+                .unwrap_or_else(|| buffer.end_iter());
+            let text = buffer.text(&start_iter, &end, false);
+            sticky.set_text(text.trim_end());
+            sticky.set_visible(!text.trim().is_empty());
+        })
+    };
+
+    vadj.connect_value_changed({
+        let update = update.clone();
+        move |_| update()
+    });
+    buffer.connect_changed({
+        let update = update.clone();
+        move |_| update()
+    });
+    glib::idle_add_local_once(move || update());
 }
 
 /// Walk up from a file's directory looking for the workspace's `.git` —

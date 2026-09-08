@@ -831,12 +831,17 @@ fn wire_tab_context_menu(
 
 /// Descend from a notebook page's root widget to its actual TextView
 /// (SourceView, which extends TextView). A tab page is
-/// `Frame -> ScrolledWindow -> SourceView` (see TextEditor) — this needs
-/// *two* `first_child()` hops, not one, since the ScrolledWindow itself
-/// obviously isn't a TextView.
+/// `Frame -> Overlay -> ScrolledWindow -> SourceView` (see TextEditor);
+/// walk `first_child()` until a TextView turns up rather than hard-coding
+/// the hop count.
 fn text_view_for_page(page: &gtk::Widget) -> Option<TextView> {
-    page.first_child()?
-        .first_child()?
-        .downcast::<TextView>()
-        .ok()
+    let mut widget = page.first_child();
+    for _ in 0..6 {
+        let current = widget?;
+        if let Ok(view) = current.clone().downcast::<TextView>() {
+            return Some(view);
+        }
+        widget = current.first_child();
+    }
+    None
 }
