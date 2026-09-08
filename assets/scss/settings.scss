@@ -1,28 +1,29 @@
 @use "mixins" as *;
 
-/* Settings dialog — modern-IDE-style sidebar + content layout */
+/* Settings dialog — JetBrains layout: a darker tree-style sidebar, a flat
+   lighter content pane with no inset panel, a breadcrumb header. */
 .settings-window {
     background: var(--bg-darkest);
 }
 
 .settings-sidebar {
-    background: var(--bg-dark);
+    background: var(--bg-darkest);
     border-right: 1px solid var(--border-dark);
 
     & entry {
-        background: var(--bg-darkest);
+        background: var(--bg-dark);
     }
 }
 
 .settings-category-list {
-    background: var(--bg-dark);
+    background: var(--bg-darkest);
 
     @include list-row-hover-select(var(--bg-hover), var(--selection-bg), $force-fg: true);
 
     & > row {
         padding: 0;
         margin: 0;
-        background-color: var(--bg-dark);
+        background-color: var(--bg-darkest);
     }
 
     & label {
@@ -32,13 +33,18 @@
 }
 
 .settings-content {
-    background: var(--bg-darkest);
+    background: var(--bg-dark);
 
-    /* the universal `box { background }` reset would otherwise tint the
-       form grids a shade lighter than the page */
+    /* the universal `box { background }` / `grid` reset would otherwise
+       paint a lighter slab inset on the content pane */
+    & box,
     & grid {
         background: none;
     }
+}
+
+.settings-page {
+    background: none;
 }
 
 /* Breadcrumb path, not a big title — JetBrains "Group › Category". */
@@ -48,11 +54,11 @@
     background: none;
 }
 
-/* Small bold muted group sub-header inside a page. */
+/* Bold sub-header for a sub-group within a page (e.g. Gutter / Indentation). */
 .settings-section {
     font-size: 11px;
     font-weight: bold;
-    color: var(--text-muted);
+    color: var(--text-not-so-dim);
     background: none;
 }
 

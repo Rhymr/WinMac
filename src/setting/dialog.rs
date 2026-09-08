@@ -23,33 +23,36 @@ const CATEGORIES: [(&str, &str, &str); 5] = [
 ];
 
 /// A category page: a tight vertical stack of section headers and form
-/// grids, with the dialog's standard content margins.
+/// grids, on the flat content background (no inset panel).
 fn settings_page() -> GtkBox {
     GtkBox::builder()
         .orientation(Orientation::Vertical)
-        .spacing(4)
+        .spacing(2)
         .margin_top(14)
         .margin_start(20)
         .margin_end(20)
+        .css_classes(["settings-page"])
         .build()
 }
 
-/// A small bold muted sub-header above a group of rows.
+/// A small bold muted sub-header above a *sub*-group of rows (only used
+/// where a page has more than one group — the category name itself is
+/// already in the breadcrumb header).
 fn section_header(text: &str) -> Label {
     Label::builder()
         .label(text)
         .halign(Align::Start)
-        .margin_top(8)
+        .margin_top(14)
         .margin_bottom(2)
         .css_classes(["settings-section"])
         .build()
 }
 
-/// A 2-column form grid: right-aligned labels in column 0, left-aligned
-/// controls in column 1.
+/// A 2-column form grid: right-aligned labels in a fixed-width column 0,
+/// left-aligned controls in column 1.
 fn form_grid() -> Grid {
     Grid::builder()
-        .row_spacing(6)
+        .row_spacing(8)
         .column_spacing(12)
         .margin_start(4)
         .build()
@@ -61,6 +64,7 @@ fn grid_field(grid: &Grid, row: i32, label_text: &str, control: &impl IsA<gtk::W
         &Label::builder()
             .label(label_text)
             .halign(Align::End)
+            .width_request(120)
             .css_classes(["settings-field-label"])
             .build(),
         0,
@@ -215,7 +219,6 @@ pub fn show_settings_dialog(app: &Application, controller: Option<Rc<WorkspaceCo
     )));
 
     let appearance_page = settings_page();
-    appearance_page.append(&section_header("Appearance"));
     let appearance_grid = form_grid();
     grid_field(&appearance_grid, 0, "Theme:", &theme_dropdown);
     grid_field(&appearance_grid, 1, "Icons:", &icon_theme_dropdown);
@@ -260,7 +263,6 @@ pub fn show_settings_dialog(app: &Application, controller: Option<Rc<WorkspaceCo
         .active(settings.rhyme_stop_at_blank_line)
         .build();
     let rhyme_page = settings_page();
-    rhyme_page.append(&section_header("Rhyme Highlighting"));
     let rhyme_grid = form_grid();
     grid_check(&rhyme_grid, 0, &rhyme_toggle);
     grid_check(&rhyme_grid, 1, &rhyme_stop_at_blank_line_toggle);
@@ -275,7 +277,6 @@ pub fn show_settings_dialog(app: &Application, controller: Option<Rc<WorkspaceCo
         .active(settings.word_completion)
         .build();
     let completion_page = settings_page();
-    completion_page.append(&section_header("Completions"));
     let completion_grid = form_grid();
     grid_check(&completion_grid, 0, &completion_toggle);
     completion_page.append(&completion_grid);
@@ -289,7 +290,6 @@ pub fn show_settings_dialog(app: &Application, controller: Option<Rc<WorkspaceCo
         .active(settings.git_autostage)
         .build();
     let git_page = settings_page();
-    git_page.append(&section_header("Git"));
     let git_grid = form_grid();
     grid_check(&git_grid, 0, &git_toggle);
     git_page.append(&git_grid);
