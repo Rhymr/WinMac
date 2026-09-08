@@ -21,6 +21,15 @@
     <file compressed="true" preprocess="xml-stripblanks">icons/color/directory-color.svg</file>
     <file compressed="true" preprocess="xml-stripblanks">icons/color/file-color.svg</file>
     <file compressed="true" preprocess="xml-stripblanks">icons/color/folder-ios-color.svg</file>
+    <file compressed="true" preprocess="xml-stripblanks">icons/color/add-file-storage-color.svg</file>
+    <file compressed="true" preprocess="xml-stripblanks">icons/color/toolbar-toggle-highlighting-color.svg</file>
+    <file compressed="true" preprocess="xml-stripblanks">icons/color/diff-added-color.svg</file>
+    <file compressed="true" preprocess="xml-stripblanks">icons/color/diff-changed-color.svg</file>
+    <file compressed="true" preprocess="xml-stripblanks">icons/color/diff-removed-color.svg</file>
+    <file compressed="true" preprocess="xml-stripblanks">icons/color/folder-windows-color.svg</file>
+    <file compressed="true" preprocess="xml-stripblanks">icons/color/folder-www-root-opened-color.svg</file>
+    <file compressed="true" preprocess="xml-stripblanks">icons/color/folder-unloaded-color.svg</file>
+    <file compressed="true" preprocess="xml-stripblanks">icons/color/missing-folder-color.svg</file>
     <file compressed="true" preprocess="xml-stripblanks">icons/dark/new-file-dark.svg</file>
     <file compressed="true" preprocess="xml-stripblanks">icons/dark/new-folder-dark.svg</file>
     <file compressed="true" preprocess="xml-stripblanks">icons/dark/save-all-dark.svg</file>
@@ -38,6 +47,15 @@
     <file compressed="true" preprocess="xml-stripblanks">icons/dark/directory-dark.svg</file>
     <file compressed="true" preprocess="xml-stripblanks">icons/dark/file-dark.svg</file>
     <file compressed="true" preprocess="xml-stripblanks">icons/dark/folder-ios-dark.svg</file>
+    <file compressed="true" preprocess="xml-stripblanks">icons/dark/add-file-storage-dark.svg</file>
+    <file compressed="true" preprocess="xml-stripblanks">icons/dark/toolbar-toggle-highlighting-dark.svg</file>
+    <file compressed="true" preprocess="xml-stripblanks">icons/dark/diff-added-dark.svg</file>
+    <file compressed="true" preprocess="xml-stripblanks">icons/dark/diff-changed-dark.svg</file>
+    <file compressed="true" preprocess="xml-stripblanks">icons/dark/diff-removed-dark.svg</file>
+    <file compressed="true" preprocess="xml-stripblanks">icons/dark/folder-windows-dark.svg</file>
+    <file compressed="true" preprocess="xml-stripblanks">icons/dark/folder-www-root-opened-dark.svg</file>
+    <file compressed="true" preprocess="xml-stripblanks">icons/dark/folder-unloaded-dark.svg</file>
+    <file compressed="true" preprocess="xml-stripblanks">icons/dark/missing-folder-dark.svg</file>
     <file compressed="true" preprocess="xml-stripblanks">icons/light/new-file-light.svg</file>
     <file compressed="true" preprocess="xml-stripblanks">icons/light/new-folder-light.svg</file>
     <file compressed="true" preprocess="xml-stripblanks">icons/light/save-all-light.svg</file>
@@ -55,5 +73,14 @@
     <file compressed="true" preprocess="xml-stripblanks">icons/light/directory-light.svg</file>
     <file compressed="true" preprocess="xml-stripblanks">icons/light/file-light.svg</file>
     <file compressed="true" preprocess="xml-stripblanks">icons/light/folder-ios-light.svg</file>
+    <file compressed="true" preprocess="xml-stripblanks">icons/light/add-file-storage-light.svg</file>
+    <file compressed="true" preprocess="xml-stripblanks">icons/light/toolbar-toggle-highlighting-light.svg</file>
+    <file compressed="true" preprocess="xml-stripblanks">icons/light/diff-added-light.svg</file>
+    <file compressed="true" preprocess="xml-stripblanks">icons/light/diff-changed-light.svg</file>
+    <file compressed="true" preprocess="xml-stripblanks">icons/light/diff-removed-light.svg</file>
+    <file compressed="true" preprocess="xml-stripblanks">icons/light/folder-windows-light.svg</file>
+    <file compressed="true" preprocess="xml-stripblanks">icons/light/folder-www-root-opened-light.svg</file>
+    <file compressed="true" preprocess="xml-stripblanks">icons/light/folder-unloaded-light.svg</file>
+    <file compressed="true" preprocess="xml-stripblanks">icons/light/missing-folder-light.svg</file>
   </gresource>
 </gresources>
