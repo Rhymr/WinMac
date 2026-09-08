@@ -4,8 +4,8 @@ use crate::workspace::recent::load_recent_workspaces;
 use gio::prelude::FileExt;
 use gtk::prelude::*;
 use gtk::{
-    Align, ApplicationWindow, Box, Button, CheckButton, Entry, FileDialog, Grid, Label, ListBox,
-    ListBoxRow, Orientation, SearchEntry, Window,
+    Align, ApplicationWindow, Box, Button, CheckButton, Entry, FileDialog, Grid, Image, Label,
+    ListBox, ListBoxRow, Orientation, SearchEntry, Window,
 };
 use libadwaita::Application;
 use std::path::PathBuf;
@@ -42,7 +42,8 @@ where
     brand_box.set_margin_start(16);
     brand_box.set_margin_end(16);
 
-    let logo_icon = crate::app::icons::img("toolbar-toggle-highlighting", 28);
+    let logo_icon = Image::from_resource("/org/gtk_rs/rhymr/icons/rhymr-icon.svg");
+    logo_icon.set_pixel_size(28);
     logo_icon.set_css_classes(&["brand-icon"]);
 
     let title_vbox = Box::new(Orientation::Vertical, 0);
@@ -93,7 +94,6 @@ where
 
     let (configure_btn, configure_menu) =
         crate::app::context_menu::ContextMenu::dropdown(None, Some("Configure"));
-    configure_btn.add_css_class("welcome-sidebar-menu");
     configure_btn.set_always_show_arrow(true);
     {
         let app = app.clone();
@@ -109,7 +109,6 @@ where
     }
 
     let (help_btn, help_menu) = crate::app::context_menu::ContextMenu::dropdown(None, Some("Help"));
-    help_btn.add_css_class("welcome-sidebar-menu");
     help_btn.set_always_show_arrow(true);
     {
         let w = window.clone();

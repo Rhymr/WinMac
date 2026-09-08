@@ -117,7 +117,7 @@ impl FileTree {
             collapsed: Rc::new(RefCell::new(HashSet::new())),
             clipboard: Rc::new(RefCell::new(None)),
             git_statuses: Rc::new(RefCell::new(HashMap::new())),
-            folder_icon: crate::app::icons::paintable("directory"),
+            folder_icon: crate::app::icons::paintable("folder"),
             file_icon: crate::app::icons::paintable("file"),
         };
 

@@ -64,7 +64,7 @@ pub fn main_toolbar(controller: &Rc<WorkspaceController>) -> GtkBox {
     let bar = GtkBox::builder()
         .orientation(Orientation::Horizontal)
         .css_classes(["main-toolbar"])
-        .spacing(4)
+        .spacing(2)
         .build();
 
     // Left: breadcrumb showing where the active tab lives — the workspace
@@ -98,7 +98,7 @@ pub fn main_toolbar(controller: &Rc<WorkspaceController>) -> GtkBox {
                 let icon = if i == last && leaf_is_file {
                     img("file", 12)
                 } else {
-                    img("directory", 12)
+                    img("folder", 12)
                 };
                 breadcrumb.append(&icon);
 
@@ -149,7 +149,7 @@ pub fn main_toolbar(controller: &Rc<WorkspaceController>) -> GtkBox {
     bar.append(&git_label);
 
     let git_commit = tool_button(
-        "add-file-storage",
+        "git-commit",
         "app.git-commit",
         "Commit\u{2026}",
         "git-commit",
@@ -198,10 +198,12 @@ pub fn left_stripe<F: Fn(bool) + 'static>(project_visible: bool, on_toggle: F) -
         .valign(Align::Fill)
         .build();
 
-    let content = GtkBox::new(Orientation::Vertical, 3);
+    // Label on top (reads bottom-to-top), a small padded icon beneath it —
+    // JetBrains tool-window stripe convention.
+    let content = GtkBox::new(Orientation::Vertical, 2);
     content.set_halign(Align::Center);
-    content.append(&img("directory", 16));
     content.append(&VerticalLabel::new("Project"));
+    content.append(&img("folder", 12));
 
     let btn = ToggleButton::builder()
         .css_classes(["tool-stripe-button"])

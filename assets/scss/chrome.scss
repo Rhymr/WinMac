@@ -11,9 +11,12 @@
         background: none;
         border: none;
         border-radius: 0;
+        /* fixed square cell: the 16px icon centres in it, so the gap
+           between any two icons is uniform regardless of how each SVG's
+           artwork sits inside its own box */
         padding: 0;
-        min-height: 0;
-        min-width: 0;
+        min-height: 22px;
+        min-width: 22px;
         margin: 0;
         color: var(--text-not-so-dim);
         transition: background-color var(--transition-fast);
@@ -23,7 +26,6 @@
             color: inherit;
         }
 
-        /* hover wraps just the icon, not a full-height cell */
         &:hover {
             background-color: var(--bg-hover);
         }
@@ -38,8 +40,11 @@
         }
     }
 
-    & > menubutton > button {
+    & > menubutton > button,
+    & .app-dropdown > button {
         padding: 0;
+        min-width: 22px;
+        min-height: 22px;
     }
 
     & separator {
@@ -105,7 +110,7 @@
     background-color: var(--bg-dark);
     border-right: 1px solid var(--border-dark);
     padding: 4px 0 0 0;
-    min-width: 22px;
+    min-width: 24px;
 }
 
 /* The button fills the strip cell, but only its inner icon+label box is
@@ -120,7 +125,7 @@
     color: var(--text-not-so-dim);
 
     & > box {
-        padding: 2px 0;
+        padding: 4px 0;
         margin: 2px 0;
         transition: background-color var(--transition-fast);
     }
@@ -129,6 +134,11 @@
     & image {
         color: inherit;
         background: none;
+    }
+
+    /* small breathing room around the icon that sits below the label */
+    & image {
+        padding: 4px 2px 2px 2px;
     }
 
     &:hover {

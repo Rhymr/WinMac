@@ -3,7 +3,7 @@
 //! mark over a gradient).
 
 use gtk::prelude::*;
-use gtk::{Align, ApplicationWindow, Box as GtkBox, Label, Orientation};
+use gtk::{Align, ApplicationWindow, Box as GtkBox, Image, Label, Orientation};
 use libadwaita::Application;
 
 /// Build, present, and return the splash window. The caller closes it once
@@ -47,7 +47,8 @@ pub fn show(app: &Application) -> ApplicationWindow {
     );
     body.append(&head);
 
-    let logo = crate::app::icons::img("toolbar-toggle-highlighting", 44);
+    let logo = Image::from_resource("/org/gtk_rs/rhymr/icons/rhymr-icon.svg");
+    logo.set_pixel_size(44);
     logo.set_halign(Align::End);
     logo.set_valign(Align::End);
     logo.add_css_class("splash-logo");
