@@ -147,7 +147,7 @@ pub fn show_commit_dialog(app: &Application, controller: Rc<WorkspaceController>
                 refresh_file_tree(&controller);
                 dialog_for_commit.close();
             }
-            Err(e) => eprintln!("Commit failed: {e}"),
+            Err(e) => log::error!("commit failed: {e}"),
         }
     });
 

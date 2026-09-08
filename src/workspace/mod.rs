@@ -202,7 +202,7 @@ impl Workspace {
             let buffer = text_view.buffer();
             let content = buffer.text(&buffer.start_iter(), &buffer.end_iter(), false);
             if let Err(e) = fs::write(path, content.as_str()) {
-                eprintln!("Failed to save {path:?}: {e}");
+                log::error!("failed to save {path:?}: {e}");
             }
         }
 
@@ -227,7 +227,7 @@ impl Workspace {
             };
             match fs::read_to_string(path) {
                 Ok(content) => text_view.buffer().set_text(&content),
-                Err(e) => eprintln!("Failed to reload {path:?}: {e}"),
+                Err(e) => log::error!("failed to reload {path:?}: {e}"),
             }
         }
     }

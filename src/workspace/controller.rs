@@ -281,7 +281,7 @@ impl WorkspaceController {
         }
 
         if let Err(e) = fs::write(&candidate, "") {
-            eprintln!("Failed to create {candidate:?}: {e}");
+            log::error!("failed to create {candidate:?}: {e}");
             return;
         }
 
@@ -309,7 +309,7 @@ impl WorkspaceController {
         }
 
         if let Err(e) = fs::create_dir(&candidate) {
-            eprintln!("Failed to create {candidate:?}: {e}");
+            log::error!("failed to create {candidate:?}: {e}");
             return;
         }
 

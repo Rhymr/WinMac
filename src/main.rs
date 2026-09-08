@@ -54,6 +54,13 @@ fn first_text_file(dir: &std::path::Path) -> Option<PathBuf> {
 }
 
 fn main() -> glib::ExitCode {
+    // Verbosity flags (`-v` / `--verbose`, repeatable) and `RHYMR_LOG` drive
+    // stderr logging. Parse and strip our flags before GTK sees argv —
+    // a HANDLES_OPEN app rejects options it doesn't recognise.
+    let mut args: Vec<String> = std::env::args().collect();
+    let verbosity = rhymr_rs::logging::parse_verbosity(&mut args);
+    rhymr_rs::logging::init(verbosity);
+
     // Register the resource bundle from the compiled resource file
     let resource_bytes = include_bytes!(concat!(env!("OUT_DIR"), "/compiled.gresource"));
     let resource_data = glib::Bytes::from(&resource_bytes[..]);
@@ -61,11 +68,11 @@ fn main() -> glib::ExitCode {
         &Resource::from_data(&resource_data).expect("Failed to load resources"),
     );
 
-    println!("Current dir = {:?}", std::env::current_dir().unwrap());
+    log::debug!("current dir = {:?}", std::env::current_dir());
 
     // Compile scss files into css files
     if let Err(e) = css::compile_sass() {
-        eprintln!("compile_sass failed: {e}");
+        log::error!("compile_sass failed: {e}");
         panic!("{e}");
     }
 
@@ -123,6 +130,6 @@ fn main() -> glib::ExitCode {
         }
     });
 
-    // Run application!
-    app.run()
+    // Run application! (argv with our verbosity flags already stripped)
+    app.run_with_args(&args)
 }

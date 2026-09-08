@@ -24,7 +24,7 @@ pub fn open_uri(window: &impl IsA<gtk::Window>, uri: &str) {
     let uri = uri.to_string();
     gtk::glib::MainContext::default().spawn_local(async move {
         if let Err(e) = launcher.launch_future(Some(&window)).await {
-            eprintln!("Failed to open {uri}: {e}");
+            log::error!("failed to open {uri}: {e}");
         }
     });
 }

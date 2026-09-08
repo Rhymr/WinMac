@@ -220,7 +220,7 @@ impl FileTree {
             fs::write(&candidate, "")
         };
         if let Err(e) = result {
-            eprintln!("Failed to create {candidate:?}: {e}");
+            log::error!("failed to create {candidate:?}: {e}");
             return;
         }
 
@@ -353,7 +353,7 @@ impl FileTree {
                         drop(collapsed);
                         self.stage_git();
                     }
-                    Err(e) => eprintln!("Failed to rename {old_path:?} to {new_path:?}: {e}"),
+                    Err(e) => log::error!("failed to rename {old_path:?} to {new_path:?}: {e}"),
                 }
             }
         }
@@ -397,7 +397,7 @@ impl FileTree {
                     file_tree_ref.select_path(&dest);
                 });
             }
-            Err(e) => eprintln!("Failed to move {src:?} to {dest:?}: {e}"),
+            Err(e) => log::error!("failed to move {src:?} to {dest:?}: {e}"),
         }
     }
 
@@ -447,7 +447,7 @@ impl FileTree {
                     file_tree_ref.select_path(&dest);
                 });
             }
-            Err(e) => eprintln!("Failed to copy {src:?} to {dest:?}: {e}"),
+            Err(e) => log::error!("failed to copy {src:?} to {dest:?}: {e}"),
         }
     }
 
@@ -528,7 +528,7 @@ impl FileTree {
                 self.stage_git();
                 self.refresh_deferred();
             }
-            Err(e) => eprintln!("Failed to delete {path:?}: {e}"),
+            Err(e) => log::error!("failed to delete {path:?}: {e}"),
         }
     }
 

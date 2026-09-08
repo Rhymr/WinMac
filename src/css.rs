@@ -107,7 +107,7 @@ pub fn compile_sass() -> Result<(), Box<dyn std::error::Error>> {
         let scss_path = css_file.replace("{1}", "scss");
         let css_path = css_file.replace("{1}", "css");
 
-        println!("Compiling {scss_path}");
+        log::debug!("compiling {scss_path}");
         let css_output = grass::from_path(&scss_path, &Options::default())?;
         fs::write(css_path, css_output)?;
     }
@@ -181,7 +181,7 @@ fn build_css(settings: &Settings) -> String {
                 combined_css.push_str(css);
                 combined_css.push('\n');
             }
-            Err(err) => eprintln!("Failed to compile {scss_path}: {err}"),
+            Err(err) => log::error!("failed to compile {scss_path}: {err}"),
         }
     }
 

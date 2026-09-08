@@ -121,7 +121,7 @@ impl TextEditor {
                     return;
                 }
                 if let Err(e) = std::fs::write(&path, text) {
-                    eprintln!("Auto-save failed for {path:?}: {e}");
+                    log::error!("auto-save failed for {path:?}: {e}");
                     return;
                 }
                 modified_for_timeout.set(false);
