@@ -31,27 +31,17 @@ pub struct Workspace {
 
 impl Workspace {
     pub fn new(controller: Rc<WorkspaceController>, file_tree: Option<FileTree>) -> Self {
-        // Starts non-scrollable: GTK only ever shrinks tab allocations
-        // toward their ellipsized minimum (rather than growing the window)
-        // when scrolling is off — with it on, tabs stay at full width and
-        // overflow behind scroll arrows instead. `adapt_tab_display` (see
-        // its tick callback below) is what turns scrolling back on, but
-        // only once every tab has already been squeezed down to icon-only
-        // and *still* doesn't fit — the last resort, not the first one.
+        // Scrollable: when the open tabs don't fit, each tab's label
+        // ellipsizes toward its `width_chars` minimum (see
+        // `build_tab_widget`) and only once even those minimums overflow
+        // does the header hand off to paging arrows — JetBrains-style. No
+        // per-frame relayout: the label's own min/natural sizing does the
+        // shrinking.
         let notebook = Notebook::builder()
-            .scrollable(false)
+            .scrollable(true)
             .show_border(false)
             .css_classes(vec!["workspace-notebook"])
             .build();
-
-        // Keeps the tab strip from ever pushing the window wider: every
-        // frame, shrink open tabs toward icon-only before falling back to
-        // paging arrows, rather than letting the header just demand more
-        // width than it's been given.
-        notebook.add_tick_callback(|notebook, _clock| {
-            adapt_tab_display(notebook);
-            glib::ControlFlow::Continue
-        });
 
         let open_files = Rc::new(RefCell::new(Vec::new()));
 
@@ -526,13 +516,11 @@ fn add_new_tab(
 
     // `tab_expand(false)`: without it, GTK stretches each tab to fill any
     // leftover header width (and centers the row while it's at it) — pin
-    // every tab to its own size instead, so the strip stays left aligned.
-    // `tab_fill` is deliberately left at its default (true): that's what
-    // lets a tab size to its full natural (un-ellipsized) width when
-    // there's room, only shrinking toward the label's ellipsized minimum
-    // once the open tabs collectively overflow the header — setting it
-    // false here instead made every tab render at minimum width always,
-    // collapsing names even with plenty of space free.
+    // every tab to its own size instead, so the strip stays left aligned,
+    // JetBrains-style, with a plain empty band after the last tab.
+    // `tab_fill` stays at its default (true): a tab sizes to its full
+    // natural width when there's room and ellipsizes toward the label's
+    // `width_chars` minimum once the strip is crowded (`scrollable(true)`).
     let page = notebook.page(&page_widget);
     page.set_tab_expand(false);
 
@@ -575,9 +563,8 @@ fn build_tab_widget(path: &Path) -> (Box, Button) {
         .orientation(gtk::Orientation::Horizontal)
         .css_classes(vec!["tab-box"])
         .spacing(3)
-        // Read regardless of label visibility, so a tab shrunk down to
-        // icon-only (see `adapt_tab_display`) still identifies itself on
-        // hover.
+        // Shown on hover so a tab ellipsized down to a few characters
+        // still identifies itself.
         .tooltip_text(display_path)
         .build();
 
@@ -600,11 +587,11 @@ fn build_tab_widget(path: &Path) -> (Box, Button) {
     // there's otherwise no basis for GTK to know it should ask for more.
     // `max_width_chars` gives it a generous natural-size ceiling instead
     // (comfortably past any real filename, so a tab shows its full name by
-    // default), while `width_chars` sets the actual minimum it can shrink
-    // down toward once the open tabs don't all fit — see
-    // `Notebook::scrollable(false)` in `Workspace::new`.
-    label.set_width_chars(8);
-    label.set_max_width_chars(28);
+    // default), while `width_chars` sets the actual minimum it ellipsizes
+    // down toward once the strip is crowded — see `Notebook::scrollable`
+    // in `Workspace::new`.
+    label.set_width_chars(6);
+    label.set_max_width_chars(24);
     label.set_halign(gtk::Align::Start);
 
     // Visibility is handled entirely by CSS (`tab:checked`/`tab:hover` in
@@ -623,107 +610,6 @@ fn build_tab_widget(path: &Path) -> (Box, Button) {
     tab_box.append(&close_button);
 
     (tab_box, close_button)
-}
-
-/// Keeps the open tabs from ever forcing the notebook (and so the window)
-/// wider than it already is. Run every frame from a tick callback (GTK
-/// gives no resize/allocation-changed signal for a stock widget we haven't
-/// subclassed, and this needs to react to both window resizes and tabs
-/// being added/removed) it re-measures every tab and picks the least
-/// cramped of three tiers that still fits:
-///
-/// 1. Full labels — every tab at its natural (un-ellipsized) width.
-/// 2. Ellipsized labels — GTK's own min/natural shrink already handles
-///    this; no help needed from here.
-/// 3. Icon-only — labels hidden entirely.
-///
-/// Only once even icon-only tabs collectively don't fit does it fall back
-/// to paging arrows (`scrollable`), so the header hands off to those
-/// rather than to a wider window.
-fn adapt_tab_display(notebook: &Notebook) {
-    let available = notebook.width() - 16;
-    if available <= 0 {
-        return;
-    }
-
-    let mut tab_widgets = Vec::new();
-    let mut labels = Vec::new();
-
-    for i in 0..notebook.n_pages() {
-        let Some(page) = notebook.nth_page(Some(i)) else {
-            continue;
-        };
-        // No tab label at all on the empty-state placeholder page.
-        let Some(tab_widget) = notebook.tab_label(&page) else {
-            continue;
-        };
-        let Some(label) = tab_widget
-            .first_child()
-            .and_then(|icon| icon.next_sibling())
-            .and_then(|w| w.downcast::<Label>().ok())
-        else {
-            continue;
-        };
-        tab_widgets.push(tab_widget);
-        labels.push(label);
-    }
-
-    if labels.is_empty() {
-        return;
-    }
-
-    // Always measure as if every label were visible first, regardless of
-    // whatever state they're currently in. Measuring a tab whose label is
-    // *already* hidden would report its "full" width as just the
-    // icon/close-button footprint (a hidden child contributes ~nothing to
-    // its box's size) — nowhere near what showing it back would actually
-    // need — and the strip would flip back to full labels next frame, only
-    // to immediately re-collapse the frame after that: an infinite
-    // show/hide oscillation, which is what tabs visibly flying off to the
-    // right turned out to be. Toggling visible→hidden synchronously within
-    // this same callback, before layout/paint for this frame happens,
-    // doesn't flicker — only the final state at the end of this function
-    // is ever actually drawn.
-    for label in &labels {
-        if !label.is_visible() {
-            label.set_visible(true);
-        }
-    }
-
-    let mut full_natural_total = 0;
-    let mut min_total = 0;
-    for tab_widget in &tab_widgets {
-        let (min_w, natural_w, _, _) = tab_widget.measure(gtk::Orientation::Horizontal, -1);
-        full_natural_total += natural_w;
-        min_total += min_w;
-    }
-
-    if full_natural_total <= available || min_total <= available {
-        // Labels are already visible from the measurement pass above.
-        if notebook.is_scrollable() {
-            notebook.set_scrollable(false);
-        }
-        return;
-    }
-
-    for label in &labels {
-        label.set_visible(false);
-    }
-
-    // Real re-measurement now that labels are actually hidden, rather than
-    // the fixed `TAB_ICON_ONLY_WIDTH_ESTIMATE` guess this used to compare
-    // against — any mismatch between an estimate and each tab's genuine
-    // icon-only footprint (padding/border/margin from notebook.scss) could
-    // leave tabs overflowing uncontained, since a non-scrollable notebook
-    // doesn't clip its header.
-    let icon_only_total: i32 = tab_widgets
-        .iter()
-        .map(|w| w.measure(gtk::Orientation::Horizontal, -1).1)
-        .sum();
-    let need_scrolling = icon_only_total > available;
-    if notebook.is_scrollable() != need_scrolling {
-        notebook.set_scrollable(need_scrolling);
-    }
 }
 
 fn wire_tab_close_button(close_button: &Button, controller: &Rc<WorkspaceController>) {
