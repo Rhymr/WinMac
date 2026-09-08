@@ -95,8 +95,12 @@
     background-color: inherit;
 }
 
+/* Open-file dot — a small solid circle. White by default; a `.file-modified`
+   / `.file-new` / `.file-renamed` class (added alongside this one) overrides
+   the colour, since those rules come later in this file. */
 .active-chevron {
-    color: var(--text-bright);
+    color: #ffffff;
+    font-size: 9px;
 }
 
 .dir-label {

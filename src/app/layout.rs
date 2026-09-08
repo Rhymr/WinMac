@@ -151,7 +151,7 @@ pub fn create_main_layout() -> (GtkBox, Rc<WorkspaceController>) {
     };
 
     let main_box = GtkBox::new(Orientation::Vertical, 0);
-    main_box.append(&crate::app::chrome::main_toolbar());
+    main_box.append(&crate::app::chrome::main_toolbar(&workspace_controller));
     main_box.append(&outer_split);
     main_box.append(&bottom_stripe);
     main_box.append(&create_status_bar(&workspace_controller));

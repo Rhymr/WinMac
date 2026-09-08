@@ -1,8 +1,7 @@
 use datamuse_api_rs::{DatamuseClient, EndPoint, RelatedType, Vocabulary};
 use gtk::prelude::*;
 use gtk::{
-    Box as GtkBox, Button, Entry, Frame, GestureClick, Label, ListBox, Orientation, ScrolledWindow,
-    pango,
+    Box as GtkBox, Button, Entry, Frame, Label, ListBox, Orientation, ScrolledWindow, pango,
 };
 use std::cell::{Cell, RefCell};
 use std::collections::BTreeMap;
@@ -80,12 +79,12 @@ impl RhymeSearch {
             .child(&rhyming_words_list)
             .build();
 
-        // Collapsible header: chevron + title, click to toggle (same visual
-        // language as the file tree's expand/collapse chevrons).
+        // Plain header strip — a title only. Show/hide is driven solely by
+        // the bottom stripe (see app::chrome::bottom_stripe); the panel has
+        // no second click-to-collapse layer of its own.
         let header = GtkBox::new(Orientation::Horizontal, 6);
         header.set_css_classes(&["rhyme-search-header"]);
 
-        // Starts collapsed
         let title = Label::new(Some("Rhyme Search"));
         title.set_css_classes(&["rhyme-search-title"]);
 
@@ -101,21 +100,6 @@ impl RhymeSearch {
 
         let collapsed = Rc::new(Cell::new(true));
         let on_toggle: ToggleCallback = Rc::new(RefCell::new(None));
-
-        let header_click = GestureClick::new();
-        header_click.set_button(1);
-        let container_for_toggle = container.clone();
-        let collapsed_for_toggle = collapsed.clone();
-        let on_toggle_for_click = on_toggle.clone();
-        header_click.connect_released(move |_, _, _, _| {
-            let is_collapsed = !collapsed_for_toggle.get();
-            collapsed_for_toggle.set(is_collapsed);
-            container_for_toggle.set_visible(!is_collapsed);
-            if let Some(callback) = on_toggle_for_click.borrow().as_ref() {
-                callback(is_collapsed);
-            }
-        });
-        header.add_controller(header_click);
 
         let handle_submit = move |input: &str| {
             if !input.is_empty()

@@ -303,12 +303,21 @@ impl FileTree {
                 .map(|w| w.open_files.borrow().iter().any(|p| p == path))
                 .unwrap_or(false);
 
-            let chevron = Label::new(if is_open { Some("\u{25CA}") } else { None });
-            chevron.set_css_classes(if is_open {
-                &["dir-chevron", "active-chevron"]
-            } else {
-                &["dir-chevron"]
-            });
+            // Open-file dot: a solid circle, white when the file is merely
+            // open, otherwise following the file's VCS colour (orange
+            // modified, etc.) — same classes as the name label below.
+            let chevron = Label::new(if is_open { Some("\u{25CF}") } else { None });
+            let mut chevron_classes = vec!["dir-chevron"];
+            if is_open {
+                chevron_classes.push("active-chevron");
+                match git_status {
+                    Some(GitFileStatus::New) => chevron_classes.push("file-new"),
+                    Some(GitFileStatus::Renamed) => chevron_classes.push("file-renamed"),
+                    Some(GitFileStatus::Modified) => chevron_classes.push("file-modified"),
+                    None => {}
+                }
+            }
+            chevron.set_css_classes(&chevron_classes);
             hbox.append(&chevron);
 
             let icon = Image::from_paintable(self.file_icon.as_ref());

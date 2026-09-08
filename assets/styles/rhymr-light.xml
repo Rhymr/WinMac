@@ -9,7 +9,7 @@
   <style name="selection-unfocused" background="#d4d4d4" foreground="#000000"/>
   <style name="cursor" foreground="#000000"/>
   <style name="secondary-cursor" foreground="#000000"/>
-  <style name="line-numbers" foreground="#999999" background="#ffffff"/>
+  <style name="line-numbers" foreground="#999999" background="#f0f0f0"/>
   <style name="line-numbers-border" background="#d0d0d0"/>
   <style name="bracket-match" background="#93d9d9" bold="true"/>
   <style name="bracket-mismatch" background="#ffcccc" bold="true"/>
@@ -18,8 +18,8 @@
   <style name="background-pattern" background="#ffffff"/>
 
   <!-- Editor specific -->
-  <style name="rhyme-editor-gutter" foreground="#999999" background="#ffffff"/>
-  <style name="syllable-count" foreground="#4a8f3c" background="#ffffff"/>
+  <style name="rhyme-editor-gutter" foreground="#999999" background="#f0f0f0"/>
+  <style name="syllable-count" foreground="#3a8a2e" background="#f0f0f0"/>
 
   <!-- Current line highlight — classic pale-yellow -->
   <style name="line-highlight" background="#fcfaed"/>

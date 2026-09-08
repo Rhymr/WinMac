@@ -84,6 +84,7 @@ impl Workspace {
         notebook.connect_switch_page(move |_, _, _| {
             controller_for_switch.refresh_word_count();
             controller_for_switch.refresh_cursor();
+            controller_for_switch.refresh_nav();
         });
 
         workspace
@@ -121,6 +122,7 @@ impl Workspace {
         self.notebook.add_css_class("has-open-files");
 
         self.controller.refresh_word_count();
+        self.controller.refresh_nav();
 
         page_num
     }

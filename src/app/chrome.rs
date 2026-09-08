@@ -1,14 +1,17 @@
-//! Classic JetBrains-style window chrome: a top toolbar (file actions on the
-//! left, a colour-coded `Git:` group on the right), a left tool-window
-//! stripe with a vertical "Project" label, and a bottom stripe for the
-//! Rhyme Search panel — the way a JetBrains IDE arranges its tool windows.
+//! Classic JetBrains-style window chrome: a compact top toolbar (active-file
+//! breadcrumb on the left; file actions + a colour-coded Git group + a
+//! settings gear on the right), a left tool-window stripe with a vertical
+//! "Project" label, and a bottom stripe for the Rhyme Search panel.
 
 use crate::app::vertical_label::VerticalLabel;
+use crate::workspace::controller::WorkspaceController;
 use gtk::gio;
 use gtk::prelude::*;
 use gtk::{
     Align, Box as GtkBox, Button, Image, Label, MenuButton, Orientation, Separator, ToggleButton,
+    pango,
 };
+use std::rc::Rc;
 
 /// Toolbar icon size, matching JetBrains.
 const TOOLBAR_ICON: i32 = 16;
@@ -20,20 +23,21 @@ fn tool_button(icon: &str, action: &str, tooltip: &str) -> Button {
     let button = Button::builder()
         .action_name(action)
         .tooltip_text(tooltip)
+        .valign(Align::Center)
         .build();
     button.set_child(Some(&image));
     button
 }
 
-/// Same, plus an extra CSS class (used to colour the Git actions).
-fn git_button(icon: &str, action: &str, tooltip: &str, class: &str) -> Button {
+/// Same, plus an extra CSS class (used to colour the Git / run actions).
+fn tinted_button(icon: &str, action: &str, tooltip: &str, class: &str) -> Button {
     let b = tool_button(icon, action, tooltip);
     b.add_css_class(class);
     b
 }
 
-/// The "Configure" dropdown — Settings first, then Help.
-fn configure_button() -> MenuButton {
+/// The settings gear (JetBrains-style) — Settings first, then Help.
+fn settings_button() -> MenuButton {
     let menu = gio::Menu::new();
     menu.append(Some("Settings\u{2026}"), Some("app.preferences"));
 
@@ -44,64 +48,88 @@ fn configure_button() -> MenuButton {
     menu.append_section(None, &help);
 
     MenuButton::builder()
-        .label("Configure")
-        .always_show_arrow(true)
+        .icon_name("emblem-system-symbolic")
         .menu_model(&menu)
-        .tooltip_text("Configure")
+        .tooltip_text("Settings")
+        .valign(Align::Center)
+        .css_classes(["settings-gear"])
         .build()
 }
 
-/// The top toolbar row.
-pub fn main_toolbar() -> GtkBox {
+/// The compact top toolbar.
+pub fn main_toolbar(controller: &Rc<WorkspaceController>) -> GtkBox {
     let bar = GtkBox::builder()
         .orientation(Orientation::Horizontal)
         .css_classes(["main-toolbar"])
-        .spacing(1)
+        .spacing(2)
         .build();
 
-    bar.append(&tool_button("document-new-symbolic", "app.new", "New File"));
-    bar.append(&tool_button(
-        "document-open-symbolic",
-        "app.open",
-        "Open\u{2026}",
+    // Left: breadcrumb showing where the active tab lives.
+    let breadcrumb = Label::builder()
+        .css_classes(["nav-breadcrumb"])
+        .halign(Align::Start)
+        .hexpand(true)
+        .xalign(0.0)
+        .ellipsize(pango::EllipsizeMode::Start)
+        .build();
+    {
+        let breadcrumb = breadcrumb.clone();
+        controller.set_nav_listener(move |segments| {
+            breadcrumb.set_text(&segments.join("  \u{203a}  "));
+        });
+    }
+    controller.refresh_nav();
+    bar.append(&breadcrumb);
+
+    // File actions, sitting where a JetBrains toolbar puts the run controls —
+    // tinted like run buttons, but keeping their own action icons.
+    bar.append(&tinted_button(
+        "document-new-symbolic",
+        "app.new",
+        "New File",
+        "run-action",
     ));
-    bar.append(&tool_button(
+    bar.append(&tinted_button(
+        "folder-new-symbolic",
+        "app.new-folder",
+        "New Folder",
+        "run-action",
+    ));
+    bar.append(&tinted_button(
         "document-save-symbolic",
         "app.save-all",
         "Save All",
+        "run-action",
     ));
 
-    let spacer = GtkBox::new(Orientation::Horizontal, 0);
-    spacer.set_hexpand(true);
-    bar.append(&spacer);
+    bar.append(&Separator::new(Orientation::Vertical));
 
-    // Git: <pull> <commit> <push> <fetch> — JetBrains colours (blue update,
-    // green commit/push).
+    // Git: <pull> <commit> <push> <fetch>
     bar.append(
         &Label::builder()
             .label("Git:")
             .css_classes(["toolbar-group-label"])
             .build(),
     );
-    bar.append(&git_button(
+    bar.append(&tinted_button(
         "go-down-symbolic",
         "app.git-pull",
         "Pull\u{2026}",
         "git-pull",
     ));
-    bar.append(&git_button(
+    bar.append(&tinted_button(
         "object-select-symbolic",
         "app.git-commit",
         "Commit\u{2026}",
         "git-commit",
     ));
-    bar.append(&git_button(
+    bar.append(&tinted_button(
         "go-up-symbolic",
         "app.git-push",
         "Push\u{2026}",
         "git-push",
     ));
-    bar.append(&git_button(
+    bar.append(&tinted_button(
         "view-refresh-symbolic",
         "app.git-fetch",
         "Fetch",
@@ -109,13 +137,12 @@ pub fn main_toolbar() -> GtkBox {
     ));
 
     bar.append(&Separator::new(Orientation::Vertical));
-    bar.append(&configure_button());
+    bar.append(&settings_button());
 
     bar
 }
 
 /// The left tool-window stripe — a narrow column of vertical-text toggles.
-/// Currently just "Project"; `on_toggle(active)` flips the file tree.
 pub fn left_stripe<F: Fn(bool) + 'static>(project_visible: bool, on_toggle: F) -> GtkBox {
     let stripe = GtkBox::builder()
         .orientation(Orientation::Vertical)
@@ -135,6 +162,7 @@ pub fn left_stripe<F: Fn(bool) + 'static>(project_visible: bool, on_toggle: F) -
         .css_classes(["tool-stripe-button"])
         .active(project_visible)
         .tooltip_text("Project")
+        .halign(Align::Center)
         .valign(Align::Start)
         .build();
     btn.set_child(Some(&content));
@@ -145,7 +173,6 @@ pub fn left_stripe<F: Fn(bool) + 'static>(project_visible: bool, on_toggle: F) -
 }
 
 /// The bottom stripe — horizontal toggles for bottom-docked tool windows.
-/// Currently just "Rhyme Search"; `on_toggle(active)` shows/hides it.
 pub fn bottom_stripe<F: Fn(bool) + 'static>(rhyme_visible: bool, on_toggle: F) -> GtkBox {
     let stripe = GtkBox::builder()
         .orientation(Orientation::Horizontal)
@@ -155,7 +182,7 @@ pub fn bottom_stripe<F: Fn(bool) + 'static>(rhyme_visible: bool, on_toggle: F) -
 
     let content = GtkBox::new(Orientation::Horizontal, 4);
     let icon = Image::from_icon_name("system-search-symbolic");
-    icon.set_pixel_size(14);
+    icon.set_pixel_size(13);
     content.append(&icon);
     content.append(&Label::new(Some("Rhyme Search")));
 
@@ -163,6 +190,7 @@ pub fn bottom_stripe<F: Fn(bool) + 'static>(rhyme_visible: bool, on_toggle: F) -
         .css_classes(["bottom-stripe-button"])
         .active(rhyme_visible)
         .tooltip_text("Rhyme Search")
+        .valign(Align::Center)
         .build();
     btn.set_child(Some(&content));
     btn.connect_toggled(move |b| on_toggle(b.is_active()));

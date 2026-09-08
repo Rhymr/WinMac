@@ -1,27 +1,29 @@
-/* Classic window chrome — top toolbar, left tool-window stripe, bottom
-   stripe (src/app/chrome.rs). Flat, square, dense. */
+/* Classic window chrome — a compact top toolbar, a left tool-window stripe
+   and a bottom stripe (src/app/chrome.rs). Flat, square, JetBrains-tight. */
 
 .main-toolbar {
     background-color: var(--bg-dark);
     border-bottom: 1px solid var(--border-dark);
-    padding: 2px 4px;
-    min-height: 28px;
+    padding: 1px 4px;
+    min-height: 24px;
 
     & button {
         background: none;
         border: none;
         border-radius: 0;
-        padding: 2px 5px;
-        min-height: 24px;
-        min-width: 24px;
+        padding: 1px 4px;
+        min-height: 20px;
+        min-width: 20px;
+        margin: 1px 0;
         color: var(--text-not-so-dim);
         transition: background-color var(--transition-fast);
 
-        /* let the icon follow the button's colour rather than `* {}` */
+        /* icon follows the button colour, not `* {}` */
         & image {
             color: inherit;
         }
 
+        /* hover wraps just the icon, not a full-height cell */
         &:hover {
             background-color: var(--bg-hover);
         }
@@ -36,28 +38,37 @@
         }
     }
 
-    /* the "Configure" MenuButton keeps a little more room for its label */
     & > menubutton > button {
-        padding: 2px 8px;
+        padding: 1px 4px;
     }
 
     & separator {
         background-color: var(--border-dark);
         min-width: 1px;
-        margin: 5px 3px;
+        margin: 4px 3px;
     }
+}
+
+/* Active-file breadcrumb on the left, pushing the action groups right. */
+.nav-breadcrumb {
+    color: var(--text-muted);
+    font-size: 11px;
+    margin: 0 4px;
 }
 
 /* "Git:" label before the VCS action group. */
 .toolbar-group-label {
     color: var(--text-muted);
     font-size: 11px;
-    margin: 0 4px 0 6px;
+    margin: 0 2px 0 4px;
 }
 
-/* JetBrains VCS action colours. base.scss's `* { color: ... }` colours the
-   inner GtkImage node *directly*, so the button's colour never reaches the
-   icon by inheritance — target the image explicitly (and beat `*`). */
+/* base.scss's `* { color }` paints the inner GtkImage directly, so tinting
+   has to target the image node (and beat `*`). */
+.main-toolbar button.run-action image {
+    color: var(--vcs-added);
+}
+
 .main-toolbar button.git-pull image,
 .main-toolbar button.git-fetch image {
     color: var(--vcs-modified);
@@ -68,7 +79,11 @@
     color: var(--vcs-added);
 }
 
-/* --- Left tool-window stripe ------------------------------------------- */
+.settings-gear image {
+    color: var(--text-not-so-dim);
+}
+
+/* --- Left tool-window stripe ---------------------------------------- */
 .tool-stripe {
     background-color: var(--bg-dark);
     border-right: 1px solid var(--border-dark);
@@ -80,8 +95,10 @@
     background: none;
     border: none;
     border-radius: 0;
-    padding: 8px 2px;
-    min-width: 20px;
+    padding: 6px 2px;
+    margin: 1px;
+    min-width: 0;
+    min-height: 0;
     color: var(--text-not-so-dim);
     transition: background-color var(--transition-fast);
 
@@ -96,8 +113,6 @@
         color: var(--text-bright);
     }
 
-    /* Pressed-in = its tool window is showing, with an accent bar on the
-       docked edge. */
     &:checked {
         background-color: var(--bg-mid);
         color: var(--text-bright);
@@ -105,12 +120,12 @@
     }
 }
 
-/* --- Bottom stripe --------------------------------------------------- */
+/* --- Bottom stripe ------------------------------------------------- */
 .bottom-stripe {
     background-color: var(--bg-dark);
     border-top: 1px solid var(--border-dark);
     padding: 0 4px;
-    min-height: 24px;
+    min-height: 22px;
 }
 
 .bottom-stripe-button {
@@ -118,6 +133,8 @@
     border: none;
     border-radius: 0;
     padding: 2px 8px;
+    margin: 2px 0;
+    min-height: 0;
     color: var(--text-not-so-dim);
     font-size: 11px;
     transition: background-color var(--transition-fast);

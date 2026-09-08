@@ -12,6 +12,7 @@ use std::rc::Rc;
 type WordCountListener = RefCell<Option<Box<dyn Fn(u32)>>>;
 type CursorListener = RefCell<Option<Box<dyn Fn(i32, i32)>>>;
 type BranchListener = RefCell<Option<Box<dyn Fn(Option<String>)>>>;
+type NavListener = RefCell<Option<Box<dyn Fn(Vec<String>)>>>;
 
 pub struct WorkspaceController {
     pub(crate) workspace: RefCell<Option<Rc<Workspace>>>,
@@ -19,6 +20,7 @@ pub struct WorkspaceController {
     word_count_listener: WordCountListener,
     cursor_listener: CursorListener,
     branch_listener: BranchListener,
+    nav_listener: NavListener,
 }
 
 impl Default for WorkspaceController {
@@ -35,6 +37,7 @@ impl WorkspaceController {
             word_count_listener: RefCell::new(None),
             cursor_listener: RefCell::new(None),
             branch_listener: RefCell::new(None),
+            nav_listener: RefCell::new(None),
         }
     }
 
@@ -99,6 +102,36 @@ impl WorkspaceController {
 
         if let Some(listener) = self.branch_listener.borrow().as_ref() {
             listener(branch);
+        }
+    }
+
+    /// Subscribe to the active tab's location as breadcrumb segments
+    /// (`["src", "app", "main.rs"]`) — empty when no file is open.
+    pub fn set_nav_listener(&self, listener: impl Fn(Vec<String>) + 'static) {
+        self.nav_listener.replace(Some(Box::new(listener)));
+    }
+
+    /// Recompute the active tab's breadcrumb and notify the listener.
+    pub fn refresh_nav(&self) {
+        let segments = self
+            .get_workspace()
+            .and_then(|w| w.get_current_buffer())
+            .and_then(|(_, path)| path)
+            .map(|path| {
+                let rel = self
+                    .root_path
+                    .borrow()
+                    .as_ref()
+                    .and_then(|root| path.strip_prefix(root).ok().map(PathBuf::from))
+                    .unwrap_or_else(|| path.clone());
+                rel.components()
+                    .map(|c| c.as_os_str().to_string_lossy().into_owned())
+                    .collect()
+            })
+            .unwrap_or_default();
+
+        if let Some(listener) = self.nav_listener.borrow().as_ref() {
+            listener(segments);
         }
     }
 

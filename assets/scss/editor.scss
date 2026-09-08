@@ -20,35 +20,37 @@ sourceview {
     }
 }
 
-/* Gutter — shares the editor's background (classic IDE), colours from the
-   scheme's `line-numbers` / `rhyme-editor-gutter` / `syllable-count`
-   styles. */
+/* Gutter — a shade off the editor background (JetBrains). Its column
+   spacing is kept tight so the line number, syllable count and VCS bar sit
+   close together. Colours come from the scheme, except the syllable count
+   which is forced green regardless of theme. */
 .rhyme-editor-gutter {
     padding: 0;
     margin: 0;
     font-family: "Georgia", serif;
-    background-color: var(--bg-darkest);
+    background-color: var(--gutter-bg);
 }
 
 .syllable-count {
+    color: var(--syllable-green);
     font-size: 10px;
     padding: 0;
-    margin-left: 6px;
-    margin-right: 8px;
-    background-color: var(--bg-darkest);
+    margin-left: 3px;
+    margin-right: 3px;
+    background-color: var(--gutter-bg);
     font-family: var(--app-font-family);
     text-align: center;
 }
 
 .line-numbers {
-    background-color: var(--bg-darkest);
-    padding: 0;
+    background-color: var(--gutter-bg);
+    padding: 0 2px;
     margin: 0;
     font-family: var(--app-font-family);
-    text-align: center;
+    text-align: right;
 
     & + .syllable-count {
-        margin-top: 4px;
+        margin-top: 0;
     }
 }
 
@@ -61,9 +63,9 @@ sourceview {
    rightmost in the gutter so the bar butts against the text. */
 .vcs-gutter {
     padding: 0;
-    margin: 0 2px 0 4px;
-    min-width: 5px;
-    background: none;
+    margin: 0 0 0 1px;
+    min-width: 4px;
+    background-color: var(--gutter-bg);
 }
 
 scrolledwindow {
