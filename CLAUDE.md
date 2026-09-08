@@ -5,12 +5,37 @@ Rhymr is a cross-platform (Windows + macOS) desktop lyric editor built in
 a syllable-count gutter and live color-highlighted rhyme groups, styled like
 a rap rhyme-scheme breakdown.
 
+**English only.** Rhymr targets English text exclusively — pronunciation,
+syllable splitting, rhyme scoring, and any language-tool lookups (rhyme
+search, etymology, etc.) assume and query English. There is no
+multi-language support and none is planned; features that call external
+language APIs must constrain them to English.
+
 **End goal:** a production-standard tool for poets — a "JetBrains-capable
 IDE" for lyrics. The polish, keyboard-driven UX, tool windows, project model
 and VCS integration of a JetBrains IDE, with the *developer* tooling
 replaced by writing tooling: very advanced rhyme search and highlighting,
 beat markers, syllable counters, version control. Built against the author's
 own rap-lyrics workflow first, then generalised.
+
+**Offline-first.** The core — editing, the syllable gutter, rhyme
+highlighting, CMUdict pronunciation, syllable counting, version control —
+must work with **zero network access, forever**. No account, no sign-in, no
+activation, no license server, no telemetry, no analytics, no phone-home, no
+update check that gates functionality. The external language APIs (Datamuse,
+etymology, rhyme search) are **enhancement only**: each has a local fallback,
+each has an off switch, and the app stays fully usable when they are
+unreachable, disabled, or slow. A feature that cannot work offline does not
+ship until its offline path does.
+
+**Piracy-tolerant by design.** Rhymr's source is MIT and free to build;
+distributable binaries are sold to fund the work, but the app assumes any
+given copy may be unpaid, cracked, or self-built — and behaves identically
+either way. No DRM, no serial/license keys, no "trial" gating, no nag
+screens, no crippled or time-limited features, no check for how the binary
+was obtained. A paid build and a `cargo build` are the same program. Reward
+the people who pay by making the tool excellent, never by punishing the
+people who don't.
 
 ## Architecture
 
@@ -116,6 +141,16 @@ syllable regression tests.
    commit` (runs `cargo fmt` first). Don't hand-write commit messages that
    bypass commitlint. Types in use: `feat` `fix` `refactor` `style` `docs`
    `chore` `perf` `build` `ci`. Scope is a module/area.
+4. **Offline-first is non-negotiable.** No change may add a *required*
+   network call, account, sign-in, activation, license check, telemetry, or
+   analytics on any code path. Network-backed features stay optional, time
+   out fast, and degrade to a local fallback (CMUdict / local scoring). If
+   you believe something genuinely needs the network, ask before building
+   it.
+5. **No anti-piracy machinery.** Never add DRM, serial/license validation,
+   "is this a paid copy" checks, trial timers, feature gating by build
+   type, kill switches, or nag dialogs. Every feature is available in every
+   build, regardless of how it was obtained.
 
 ## Production standards
 
@@ -133,6 +168,11 @@ syllable regression tests.
   Genius, NotesServer) and heavy alignment/parsing run off-thread; results
   marshalled back to the UI properly. Never `.await`-block or sleep on the UI
   thread.
+- **Every network feature fails soft and offline.** Datamuse, etymology and
+  rhyme-search lookups must handle timeout / error / no-connectivity by
+  falling back to CMUdict and local scoring, not by blocking, erroring out,
+  or disabling the surrounding feature. Assume the machine is offline and the
+  result must still be useful. No feature depends on a reachable server.
 - **No secrets or hardcoded hosts/ports scattered in code.** The NotesServer
   address (`127.0.0.1:8080`), API base URLs, and timeouts live in one
   config/constants module.
@@ -194,7 +234,9 @@ clearly-labeled step, not silently mixed into a feature change.
   blocked. There is no automated release: Rhymr is open source and free to
   build from source. Distributable macOS + Windows binaries are built and
   published manually (sold on the project website); the source and this repo
-  stay MIT-licensed and buildable by anyone.
+  stay MIT-licensed and buildable by anyone. The binaries carry no license
+  keys, activation, or copy protection — a bought build and a from-source
+  build are the same program (see *Piracy-tolerant by design* above).
 - **`beta`** — the working branch. Feature work branches off `beta` and
   merges back into it; `beta` merges into `release` for a cut.
 - `.github/workflows/ci.yml` runs `fmt --check`, `clippy -D warnings`,
