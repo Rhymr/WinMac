@@ -414,9 +414,10 @@ impl SourcePanel {
             hbox.append(&icon);
         }
         // "Apple Notes  [read only]" reads as one bold phrase — every
-        // external source is read-only.
+        // external source is read-only, so the whole row goes goldenrod,
+        // the same cue the file tree uses for ignored / excluded nodes.
         let label = Label::new(Some(&format!("{}  [read only]", source.label())));
-        label.set_css_classes(&["dir-label"]);
+        label.set_css_classes(&["dir-label", "file-ignored"]);
         hbox.append(&label);
 
         if ready {
@@ -466,7 +467,7 @@ impl SourcePanel {
             hbox.append(&img);
         }
         let label = Label::new(Some(name));
-        label.set_css_classes(&["dir-label"]);
+        label.set_css_classes(&["dir-label", "file-ignored"]);
         hbox.append(&label);
 
         let panel = self.clone();
@@ -493,6 +494,7 @@ impl SourcePanel {
             hbox.append(&img);
         }
         let label = Label::new(Some(title));
+        label.set_css_classes(&["file-ignored"]);
         hbox.append(&label);
 
         let panel = self.clone();
