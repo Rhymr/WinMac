@@ -1,4 +1,3 @@
-use crate::platform::fetch_apple_notes;
 use crate::workspace::manager::WorkspaceManager;
 use crate::workspace::recent::load_recent_workspaces;
 use gio::prelude::FileExt;
@@ -451,12 +450,6 @@ where
         .build();
     grid.attach(&git_toggle, 1, 3, 2, 1);
 
-    let notes_toggle = CheckButton::builder()
-        .label("Import Apple Notes as text files")
-        .active(false)
-        .build();
-    grid.attach(&notes_toggle, 1, 4, 2, 1);
-
     // Buttons Row
     let action_box = Box::new(Orientation::Horizontal, 12);
     action_box.set_halign(Align::End);
@@ -543,16 +536,6 @@ where
         if let Ok(manager) =
             WorkspaceManager::init_workspace(&workspace_path, git_toggle.is_active())
         {
-            if notes_toggle.is_active()
-                && let Ok(notes) = fetch_apple_notes()
-            {
-                for (title, body) in notes {
-                    let note_path = manager.root_path.join(format!("{title}.txt"));
-                    let _ = std::fs::write(note_path, body);
-                }
-                let git = crate::git::ops::GitController::new(&manager.root_path);
-                let _ = git.commit_all("Initial import from Apple Notes");
-            }
             dialog_for_create.close();
             // Also close the welcome window behind this dialog — otherwise
             // it lingers alongside the newly opened workspace window.

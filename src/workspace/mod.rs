@@ -130,6 +130,52 @@ impl Workspace {
         }
     }
 
+    /// Open an external-source document (Apple Notes, …) in a **read-only**
+    /// tab. The body is staged to a temp file so the existing tab / editor
+    /// machinery can be reused unchanged; the editor is then locked so it
+    /// can't be typed into and never autosaves.
+    pub fn open_readonly(&self, title: &str, body: &str) {
+        let mut dir = std::env::temp_dir();
+        dir.push("rhymr-external");
+        if fs::create_dir_all(&dir).is_err() {
+            return;
+        }
+        let safe: String = title
+            .chars()
+            .map(|c| {
+                if matches!(c, '/' | ':' | '\\') {
+                    '_'
+                } else {
+                    c
+                }
+            })
+            .collect();
+        let path = dir.join(format!("{safe}.txt"));
+        if fs::write(&path, body).is_err() {
+            return;
+        }
+
+        self.open_path(path.clone());
+
+        let index = self.open_files.borrow().iter().position(|p| p == &path);
+        if let Some(index) = index {
+            if let Some(editor) = self.text_editors.borrow().get(index) {
+                editor.set_editable(false);
+            }
+            // Swap the tab's icon for the read-only "documentation" glyph.
+            if let Some(page) = self.notebook.nth_page(Some(index as u32))
+                && let Some(tab) = self.notebook.tab_label(&page)
+                && let Ok(tab_box) = tab.downcast::<Box>()
+                && let Some(old_icon) = tab_box.first_child()
+            {
+                let icon = crate::app::icons::img("usage-documentation", 16);
+                icon.set_css_classes(&["tab-icon"]);
+                tab_box.remove(&old_icon);
+                tab_box.prepend(&icon);
+            }
+        }
+    }
+
     pub fn get_current_buffer(&self) -> Option<(TextBuffer, Option<PathBuf>)> {
         let current_page = self.notebook.current_page()?;
         let page = self.notebook.nth_page(Some(current_page))?;
@@ -554,6 +600,23 @@ fn add_new_tab(
     (page_num, text_editor)
 }
 
+/// Longest a tab name is shown before it's cut with an ellipsis.
+const MAX_TAB_CHARS: usize = 18;
+
+/// Cap a tab name at [`MAX_TAB_CHARS`], breaking on the last word boundary
+/// within the limit where there is one so a title doesn't cut mid-word.
+fn truncate_tab_name(name: &str) -> String {
+    if name.chars().count() <= MAX_TAB_CHARS {
+        return name.to_string();
+    }
+    let head: String = name.chars().take(MAX_TAB_CHARS).collect();
+    let cut = match head.rfind(' ') {
+        Some(sp) if sp >= MAX_TAB_CHARS / 2 => &head[..sp],
+        _ => head.trim_end(),
+    };
+    format!("{}\u{2026}", cut.trim_end())
+}
+
 /// Icon + truncated label + close button for one tab — shared by the
 /// initial tab creation and by rename/Save As updates (`set_tab_label`) so
 /// both build an identical widget.
@@ -580,19 +643,13 @@ fn build_tab_widget(path: &Path) -> (Box, Button) {
         .map(crate::file::tree::strip_txt_extension)
         .unwrap_or("Untitled");
 
-    // Tabs size to their content, capped at MAX_TAB_CHARS: a plain
+    // Tabs size to their content, capped at MAX_TAB_CHARS. A plain
     // non-ellipsizing label makes min == natural == text width, so
     // GtkNotebook (which allocates non-expand tabs their minimum) still
-    // shows the whole name. The cap is applied here in Rust rather than via
+    // shows the whole name; the cap is applied here in Rust rather than via
     // Pango ellipsize, whose "natural width" would collapse to just "…".
-    // The full path is always on the tab's tooltip.
-    const MAX_TAB_CHARS: usize = 24;
-    let shown_name = if display_name.chars().count() > MAX_TAB_CHARS {
-        let head: String = display_name.chars().take(MAX_TAB_CHARS - 1).collect();
-        format!("{head}\u{2026}")
-    } else {
-        display_name.to_string()
-    };
+    // The full name is always on the tab's tooltip.
+    let shown_name = truncate_tab_name(display_name);
 
     let label = Label::new(Some(&shown_name));
     label.set_css_classes(&["tab-label"]);

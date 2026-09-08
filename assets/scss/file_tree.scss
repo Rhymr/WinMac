@@ -153,3 +153,21 @@
 .drop-target-active * {
     background-color: var(--selection-bg);
 } 
+/* Read-only external-source trees (Apple Notes, …) stacked under the
+   project tree — a 1px rule separates them from it, and each source's
+   header row reuses `.file-tree-header`. */
+.source-panel {
+    border-top: 1px solid var(--border-dark);
+    background-color: var(--bg-mid);
+}
+
+.source-list {
+    background-color: var(--bg-mid);
+}
+
+.source-readonly-tag {
+    color: var(--text-muted);
+    font-size: 10px;
+    font-weight: bold;
+    background-color: inherit;
+}

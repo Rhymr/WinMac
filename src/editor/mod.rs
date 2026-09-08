@@ -72,6 +72,9 @@ impl TextEditor {
             .highlight_current_line(true)
             .pixels_above_lines(1)
             .pixels_below_lines(1)
+            // Long bars wrap to the editor width rather than scrolling
+            // sideways; the gutter still counts once per logical line.
+            .wrap_mode(gtk::WrapMode::Word)
             .background_pattern(sourceview5::BackgroundPatternType::None)
             .smart_backspace(true)
             .smart_home_end(sourceview5::SmartHomeEndType::After)
@@ -458,6 +461,19 @@ impl TextEditor {
 
     pub fn get_widget(&self) -> &Frame {
         &self.frame
+    }
+
+    /// Make this editor read-only — no typing, no caret, a `.readonly` CSS
+    /// hook. Used for external-source documents (Apple Notes), which Rhymr
+    /// never writes back.
+    pub fn set_editable(&self, editable: bool) {
+        self.source_view.set_editable(editable);
+        self.source_view.set_cursor_visible(editable);
+        if editable {
+            self.source_view.remove_css_class("readonly");
+        } else {
+            self.source_view.add_css_class("readonly");
+        }
     }
 
     /// Has this tab been edited since it was opened, with that edit not yet

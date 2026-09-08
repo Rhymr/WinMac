@@ -4,6 +4,7 @@ pub mod context_menu;
 pub mod icons;
 pub mod layout;
 pub mod menu;
+pub mod source_panel;
 pub mod splash;
 pub mod vertical_label;
 pub mod welcome;

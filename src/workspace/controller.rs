@@ -14,6 +14,7 @@ type CursorListener = RefCell<Option<Box<dyn Fn(i32, i32)>>>;
 type BranchListener = RefCell<Option<Box<dyn Fn(Option<String>)>>>;
 type NavListener = RefCell<Option<Box<dyn Fn(Vec<String>)>>>;
 type GitListener = RefCell<Option<Box<dyn Fn(GitAvailability)>>>;
+type RootListener = RefCell<Option<Box<dyn Fn(Option<PathBuf>)>>>;
 
 /// What git actions the loaded workspace supports — drives the toolbar's
 /// Git group (see `crate::app::chrome::main_toolbar`).
@@ -35,6 +36,7 @@ pub struct WorkspaceController {
     branch_listener: BranchListener,
     nav_listener: NavListener,
     git_listener: GitListener,
+    root_listener: RootListener,
 }
 
 impl Default for WorkspaceController {
@@ -53,6 +55,7 @@ impl WorkspaceController {
             branch_listener: RefCell::new(None),
             nav_listener: RefCell::new(None),
             git_listener: RefCell::new(None),
+            root_listener: RefCell::new(None),
         }
     }
 
@@ -168,12 +171,15 @@ impl WorkspaceController {
             .and_then(|w| w.get_current_buffer())
             .and_then(|(_, path)| path)
         {
+            // A file outside the workspace (an opened external file, or a
+            // read-only source document staged to a temp file) shows just
+            // its name, not its whole absolute path.
             let rel = self
                 .root_path
                 .borrow()
                 .as_ref()
                 .and_then(|root| path.strip_prefix(root).ok().map(PathBuf::from))
-                .unwrap_or_else(|| path.clone());
+                .unwrap_or_else(|| PathBuf::from(path.file_name().unwrap_or(path.as_os_str())));
             let mut segs: Vec<String> = rel
                 .components()
                 .map(|c| c.as_os_str().to_string_lossy().into_owned())
@@ -208,16 +214,26 @@ impl WorkspaceController {
         self.workspace.borrow().clone()
     }
 
+    /// Subscribe to the loaded workspace folder — notified on every
+    /// `set_root_path`. The external-sources panel uses this to point its
+    /// per-workspace cache at the new project's `.rhymr/`.
+    pub fn set_root_listener(&self, listener: impl Fn(Option<PathBuf>) + 'static) {
+        self.root_listener.replace(Some(Box::new(listener)));
+    }
+
     /// Point the file tree at the loaded workspace folder.
     pub fn set_root_path(&self, path: PathBuf) {
         self.root_path.replace(Some(path.clone()));
         if let Some(workspace) = self.get_workspace()
             && let Some(ref file_tree) = workspace.file_tree
         {
-            file_tree.set_root_path(path);
+            file_tree.set_root_path(path.clone());
         }
         self.refresh_branch();
         self.refresh_git_availability();
+        if let Some(listener) = self.root_listener.borrow().as_ref() {
+            listener(Some(path));
+        }
     }
 
     pub fn get_root_path(&self) -> Option<PathBuf> {

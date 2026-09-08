@@ -103,13 +103,41 @@ pub fn create_main_layout() -> (GtkBox, Rc<WorkspaceController>) {
     let rhyme_frame = rhyme_search.get_widget().clone();
     rhyme_search.set_expanded(true);
 
-    // file tree | editor, flush against each other (only the tree's 1px
-    // right border separates them — no draggable "gap").
-    let content_pane = create_horizontal_split(&file_tree_widget, workspace.get_widget(), 300);
+    // Read-only "Apple Notes" (and future external sources) tree, stacked
+    // under the project tree in the left column. Workspace-independent:
+    // it's re-pointed at each project's `.rhymr/` cache via the controller.
+    let source_panel = crate::app::source_panel::SourcePanel::new();
+    {
+        let ws = workspace.clone();
+        source_panel.connect_open(move |title, body| ws.open_readonly(&title, &body));
+    }
+    source_panel.start();
+    {
+        let sp = source_panel.clone();
+        workspace_controller.set_root_listener(move |root| sp.set_workspace_root(root));
+    }
+
+    // The project tree and every source tree stack in one column that
+    // scrolls as a single list (each inner tree grows to its content;
+    // this outer scroller is the only one).
+    let left_column = GtkBox::new(Orientation::Vertical, 0);
+    file_tree_widget.set_vexpand(false);
+    left_column.append(&file_tree_widget);
+    left_column.append(source_panel.get_widget());
+
+    let left_scroller = gtk::ScrolledWindow::builder()
+        .hscrollbar_policy(gtk::PolicyType::Never)
+        .vexpand(true)
+        .child(&left_column)
+        .build();
+
+    // file tree column | editor, flush against each other (only the tree's
+    // 1px right border separates them — no draggable "gap").
+    let content_pane = create_horizontal_split(&left_scroller, workspace.get_widget(), 300);
     content_pane.set_hexpand(true);
 
-    // Left tool-window stripe (vertical "Project" label) toggles the tree.
-    let ft_for_stripe = file_tree_widget.clone();
+    // Left tool-window stripe (vertical "Project" label) toggles the column.
+    let ft_for_stripe = left_scroller.clone();
     let left_stripe =
         crate::app::chrome::left_stripe(true, move |show| ft_for_stripe.set_visible(show));
 
