@@ -5,7 +5,7 @@ use gio::prelude::FileExt;
 use gtk::prelude::*;
 use gtk::{
     Align, ApplicationWindow, Box, Button, CheckButton, Entry, FileDialog, Grid, Image, Label,
-    ListBox, ListBoxRow, Orientation, SearchEntry, Window,
+    ListBox, ListBoxRow, MenuButton, Orientation, Popover, SearchEntry, Window,
 };
 use libadwaita::Application;
 use std::path::PathBuf;
@@ -80,26 +80,58 @@ where
     nav_list.append(&projects_label);
     nav_list.select_row(nav_list.row_at_index(0).as_ref());
 
-    // Settings — pinned to the bottom of the sidebar (nav_list above it is
-    // vexpand, so this sits flush against the sidebar's bottom edge).
-    let settings_btn = Button::builder()
-        .label("\u{2699}")
-        .tooltip_text("Preferences")
-        .halign(Align::Start)
-        .css_classes(vec!["flat", "welcome-settings-button"])
-        .margin_start(12)
-        .margin_end(12)
-        .margin_top(8)
-        .margin_bottom(12)
+    // Configure / Help dropdowns — pinned to the bottom of the sidebar
+    // (nav_list above is vexpand), matching the JetBrains welcome window.
+    let footer = Box::builder()
+        .orientation(Orientation::Horizontal)
+        .spacing(2)
+        .css_classes(vec!["welcome-sidebar-footer"])
+        .margin_start(8)
+        .margin_end(8)
+        .margin_top(6)
+        .margin_bottom(10)
         .build();
+
     let app_for_settings = app.clone();
-    settings_btn.connect_clicked(move |_| {
-        crate::setting::dialog::show_settings_dialog(&app_for_settings, None);
-    });
+    let configure_btn = sidebar_dropdown(
+        "Configure",
+        vec![(
+            "Settings\u{2026}",
+            menu_action(move || {
+                crate::setting::dialog::show_settings_dialog(&app_for_settings, None);
+            }),
+        )],
+    );
+
+    let window_for_docs = window.clone();
+    let window_for_issue = window.clone();
+    let window_for_about = window.clone();
+    let help_btn = sidebar_dropdown(
+        "Help",
+        vec![
+            (
+                "Documentation",
+                menu_action(move || open_uri(&window_for_docs, "https://github.com/rhymr/win-mac")),
+            ),
+            (
+                "Report an Issue",
+                menu_action(move || {
+                    open_uri(&window_for_issue, "https://github.com/rhymr/win-mac/issues")
+                }),
+            ),
+            (
+                "About Rhymr",
+                menu_action(move || show_about(&window_for_about)),
+            ),
+        ],
+    );
+
+    footer.append(&configure_btn);
+    footer.append(&help_btn);
 
     sidebar.append(&brand_box);
     sidebar.append(&nav_list);
-    sidebar.append(&settings_btn);
+    sidebar.append(&footer);
 
     // ==========================================
     // 2. MAIN CONTENT AREA (Projects View)
@@ -526,5 +558,73 @@ where
         }
     });
 
+    dialog.present();
+}
+
+/// One click handler for a `sidebar_dropdown` item. (`Box` is aliased to
+/// `gtk::Box` in this module, hence the explicit `std::boxed`.)
+type MenuAction = std::boxed::Box<dyn Fn()>;
+
+fn menu_action(f: impl Fn() + 'static) -> MenuAction {
+    std::boxed::Box::new(f)
+}
+
+/// A flat sidebar dropdown ("Configure" / "Help") whose popover is a plain
+/// vertical stack of flat buttons — matches the app's other menus without
+/// pulling in `gio` actions the welcome window doesn't have yet.
+fn sidebar_dropdown(label: &str, items: Vec<(&str, MenuAction)>) -> MenuButton {
+    let list = Box::new(Orientation::Vertical, 0);
+    list.set_css_classes(&["context-menu"]);
+
+    let popover = Popover::builder().has_arrow(false).build();
+    popover.set_child(Some(&list));
+
+    for (text, action) in items {
+        let item = Button::builder()
+            .label(text)
+            .css_classes(vec!["flat", "context-menu-item"])
+            .build();
+        if let Some(item_label) = item.child().and_downcast::<Label>() {
+            item_label.set_xalign(0.0);
+            item_label.set_halign(Align::Start);
+        }
+        let popover_for_item = popover.clone();
+        item.connect_clicked(move |_| {
+            popover_for_item.popdown();
+            action();
+        });
+        list.append(&item);
+    }
+
+    let button = MenuButton::builder()
+        .label(label)
+        .css_classes(vec!["flat", "welcome-sidebar-menu"])
+        .build();
+    button.set_popover(Some(&popover));
+    button
+}
+
+fn open_uri(parent: &ApplicationWindow, uri: &str) {
+    let launcher = gtk::UriLauncher::new(uri);
+    let parent = parent.clone();
+    let uri = uri.to_string();
+    glib::MainContext::default().spawn_local(async move {
+        if let Err(e) = launcher.launch_future(Some(&parent)).await {
+            eprintln!("Failed to open {uri}: {e}");
+        }
+    });
+}
+
+fn show_about(parent: &ApplicationWindow) {
+    let dialog = gtk::AboutDialog::builder()
+        .program_name("Rhymr")
+        .version("2026.1")
+        .website("https://rhymr.app")
+        .website_label("Visit Website")
+        .authors(vec!["Rhymr Team".to_string()])
+        .logo_icon_name("text.svg")
+        .modal(true)
+        .transient_for(parent)
+        .build();
     dialog.present();
 }

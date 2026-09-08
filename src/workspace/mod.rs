@@ -78,10 +78,12 @@ impl Workspace {
             notebook.set_show_tabs(false);
         }
 
-        // Keep the status bar's word count pointed at whichever tab is active.
+        // Keep the status bar's word count + caret readout pointed at
+        // whichever tab is active.
         let controller_for_switch = workspace.controller.clone();
         notebook.connect_switch_page(move |_, _, _| {
             controller_for_switch.refresh_word_count();
+            controller_for_switch.refresh_cursor();
         });
 
         workspace
@@ -544,6 +546,14 @@ fn add_new_tab(
         text_editor.connect_changed(move || {
             if notebook_for_word_count.current_page() == Some(page_num) {
                 controller_for_word_count.refresh_word_count();
+            }
+        });
+
+        let notebook_for_cursor = notebook.clone();
+        let controller_for_cursor = controller.clone();
+        text_editor.connect_cursor_notify(move || {
+            if notebook_for_cursor.current_page() == Some(page_num) {
+                controller_for_cursor.refresh_cursor();
             }
         });
 

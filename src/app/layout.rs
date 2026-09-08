@@ -2,10 +2,10 @@ use crate::file::tree::FileTree;
 use crate::rhyme::search::RhymeSearch;
 use crate::workspace::Workspace;
 use crate::workspace::controller::WorkspaceController;
-use gtk::prelude::*;
 #[cfg(target_os = "windows")]
 use gtk::MenuButton;
-use gtk::{Box as GtkBox, Label, Orientation, Paned};
+use gtk::prelude::*;
+use gtk::{Box as GtkBox, Label, Orientation, Paned, Widget};
 use libadwaita::prelude::*;
 use libadwaita::{Application, ApplicationWindow};
 #[cfg(any(target_os = "windows", target_os = "macos"))]
@@ -89,10 +89,23 @@ pub fn create_main_layout() -> (GtkBox, Rc<WorkspaceController>) {
     let workspace_controller = Rc::new(WorkspaceController::new());
 
     // Create the main content area: file tree on the left, editor on the right
-    let (content_pane, _file_tree, _workspace) = create_content_layout(&workspace_controller);
+    let (content_pane, file_tree, _workspace, rhyme_panel) =
+        create_content_layout(&workspace_controller);
+    content_pane.set_hexpand(true);
+
+    // Classic chrome: a left tool-window stripe flush against the content,
+    // and a toolbar spanning the full width above both.
+    let project_panel: Widget = file_tree.get_widget().clone().upcast();
+    let stripe = crate::app::chrome::left_stripe(project_panel, rhyme_panel);
+
+    let content_row = GtkBox::new(Orientation::Horizontal, 0);
+    content_row.set_vexpand(true);
+    content_row.append(&stripe);
+    content_row.append(&content_pane);
 
     let main_box = GtkBox::new(Orientation::Vertical, 0);
-    main_box.append(&content_pane);
+    main_box.append(&crate::app::chrome::main_toolbar());
+    main_box.append(&content_row);
     main_box.append(&create_status_bar(&workspace_controller));
 
     (main_box, workspace_controller)
@@ -104,14 +117,25 @@ fn create_status_bar(workspace_controller: &Rc<WorkspaceController>) -> GtkBox {
         .css_classes(vec!["status-bar"])
         .build();
 
+    // Left: free-text message, pushed hard-left. Everything after it is a
+    // right-aligned group of 1px-fenced info segments, classic-IDE style.
     let status_label = Label::new(Some("Rhymr"));
     status_label.set_css_classes(&["status-text"]);
+    status_label.set_hexpand(true);
+    status_label.set_halign(gtk::Align::Start);
     status_bar.append(&status_label);
 
+    let branch_label = Label::new(None);
+    branch_label.set_css_classes(&["status-segment", "branch"]);
+    branch_label.set_visible(false);
+    status_bar.append(&branch_label);
+
+    let cursor_label = Label::new(Some("1:1"));
+    cursor_label.set_css_classes(&["status-segment", "cursor-pos"]);
+    status_bar.append(&cursor_label);
+
     let word_count_label = Label::new(Some("0 words"));
-    word_count_label.set_css_classes(&["status-text", "word-count"]);
-    word_count_label.set_hexpand(true);
-    word_count_label.set_halign(gtk::Align::End);
+    word_count_label.set_css_classes(&["status-segment", "word-count"]);
     status_bar.append(&word_count_label);
 
     workspace_controller.set_word_count_listener(move |count| {
@@ -122,15 +146,29 @@ fn create_status_bar(workspace_controller: &Rc<WorkspaceController>) -> GtkBox {
         };
         word_count_label.set_text(&label);
     });
+    workspace_controller.set_cursor_listener(move |line, col| {
+        cursor_label.set_text(&format!("{line}:{col}"));
+    });
+    workspace_controller.set_branch_listener(move |branch| match branch {
+        Some(name) => {
+            branch_label.set_text(&name);
+            branch_label.set_visible(true);
+        }
+        None => branch_label.set_visible(false),
+    });
     workspace_controller.refresh_word_count();
+    workspace_controller.refresh_cursor();
+    workspace_controller.refresh_branch();
 
     status_bar
 }
 
-// Create the file tree / rhyme search / editor split
+// Create the file tree / rhyme search / editor split. Returns the content
+// pane, the file tree, the workspace, and the rhyme-search panel widget
+// (the last so the tool-window stripe can toggle its visibility).
 fn create_content_layout(
     workspace_controller: &Rc<WorkspaceController>,
-) -> (Paned, FileTree, Rc<Workspace>) {
+) -> (Paned, FileTree, Rc<Workspace>, Widget) {
     // Create the FileTree component
     let mut file_tree = FileTree::new();
 
@@ -207,7 +245,8 @@ fn create_content_layout(
     // Horizontal split between the left column and the editor
     let main_pane = create_horizontal_split(&left_split, workspace.get_widget(), 320);
 
-    (main_pane, file_tree, workspace)
+    let rhyme_panel: Widget = rhyme_search_widget.clone().upcast();
+    (main_pane, file_tree, workspace, rhyme_panel)
 }
 
 pub fn create_horizontal_split(

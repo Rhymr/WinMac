@@ -39,15 +39,19 @@ fn main() -> glib::ExitCode {
         css::apply_css_to_app(&css_provider);
         css::sync_style_manager(&settings);
 
-        let app_for_workspace = app.clone();
-
-        // Show the workspace picker first; the main editor layout is only
-        // built once a workspace has actually been chosen.
-        rhymr_rs::app::welcome::show_welcome_dialog(app, move |workspace_path| {
-            println!("Loaded workspace at: {:?}", workspace_path);
-            rhymr_rs::workspace::recent::record_recent_workspace(&workspace_path);
-            let (_window, controller) = app::layout::build_ui(&app_for_workspace);
-            controller.set_root_path(workspace_path);
+        // Classic product splash, held for a beat, then the workspace picker
+        // (the main editor layout is only built once a workspace is chosen).
+        let splash = rhymr_rs::app::splash::show(app);
+        let app_for_welcome = app.clone();
+        glib::timeout_add_local_once(std::time::Duration::from_millis(1600), move || {
+            let app_for_workspace = app_for_welcome.clone();
+            rhymr_rs::app::welcome::show_welcome_dialog(&app_for_welcome, move |workspace_path| {
+                println!("Loaded workspace at: {:?}", workspace_path);
+                rhymr_rs::workspace::recent::record_recent_workspace(&workspace_path);
+                let (_window, controller) = app::layout::build_ui(&app_for_workspace);
+                controller.set_root_path(workspace_path);
+            });
+            splash.close();
         });
     });
 
