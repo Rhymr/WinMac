@@ -1,0 +1,34 @@
+name: CI
+
+on:
+  push:
+    branches: [beta, release]
+  pull_request:
+    branches: [beta, release]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - name: Install GTK
+        run: |
+          brew update
+          brew install gtk4 libadwaita gtksourceview5 pkg-config
+          echo "PKG_CONFIG_PATH=$(brew --prefix)/lib/pkgconfig" >> "$GITHUB_ENV"
+      - run: cargo fmt --all --check
+      - run: cargo clippy --all-targets -- -D warnings
+      - run: cargo build --locked
+      - name: commitlint (PRs)
+        if: github.event_name == 'pull_request'
+        run: |
+          npm ci --no-audit --no-fund
+          npx --no-install commitlint --from "${{ github.event.pull_request.base.sha }}" --to "${{ github.sha }}"

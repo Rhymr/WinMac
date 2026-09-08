@@ -143,3 +143,37 @@ list of matching songs.
   add & remove themselves there).
 - New chrome/widget code lives in `src/app/`; keep `src/app/mod.rs`'s
   `pub mod` list in sync.
+
+## Branching & releases
+
+- **`release`** — stable, protected. Only fast-forward / merge commits land
+  here; direct pushes are blocked. A push to `release` triggers
+  `.github/workflows/release.yml`, which builds macOS + Windows binaries,
+  tags `v<version>`, and publishes a GitHub Release.
+- **`beta`** — the working branch. Feature work branches off `beta` and
+  merges back into it; `beta` merges into `release` for a cut.
+- `.github/workflows/ci.yml` runs `fmt --check`, `clippy -D warnings`,
+  `build`, and (on PRs) commitlint against `beta` / `release`.
+
+## Versioning
+
+One global SemVer string derived from git history, never hand-maintained.
+**`Build/version.sh`** (Unix) / **`Build/version.ps1`** (Windows, via the
+`Build/version.bat` one-liner) is the single source of truth. Formula,
+pre-1.0:
+
+- **MAJOR** is `0` until someone runs `git tag -a vX.Y.Z` with X ≥ 1. A
+  reachable `vX.Y.Z` tag with X ≥ 1 then becomes the base and the counts
+  below are taken since it.
+- **MINOR** = count of every `feat:` commit reachable from HEAD (all
+  ancestors, not first-parent) — so a `feat:` on an unmerged branch bumps it
+  immediately.
+- **PATCH** = count of `fix:` commits since the most recent `feat:` commit.
+- **`+build.<N>.g<sha>[.dirty]`** metadata: `<N>` = `git rev-list --count
+  HEAD`, `<sha>` = short hash, `.dirty` when the tracked tree has
+  uncommitted changes.
+- No `-prerelease` suffix while MAJOR is 0 (`0.x` already means unstable).
+  `RHYMR_VERSION_PRERELEASE` injects one if ever needed.
+
+Core string e.g. `0.137.4`; full string e.g. `0.137.4+build.201.gdeadbee`.
+Widgets show `v0.137.4`.
