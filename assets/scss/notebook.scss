@@ -93,26 +93,31 @@ notebook {
    tab shows just its icon and (possibly truncated) name. */
 .tab-close-button {
     padding: 0;
-    margin: 0 0 0 4px;
+    margin: 0;
     background: none;
     border: none;
     border-radius: 0;
     opacity: 0;
     min-width: 0;
     min-height: 0;
-    transition:
-        background-color var(--transition-fast),
-        opacity var(--transition-fast);
+    color: var(--destructive);
+    font-size: 11px;
+    transition: opacity var(--transition-fast);
+
+    & label {
+        background: none;
+        color: inherit;
+    }
 
     &:hover {
-        background-color: var(--destructive);
-        color: var(--selection-fg);
+        background: none;
+        color: var(--destructive-hover);
     }
 }
 
 tab:checked .tab-close-button,
 tab:hover .tab-close-button {
     opacity: 1;
-    min-width: 16px;
-    min-height: 16px;
+    min-width: 14px;
+    min-height: 14px;
 }

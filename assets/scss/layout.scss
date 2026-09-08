@@ -3,12 +3,10 @@
     background-color: var(--bg-dark);
 }
 
-/* No visible gap between panes — the Paned handle is a 1px hairline, and
-   the only separator between file tree and editor is the tree's own
-   right border. */
+/* No visible gap or line between panes — the Paned handle is zero-width. */
 paned > separator {
-    min-width: 1px;
-    min-height: 1px;
+    min-width: 0;
+    min-height: 0;
     margin: 0;
     padding: 0;
     background: none;

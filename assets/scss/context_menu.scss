@@ -31,13 +31,13 @@ popover {
 }
 
 .context-menu-item {
-    padding: 3px 12px;
+    padding: 4px 14px;
     margin: 0;
     border-radius: 0;
     background-color: transparent;
     border: none;
     color: var(--popover-fg-color);
-    min-height: 22px;
+    min-height: 24px;
     font-size: 12px;
     transition: background-color var(--transition-fast);
 
@@ -91,8 +91,8 @@ popover {
 }
 
 .context-menu separator {
-    background-color: var(--border-light);
-    margin: 3px 0;
+    background-color: var(--border-dark);
+    margin: 4px 0;
     min-height: 1px;
 }
 

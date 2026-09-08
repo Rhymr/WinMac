@@ -46,7 +46,9 @@
 
 .file-tree-container {
     background-color: var(--bg-darkest);
-    border-right: 1px solid var(--border-dark);
+    /* No divider here — the tree flows straight into the editor; the only
+       vertical line in the editor area is the gutter/text divider. */
+    border-right: none;
 }
 
 .file-tree-outer {

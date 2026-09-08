@@ -1,8 +1,6 @@
 use datamuse_api_rs::{DatamuseClient, EndPoint, RelatedType, Vocabulary};
 use gtk::prelude::*;
-use gtk::{
-    Box as GtkBox, Button, Entry, Frame, Label, ListBox, Orientation, ScrolledWindow, pango,
-};
+use gtk::{Box as GtkBox, Frame, Label, ListBox, Orientation, ScrolledWindow, SearchEntry, pango};
 use std::cell::{Cell, RefCell};
 use std::collections::BTreeMap;
 use std::collections::HashMap;
@@ -35,24 +33,20 @@ impl RhymeSearch {
             .spacing(5)
             .build();
 
-        // Create a horizontal box for the input field and the button
+        // Search row — a single search field (magnifier + clear built in);
+        // Enter runs the lookup. No separate submit button, JetBrains-style.
         let input_box = GtkBox::builder()
             .orientation(Orientation::Horizontal)
-            .css_classes(vec!["rhyme-search-container-bg"])
+            .css_classes(vec!["rhyme-search-input"])
             .spacing(5)
             .build();
 
-        // Input field for the word
-        let word_input = Entry::builder()
-            .placeholder_text("Enter a word")
+        let word_input = SearchEntry::builder()
+            .placeholder_text("Find rhymes for a word\u{2026}")
             .hexpand(true)
             .build();
 
-        // Button to submit the word
-        let submit_button = Button::builder().label("Submit").build();
-
         input_box.append(&word_input);
-        input_box.append(&submit_button);
 
         // Create a ListBox to display rhyming words
         let rhyming_words_list = ListBox::builder()
@@ -65,7 +59,6 @@ impl RhymeSearch {
             .build();
         let rhyming_words_list_cloned = rhyming_words_list.clone();
         let entry_cloned = word_input.clone();
-        let entry_for_submit = entry_cloned.clone();
         let entry_for_activate = entry_cloned.clone();
 
         // Wrap the rhyming words list in a ScrolledWindow for consistency
@@ -154,21 +147,9 @@ impl RhymeSearch {
             }
         };
 
-        let handle_submit_activate = handle_submit.clone();
-        let handle_submit_button = handle_submit.clone();
-
-        // Handle pressing Enter in the entry field
+        // Enter runs the lookup.
         entry_for_activate.connect_activate(move |entry| {
-            let text = entry.text();
-            handle_submit_activate(text.as_str());
-            // entry.set_text("");
-        });
-
-        // Handle clicking the submit button
-        submit_button.connect_clicked(move |_| {
-            let text = entry_for_submit.text();
-            handle_submit_button(text.as_str());
-            // entry_for_submit.set_text("");
+            handle_submit(entry.text().as_str());
         });
 
         // Create the container layout

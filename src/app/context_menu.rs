@@ -6,7 +6,9 @@
 //! popdown-on-click boilerplate.
 use gtk::gdk;
 use gtk::prelude::*;
-use gtk::{Align, Box as GtkBox, Button, Label, Orientation, Popover, Separator, Widget};
+use gtk::{
+    Align, Box as GtkBox, Button, Label, MenuButton, Orientation, Popover, Separator, Widget,
+};
 
 /// Shortcut hints shown next to a menu item's label — ⌘ on macOS, "Ctrl+"
 /// elsewhere, so the menu never shows a Mac-only symbol on Windows/Linux
@@ -109,6 +111,37 @@ impl ContextMenu {
     pub fn add_separator(&self) {
         self.menu_box
             .append(&Separator::new(Orientation::Horizontal));
+    }
+
+    /// Build a dropdown button (toolbar gear, sidebar "Configure"/"Help",
+    /// …) whose popover *is* this same styled menu, so every dropdown and
+    /// context menu in the app is visually identical. Populate the returned
+    /// `ContextMenu` with `add_item` / `add_separator` exactly as for a
+    /// right-click menu.
+    pub fn dropdown(icon: Option<&str>, label: Option<&str>) -> (MenuButton, Self) {
+        let popover = Popover::new();
+        popover.set_has_arrow(false);
+
+        let menu_box = GtkBox::new(Orientation::Vertical, 0);
+        menu_box.set_css_classes(&["context-menu"]);
+        popover.set_child(Some(&menu_box));
+
+        let button = MenuButton::builder().valign(Align::Center).build();
+        if let Some(icon) = icon {
+            button.set_icon_name(icon);
+        }
+        if let Some(label) = label {
+            button.set_label(label);
+        }
+        // The MenuButton owns the popover's lifetime — no self-unparenting.
+        button.set_popover(Some(&popover));
+
+        let menu = Self {
+            popover,
+            menu_box,
+            parent: button.clone().upcast(),
+        };
+        (button, menu)
     }
 
     pub fn popdown(&self) {

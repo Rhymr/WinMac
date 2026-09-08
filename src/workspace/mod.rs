@@ -578,7 +578,7 @@ fn build_tab_widget(path: &Path) -> (Box, Button) {
     let tab_box = Box::builder()
         .orientation(gtk::Orientation::Horizontal)
         .css_classes(vec!["tab-box"])
-        .spacing(4)
+        .spacing(3)
         // Read regardless of label visibility, so a tab shrunk down to
         // icon-only (see `adapt_tab_display`) still identifies itself on
         // hover.
@@ -606,18 +606,20 @@ fn build_tab_widget(path: &Path) -> (Box, Button) {
     // default), while `width_chars` sets the actual minimum it can shrink
     // down toward once the open tabs don't all fit — see
     // `Notebook::scrollable(false)` in `Workspace::new`.
-    label.set_width_chars(4);
-    label.set_max_width_chars(40);
+    label.set_width_chars(8);
+    label.set_max_width_chars(28);
     label.set_halign(gtk::Align::Start);
 
     // Visibility is handled entirely by CSS (`tab:checked`/`tab:hover` in
     // notebook.scss) rather than tracked here — GTK's own `:checked` state
     // on the tab is always correct, unlike hand-rolled bookkeeping that has
     // to be re-run on every switch/add/remove and is easy to miss a spot on.
+    // A bare red "×" (JetBrains-style) — a plain label, so no circular
+    // symbolic-icon backdrop.
     let close_button = Button::builder()
-        .icon_name("window-close-symbolic")
         .css_classes(vec!["tab-close-button"])
         .build();
+    close_button.set_child(Some(&Label::new(Some("\u{2715}"))));
 
     tab_box.append(&icon);
     tab_box.append(&label);

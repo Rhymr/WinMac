@@ -5,7 +5,7 @@ use gio::prelude::FileExt;
 use gtk::prelude::*;
 use gtk::{
     Align, ApplicationWindow, Box, Button, CheckButton, Entry, FileDialog, Grid, Image, Label,
-    ListBox, ListBoxRow, MenuButton, Orientation, Popover, SearchEntry, Window,
+    ListBox, ListBoxRow, Orientation, SearchEntry, Window,
 };
 use libadwaita::Application;
 use std::path::PathBuf;
@@ -92,39 +92,36 @@ where
         .margin_bottom(10)
         .build();
 
-    let app_for_settings = app.clone();
-    let configure_btn = sidebar_dropdown(
-        "Configure",
-        vec![(
-            "Settings\u{2026}",
-            menu_action(move || {
-                crate::setting::dialog::show_settings_dialog(&app_for_settings, None);
-            }),
-        )],
-    );
+    let (configure_btn, configure_menu) =
+        crate::app::context_menu::ContextMenu::dropdown(None, Some("Configure"));
+    configure_btn.add_css_class("welcome-sidebar-menu");
+    {
+        let app = app.clone();
+        configure_menu.add_item("Settings\u{2026}", None, None, move || {
+            crate::setting::dialog::show_settings_dialog(&app, None);
+        });
+    }
 
-    let window_for_docs = window.clone();
-    let window_for_issue = window.clone();
-    let window_for_about = window.clone();
-    let help_btn = sidebar_dropdown(
-        "Help",
-        vec![
-            (
-                "Documentation",
-                menu_action(move || crate::app::open_uri(&window_for_docs, crate::app::DOCS_URL)),
-            ),
-            (
-                "Report an Issue",
-                menu_action(move || {
-                    crate::app::open_uri(&window_for_issue, crate::app::ISSUES_URL)
-                }),
-            ),
-            (
-                "About Rhymr",
-                menu_action(move || crate::app::about::show(&window_for_about)),
-            ),
-        ],
-    );
+    let (help_btn, help_menu) = crate::app::context_menu::ContextMenu::dropdown(None, Some("Help"));
+    help_btn.add_css_class("welcome-sidebar-menu");
+    {
+        let w = window.clone();
+        help_menu.add_item("Documentation", None, None, move || {
+            crate::app::open_uri(&w, crate::app::DOCS_URL)
+        });
+    }
+    {
+        let w = window.clone();
+        help_menu.add_item("Report an Issue", None, None, move || {
+            crate::app::open_uri(&w, crate::app::ISSUES_URL)
+        });
+    }
+    {
+        let w = window.clone();
+        help_menu.add_item("About Rhymr", None, None, move || {
+            crate::app::about::show(&w)
+        });
+    }
 
     footer.append(&configure_btn);
     footer.append(&help_btn);
@@ -558,49 +555,6 @@ where
     });
 
     dialog.present();
-}
-
-/// One click handler for a `sidebar_dropdown` item. (`Box` is aliased to
-/// `gtk::Box` in this module, hence the explicit `std::boxed`.)
-type MenuAction = std::boxed::Box<dyn Fn()>;
-
-fn menu_action(f: impl Fn() + 'static) -> MenuAction {
-    std::boxed::Box::new(f)
-}
-
-/// A flat sidebar dropdown ("Configure" / "Help") whose popover is a plain
-/// vertical stack of flat buttons — matches the app's other menus without
-/// pulling in `gio` actions the welcome window doesn't have yet.
-fn sidebar_dropdown(label: &str, items: Vec<(&str, MenuAction)>) -> MenuButton {
-    let list = Box::new(Orientation::Vertical, 0);
-    list.set_css_classes(&["context-menu"]);
-
-    let popover = Popover::builder().has_arrow(false).build();
-    popover.set_child(Some(&list));
-
-    for (text, action) in items {
-        let item = Button::builder()
-            .label(text)
-            .css_classes(vec!["flat", "context-menu-item"])
-            .build();
-        if let Some(item_label) = item.child().and_downcast::<Label>() {
-            item_label.set_xalign(0.0);
-            item_label.set_halign(Align::Start);
-        }
-        let popover_for_item = popover.clone();
-        item.connect_clicked(move |_| {
-            popover_for_item.popdown();
-            action();
-        });
-        list.append(&item);
-    }
-
-    let button = MenuButton::builder()
-        .label(label)
-        .css_classes(vec!["flat", "welcome-sidebar-menu"])
-        .build();
-    button.set_popover(Some(&popover));
-    button
 }
 
 /// Up to two initials for a project avatar — the first alphanumeric char and

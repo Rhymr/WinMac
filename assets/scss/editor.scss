@@ -29,6 +29,9 @@ sourceview {
     margin: 0;
     font-family: "Georgia", serif;
     background-color: var(--gutter-bg);
+    /* the one vertical line in the editor area — between the gutter and the
+       text, JetBrains-style */
+    border-right: 1px solid var(--border-light);
 }
 
 .syllable-count {

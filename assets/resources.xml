@@ -7,5 +7,6 @@
     <file compressed="true" preprocess="xml-stripblanks">icons/folder.svg</file>
     <file compressed="true" preprocess="xml-stripblanks">icons/note-active.svg</file>
     <file compressed="true" preprocess="xml-stripblanks">icons/clipboard.svg</file>
+    <file compressed="true" preprocess="xml-stripblanks">icons/document-new.svg</file>
   </gresource>
 </gresources> 

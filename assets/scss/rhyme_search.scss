@@ -1,5 +1,6 @@
-/* Rhyme Search — a bottom-docked tool window, styled like a JetBrains tool
-   window (flat header strip + content area, no card margins). */
+/* Rhyme Search — a bottom-docked JetBrains-style tool window: a flat header
+   strip, a compact search row, then a flush results list. No card margins,
+   no rounded corners. */
 
 frame.rhyme-search-container {
     background: var(--bg-darkest);
@@ -7,20 +8,12 @@ frame.rhyme-search-container {
     margin: 0;
 }
 
-/* The frame's label widget is the header strip. */
+/* The frame's label widget = the tool-window header strip. */
 .rhyme-search-header {
     background-color: var(--bg-dark);
     border-bottom: 1px solid var(--border-dark);
     padding: 3px 8px;
     min-height: 24px;
-
-    &:hover {
-        background-color: var(--bg-hover);
-    }
-
-    &:hover * {
-        background-color: transparent;
-    }
 }
 
 .rhyme-search-title {
@@ -32,7 +25,18 @@ frame.rhyme-search-container {
 
 .rhyme-search-body {
     background: var(--bg-darkest);
-    padding: 6px 8px;
+    padding: 0;
+}
+
+.rhyme-search-input {
+    background-color: var(--bg-dark);
+    border-bottom: 1px solid var(--border-dark);
+    padding: 4px 8px;
+
+    & entry,
+    & entry > text {
+        background: var(--bg-mid);
+    }
 }
 
 .rhyme-search-container-bg {
@@ -42,10 +46,10 @@ frame.rhyme-search-container {
 .rhyme-results {
     background-color: var(--bg-darkest);
     margin: 0;
-    padding: 0;
+    padding: 4px 0;
 
     & > row {
-        padding: 1px 6px;
+        padding: 1px 8px;
         margin: 0;
         min-height: 20px;
         background-color: var(--bg-darkest);
@@ -54,7 +58,8 @@ frame.rhyme-search-container {
     & .syllable-header {
         background-color: var(--bg-darkest) !important;
         color: var(--text-not-so-dim);
-        padding-bottom: 4px !important;
+        font-weight: bold;
+        padding: 4px 8px 2px !important;
     }
 
     & label {

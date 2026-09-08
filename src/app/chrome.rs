@@ -3,15 +3,22 @@
 //! settings gear on the right), a left tool-window stripe with a vertical
 //! "Project" label, and a bottom stripe for the Rhyme Search panel.
 
+use crate::app::context_menu::ContextMenu;
 use crate::app::vertical_label::VerticalLabel;
 use crate::workspace::controller::WorkspaceController;
-use gtk::gio;
 use gtk::prelude::*;
 use gtk::{
     Align, Box as GtkBox, Button, Image, Label, MenuButton, Orientation, Separator, ToggleButton,
     pango,
 };
 use std::rc::Rc;
+
+/// Fire an `app.*` action from a closure that has no widget handle.
+fn activate_app(name: &str) {
+    if let Some(app) = gtk::gio::Application::default() {
+        app.activate_action(name, None);
+    }
+}
 
 /// Toolbar icon size, matching JetBrains.
 const TOOLBAR_ICON: i32 = 16;
@@ -36,24 +43,39 @@ fn tinted_button(icon: &str, action: &str, tooltip: &str, class: &str) -> Button
     b
 }
 
-/// The settings gear (JetBrains-style) — Settings first, then Help.
-fn settings_button() -> MenuButton {
-    let menu = gio::Menu::new();
-    menu.append(Some("Settings\u{2026}"), Some("app.preferences"));
-
-    let help = gio::Menu::new();
-    help.append(Some("Documentation"), Some("app.docs"));
-    help.append(Some("Report Issue"), Some("app.report-issue"));
-    help.append(Some("About"), Some("app.about"));
-    menu.append_section(None, &help);
-
-    MenuButton::builder()
-        .icon_name("emblem-system-symbolic")
-        .menu_model(&menu)
-        .tooltip_text("Settings")
+/// A toolbar button using a bundled SVG (for icons the system theme is
+/// missing — `document-new-symbolic` isn't present everywhere).
+fn resource_button(resource: &str, action: &str, tooltip: &str, class: &str) -> Button {
+    let image = Image::from_resource(resource);
+    image.set_pixel_size(TOOLBAR_ICON);
+    let button = Button::builder()
+        .action_name(action)
+        .tooltip_text(tooltip)
         .valign(Align::Center)
-        .css_classes(["settings-gear"])
-        .build()
+        .css_classes([class])
+        .build();
+    button.set_child(Some(&image));
+    button
+}
+
+/// The settings gear (JetBrains-style) — Settings first, then Help. Uses the
+/// same styled dropdown as every context menu.
+fn settings_button() -> MenuButton {
+    let (button, menu) = ContextMenu::dropdown(Some("emblem-system-symbolic"), None);
+    button.set_tooltip_text(Some("Settings"));
+    button.add_css_class("settings-gear");
+
+    menu.add_item("Settings\u{2026}", None, None, || {
+        activate_app("app.preferences")
+    });
+    menu.add_separator();
+    menu.add_item("Documentation", None, None, || activate_app("app.docs"));
+    menu.add_item("Report Issue", None, None, || {
+        activate_app("app.report-issue")
+    });
+    menu.add_item("About", None, None, || activate_app("app.about"));
+
+    button
 }
 
 /// The compact top toolbar.
@@ -83,8 +105,8 @@ pub fn main_toolbar(controller: &Rc<WorkspaceController>) -> GtkBox {
 
     // File actions, sitting where a JetBrains toolbar puts the run controls —
     // tinted like run buttons, but keeping their own action icons.
-    bar.append(&tinted_button(
-        "document-new-symbolic",
+    bar.append(&resource_button(
+        "/org/gtk_rs/rhymr/icons/document-new.svg",
         "app.new",
         "New File",
         "run-action",

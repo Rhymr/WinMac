@@ -124,9 +124,17 @@ impl WorkspaceController {
                     .as_ref()
                     .and_then(|root| path.strip_prefix(root).ok().map(PathBuf::from))
                     .unwrap_or_else(|| path.clone());
-                rel.components()
+                let mut segs: Vec<String> = rel
+                    .components()
                     .map(|c| c.as_os_str().to_string_lossy().into_owned())
-                    .collect()
+                    .collect();
+                // Match the tab label — hide the implied `.txt`.
+                if let Some(last) = segs.last_mut()
+                    && let Some(stripped) = last.strip_suffix(".txt")
+                {
+                    *last = stripped.to_string();
+                }
+                segs
             })
             .unwrap_or_default();
 
