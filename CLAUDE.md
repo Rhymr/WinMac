@@ -213,3 +213,53 @@ pre-1.0:
 
 Core string e.g. `0.137.4`; full string e.g. `0.137.4+build.201.gdeadbee`.
 Widgets show `v0.137.4`.
+
+## Design direction — Apple Notes as "External Libraries"
+
+Instead of syncing Apple Notes *into* a workspace as editable `.txt` files,
+the plan is to repurpose the JetBrains-style **"External Libraries"** node at
+the bottom of the file tree: rename it **"Apple Notes"**, and render each
+Notes *folder* as an expandable child (like a dependency), notes as leaves.
+
+- **Read-only.** Rhymr never writes back to Apple Notes — the philosophy is
+  "don't touch Notes for editing". Notes are for reference: indexing,
+  full-text search, and copy-from.
+- **Workspace-independent.** The section shows in every workspace, backed by
+  the same sync, so any project can reach the writer's whole note corpus.
+- Backed by the existing macOS sync path (`osascript` → local `NotesServer`
+  → HTTP client); the tree just needs a second read-only root that reads
+  from it.
+
+## Commit messages — Conventional Commits, enforced by commitlint
+
+Every commit message is linted by a husky `commit-msg` hook
+(`.husky/commit-msg` → `commitlint --edit`; config in `commitlint.config.js`,
+deps in `package.json`). Run `npm install` once after cloning to register the
+hook (`.husky/` is gitignored — the hook is generated locally, not
+committed). Messages that fail the lint are rejected. Keep to:
+
+- `<type>: <subject>` header. `type` lower-case, one of
+  `feat fix docs style refactor perf test build ci chore misc revert`.
+  Optional scope: `<type>(scope):`.
+- Subject in lower-case imperative, no trailing period; header ≤ 100 chars.
+- Blank line before the body and before the footer; body/footer lines
+  ≤ 100 chars.
+- In this repo, practically every code change is `feat:` or `fix:` — one
+  feature per commit.
+- Use GitHub auto-close keywords anywhere in the message —
+  `fixes #123`, `closes #456`, `resolves #789` (also fix/close/resolve,
+  case-insensitive). Merged into the default branch, GitHub closes the
+  linked issue.
+
+### Sequencing — one `feat:` commit per stage
+
+Plan multi-part work as an ordered sequence of single-feature commits, each
+independently buildable, e.g.:
+
+```
+A — foundation:   feat: <structural move / new module>   (build; note file moves)
+B — data spine:   feat: <core data model>                (gate on the relevant test)
+C — behaviour:    feat: <the actual capability>
+D — surface:      feat: <UI/entry points>                → feat: <polish widgets>
+E — tooling:      feat: <in-app authoring/util>          (build; note new module)
+```
