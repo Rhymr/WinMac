@@ -39,6 +39,8 @@ pub struct SourcePanel {
     on_open: Rc<RefCell<Option<Rc<OpenFn>>>>,
     /// `tx` for "please reload source #i" — the poll loop owns the `rx`.
     reload_tx: Rc<RefCell<Option<mpsc::Sender<usize>>>>,
+    /// Current workspace root — the fold state is persisted per workspace.
+    root: Rc<RefCell<Option<PathBuf>>>,
 }
 
 impl Default for SourcePanel {
@@ -75,7 +77,22 @@ impl SourcePanel {
             collapsed: Rc::new(RefCell::new(HashSet::new())),
             on_open: Rc::new(RefCell::new(None)),
             reload_tx: Rc::new(RefCell::new(None)),
+            root: Rc::new(RefCell::new(None)),
         }
+    }
+
+    fn section_key(id: &str) -> String {
+        format!("\u{1}{id}")
+    }
+
+    /// Persist the current fold set for this workspace.
+    fn persist(&self) {
+        let Some(root) = self.root.borrow().clone() else {
+            return;
+        };
+        let mut keys: Vec<String> = self.collapsed.borrow().iter().cloned().collect();
+        keys.sort();
+        crate::workspace::session::update(&root, |s| s.collapsed_sources = Some(keys));
     }
 
     pub fn get_widget(&self) -> &Frame {
@@ -156,12 +173,34 @@ impl SourcePanel {
         });
     }
 
-    /// Re-point every source at `root`'s `.rhymr/` cache, repaint from that
-    /// cache, and ask for a fresh load. Called when the project changes.
+    /// Re-point every source at `root`'s `.rhymr/` cache, restore its fold
+    /// state, repaint, and ask for a fresh load. Called when the project
+    /// changes.
     pub fn set_workspace_root(&self, root: Option<PathBuf>) {
         for source in self.registry.sources() {
             source.set_workspace(root.as_deref());
         }
+        *self.root.borrow_mut() = root.clone();
+
+        // Restore folds; a workspace the user has never touched here starts
+        // with every source section folded (Apple Notes defaults collapsed).
+        {
+            let mut collapsed = self.collapsed.borrow_mut();
+            collapsed.clear();
+            let saved = root
+                .as_deref()
+                .map(crate::workspace::session::load)
+                .and_then(|s| s.collapsed_sources);
+            match saved {
+                Some(keys) => collapsed.extend(keys),
+                None => {
+                    for source in self.registry.sources() {
+                        collapsed.insert(Self::section_key(source.id()));
+                    }
+                }
+            }
+        }
+
         self.repaint_from_cache();
         for i in 0..self.registry.sources().len() {
             self.request_reload(i);
@@ -221,6 +260,7 @@ impl SourcePanel {
         }
         drop(c);
         self.rebuild();
+        self.persist();
     }
 
     /// Every folder key under source `idx` (its section stays expanded).
@@ -253,6 +293,7 @@ impl SourcePanel {
         }
         drop(c);
         self.rebuild();
+        self.persist();
     }
 
     fn collapse_all(&self, idx: usize) {
@@ -263,6 +304,7 @@ impl SourcePanel {
         }
         drop(c);
         self.rebuild();
+        self.persist();
     }
 
     /// The Expand All / Collapse All / Refresh menu shared by the section

@@ -1,6 +1,7 @@
 pub mod controller;
 pub mod manager;
 pub mod recent;
+pub mod session;
 
 use crate::app::context_menu::ContextMenu;
 use crate::editor::TextEditor;
