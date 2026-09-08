@@ -140,9 +140,10 @@
         background: none;
     }
 
-    /* small breathing room around the icon that sits below the label */
+    /* the icon↔label gap is the box spacing (4px, matching the bottom
+       stripe); keep only a little horizontal breathing room here */
     & image {
-        padding: 4px 2px 2px 2px;
+        padding: 0 2px;
     }
 
     &:hover {
