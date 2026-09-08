@@ -164,8 +164,6 @@ impl ContextMenu {
         on_change: impl Fn(usize) + 'static,
     ) -> (MenuButton, Rc<Cell<usize>>) {
         let (button, menu) = Self::dropdown(None, options.get(initial).copied());
-        // The value-picker variant of `.app-dropdown` — a boxed combo.
-        button.add_css_class("app-combo");
         button.set_always_show_arrow(true);
 
         let selected = Rc::new(Cell::new(initial));

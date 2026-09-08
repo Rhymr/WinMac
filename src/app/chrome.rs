@@ -13,10 +13,13 @@ use gtk::{
 };
 use std::rc::Rc;
 
-/// Fire an `app.*` action from a closure that has no widget handle.
+/// Fire an app action from a closure that has no widget handle. Accepts
+/// either the bare action name or the `app.`-prefixed form —
+/// `Application::activate_action` wants the bare name, unlike
+/// `Widget::set_action_name`.
 fn activate_app(name: &str) {
     if let Some(app) = gtk::gio::Application::default() {
-        app.activate_action(name, None);
+        app.activate_action(name.strip_prefix("app.").unwrap_or(name), None);
     }
 }
 
