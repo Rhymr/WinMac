@@ -185,7 +185,11 @@ impl TextSource for AppleNotesSource {
         if !cfg!(target_os = "macos") {
             return Err(SourceError::Unsupported);
         }
-        let rows = crate::platform::fetch_apple_notes().map_err(SourceError::Io)?;
+        let rows = crate::platform::fetch_apple_notes().map_err(|e| {
+            log::warn!("apple-notes: fetch failed: {e}");
+            SourceError::Io(e)
+        })?;
+        log::debug!("apple-notes: fetched {} notes", rows.len());
         self.write_snapshot(&rows);
         Ok(self.ingest(rows))
     }
@@ -200,12 +204,16 @@ impl TextSource for AppleNotesSource {
             return Ok(body.clone());
         }
         // Only a stale snapshot was cached — do a fresh load and retry.
+        log::debug!("apple-notes: body cache miss for {id:?}, reloading");
         self.load()?;
         self.bodies
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .get(id)
             .cloned()
-            .ok_or_else(|| SourceError::Parse(format!("note {id:?} not found")))
+            .ok_or_else(|| {
+                log::warn!("apple-notes: note {id:?} not found after reload");
+                SourceError::Parse(format!("note {id:?} not found"))
+            })
     }
 }

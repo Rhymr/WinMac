@@ -110,10 +110,11 @@ impl SourcePanel {
                     return;
                 }
                 let load_tx = load_tx.clone();
-                std::thread::spawn(move || {
-                    if let Ok(tree) = source.load() {
+                std::thread::spawn(move || match source.load() {
+                    Ok(tree) => {
                         let _ = load_tx.send((idx, tree));
                     }
+                    Err(e) => log::warn!("source {:?} load failed: {e}", source.id()),
                 });
             }
         };
