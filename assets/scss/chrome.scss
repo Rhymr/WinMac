@@ -5,17 +5,22 @@
     background-color: var(--bg-dark);
     border-bottom: 1px solid var(--border-dark);
     padding: 2px 4px;
-    min-height: 30px;
+    min-height: 28px;
 
     & button {
         background: none;
         border: none;
         border-radius: 0;
-        padding: 2px 6px;
+        padding: 2px 5px;
         min-height: 24px;
-        min-width: 26px;
+        min-width: 24px;
         color: var(--text-not-so-dim);
         transition: background-color var(--transition-fast);
+
+        /* let the icon follow the button's colour rather than `* {}` */
+        & image {
+            color: inherit;
+        }
 
         &:hover {
             background-color: var(--bg-hover);
@@ -31,10 +36,15 @@
         }
     }
 
+    /* the "Configure" MenuButton keeps a little more room for its label */
+    & > menubutton > button {
+        padding: 2px 8px;
+    }
+
     & separator {
         background-color: var(--border-dark);
         min-width: 1px;
-        margin: 4px 4px;
+        margin: 5px 3px;
     }
 }
 
@@ -45,19 +55,16 @@
     margin: 0 4px 0 6px;
 }
 
-/* JetBrains VCS action colours — kept on hover/active too so they don't
-   wash out. */
-.main-toolbar button.git-pull,
-.main-toolbar button.git-pull:hover,
-.main-toolbar button.git-fetch,
-.main-toolbar button.git-fetch:hover {
+/* JetBrains VCS action colours. base.scss's `* { color: ... }` colours the
+   inner GtkImage node *directly*, so the button's colour never reaches the
+   icon by inheritance — target the image explicitly (and beat `*`). */
+.main-toolbar button.git-pull image,
+.main-toolbar button.git-fetch image {
     color: var(--vcs-modified);
 }
 
-.main-toolbar button.git-commit,
-.main-toolbar button.git-commit:hover,
-.main-toolbar button.git-push,
-.main-toolbar button.git-push:hover {
+.main-toolbar button.git-commit image,
+.main-toolbar button.git-push image {
     color: var(--vcs-added);
 }
 
@@ -66,15 +73,15 @@
     background-color: var(--bg-dark);
     border-right: 1px solid var(--border-dark);
     padding: 4px 0 0 0;
-    min-width: 24px;
+    min-width: 22px;
 }
 
 .tool-stripe-button {
     background: none;
     border: none;
     border-radius: 0;
-    padding: 6px 2px;
-    min-width: 22px;
+    padding: 8px 2px;
+    min-width: 20px;
     color: var(--text-not-so-dim);
     transition: background-color var(--transition-fast);
 

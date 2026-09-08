@@ -4,17 +4,53 @@ use gtk::{gio, glib};
 use libadwaita as adw;
 use rhymr_rs::setting::Settings;
 use rhymr_rs::{app, css};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 pub const APP_ID: &str = "org.gtk_rs.Rhymr";
 
 /// Build the main editor window for `workspace_path` and remember it as a
 /// recent project. Shared by the welcome picker and `open` (a folder passed
 /// on the command line or via the OS "Open With").
-fn open_workspace(app: &adw::Application, workspace_path: PathBuf) {
-    rhymr_rs::workspace::recent::record_recent_workspace(&workspace_path);
+fn open_workspace(app: &adw::Application, target: PathBuf) {
+    // Accept either a folder or a file — a file opens its parent folder as
+    // the workspace and the file itself in the editor.
+    let (root, file) = if target.is_file() {
+        (
+            target
+                .parent()
+                .map(Path::to_path_buf)
+                .unwrap_or(target.clone()),
+            Some(target),
+        )
+    } else {
+        (target, None)
+    };
+
+    rhymr_rs::workspace::recent::record_recent_workspace(&root);
     let (_window, controller) = app::layout::build_ui(app);
-    controller.set_root_path(workspace_path);
+    controller.set_root_path(root.clone());
+
+    // Open a file so the editor isn't staring at an empty state — the one
+    // passed, else the first text file, matching how a JetBrains project
+    // reopens with something visible.
+    let to_open = file.or_else(|| first_text_file(&root));
+    if let Some(path) = to_open
+        && let Some(workspace) = controller.get_workspace()
+    {
+        workspace.open_path(path);
+    }
+}
+
+/// Alphabetically-first `.txt` directly in `dir`, if any.
+fn first_text_file(dir: &std::path::Path) -> Option<PathBuf> {
+    let mut txts: Vec<PathBuf> = std::fs::read_dir(dir)
+        .ok()?
+        .flatten()
+        .map(|e| e.path())
+        .filter(|p| p.extension().is_some_and(|x| x.eq_ignore_ascii_case("txt")))
+        .collect();
+    txts.sort();
+    txts.into_iter().next()
 }
 
 fn main() -> glib::ExitCode {

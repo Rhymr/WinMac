@@ -585,7 +585,7 @@ fn build_tab_widget(path: &Path) -> (Box, Button) {
 
     let icon = Image::from_resource(TAB_ICON_RESOURCE);
     icon.set_css_classes(&["tab-icon"]);
-    icon.set_pixel_size(14);
+    icon.set_pixel_size(16);
 
     let display_name = path
         .file_name()

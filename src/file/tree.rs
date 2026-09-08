@@ -15,7 +15,7 @@ use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
 const IGNORED_ENTRIES: [&str; 2] = ["target", "node_modules"];
-const INDENT_PX: i32 = 20;
+const INDENT_PX: i32 = 16;
 
 /// The tree's rendering/data model. Context menus, keyboard shortcuts, and
 /// every file-mutating operation (new/rename/cut/copy/paste/delete/move)
@@ -277,7 +277,7 @@ impl FileTree {
             hbox.append(&chevron);
 
             let icon = Image::from_paintable(self.folder_icon.as_ref());
-            icon.set_pixel_size(14);
+            icon.set_pixel_size(16);
             icon.set_css_classes(&["file-icon"]);
             hbox.append(&icon);
 
@@ -312,7 +312,7 @@ impl FileTree {
             hbox.append(&chevron);
 
             let icon = Image::from_paintable(self.file_icon.as_ref());
-            icon.set_pixel_size(14);
+            icon.set_pixel_size(16);
             icon.set_css_classes(&["file-icon"]);
             hbox.append(&icon);
 

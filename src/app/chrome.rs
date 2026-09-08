@@ -10,13 +10,19 @@ use gtk::{
     Align, Box as GtkBox, Button, Image, Label, MenuButton, Orientation, Separator, ToggleButton,
 };
 
+/// Toolbar icon size, matching JetBrains.
+const TOOLBAR_ICON: i32 = 16;
+
 /// A flat icon button wired to an `app.*` action by name.
 fn tool_button(icon: &str, action: &str, tooltip: &str) -> Button {
-    Button::builder()
-        .icon_name(icon)
+    let image = Image::from_icon_name(icon);
+    image.set_pixel_size(TOOLBAR_ICON);
+    let button = Button::builder()
         .action_name(action)
         .tooltip_text(tooltip)
-        .build()
+        .build();
+    button.set_child(Some(&image));
+    button
 }
 
 /// Same, plus an extra CSS class (used to colour the Git actions).
@@ -121,7 +127,7 @@ pub fn left_stripe<F: Fn(bool) + 'static>(project_visible: bool, on_toggle: F) -
     let content = GtkBox::new(Orientation::Vertical, 3);
     content.set_halign(Align::Center);
     let icon = Image::from_icon_name("folder-symbolic");
-    icon.set_pixel_size(14);
+    icon.set_pixel_size(13);
     content.append(&icon);
     content.append(&VerticalLabel::new("Project"));
 

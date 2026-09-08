@@ -29,7 +29,7 @@
     }
 
     & label {
-        padding: 4px 4px 4px 0;
+        padding: 2px 4px 2px 0;
         margin: 0 0 0 4px;
         text-align: left;
         background-color: inherit;
@@ -89,8 +89,8 @@
 }
 
 .dir-chevron {
-    min-width: 12px;
-    padding-left: 5px;
+    min-width: 10px;
+    padding-left: 2px;
     color: var(--text-muted);
     background-color: inherit;
 }
