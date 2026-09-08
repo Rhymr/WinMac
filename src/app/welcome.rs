@@ -228,7 +228,7 @@ where
                 .valign(Align::Center)
                 .css_classes(vec!["flat", "project-menu-button"])
                 .build();
-            menu_btn.set_child(Some(&crate::app::icons::img("more", 14)));
+            menu_btn.set_child(Some(&crate::app::icons::img("more", 16)));
 
             hbox.append(&avatar_label);
             hbox.append(&details_vbox);
