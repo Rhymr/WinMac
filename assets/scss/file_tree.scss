@@ -45,10 +45,9 @@
 
 .file-tree-container {
     background-color: var(--bg-darkest);
-    /* Hard 1px divider between the file tree and the editor pane,
-       JetBrains-style (a second vertical line sits inside the editor
-       between its gutter and text). */
-    border-right: 1px solid var(--border-dark);
+    /* The panel/editor divider now lives on `.left-panel-scroller` (the
+       project tree + source trees share one scroller). */
+    border-right: none;
 }
 
 .file-tree-outer {
@@ -154,19 +153,20 @@
     background-color: var(--selection-bg);
 } 
 /* Read-only external-source trees (Apple Notes, …) stacked under the
-   project tree — a 1px rule separates them from it, and each source's
-   header row reuses `.file-tree-header`. */
-.source-panel {
-    border-top: 1px solid var(--border-dark);
-    background-color: var(--bg-mid);
-}
-
+   project tree — no rule between them (they read as one panel); each
+   source's header row reuses `.file-tree-header`. */
+.source-panel,
 .source-list {
     background-color: var(--bg-mid);
 }
 
-/* Git-ignored entries and read-only external-source trees — muted
-   goldenrod, JetBrains-style. */
+/* The whole left panel (project tree + source trees) scrolls as one; a
+   single 1px divider on its right edge separates it from the editor. */
+.left-panel-scroller {
+    border-right: 1px solid var(--border-dark);
+}
+
+/* Git-ignored entries — muted goldenrod, JetBrains-style. */
 .file-ignored {
     color: var(--text-ignored);
 }

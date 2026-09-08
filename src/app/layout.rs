@@ -141,6 +141,7 @@ pub fn create_main_layout() -> (GtkBox, Rc<WorkspaceController>) {
     let left_scroller = gtk::ScrolledWindow::builder()
         .hscrollbar_policy(gtk::PolicyType::Never)
         .vexpand(true)
+        .css_classes(["left-panel-scroller"])
         .child(&left_column)
         .build();
 
