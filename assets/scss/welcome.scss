@@ -23,37 +23,17 @@
     }
 }
 
-/* Bottom-of-sidebar Configure / Help dropdowns (JetBrains welcome window). */
+/* Bottom-of-sidebar Configure / Help dropdowns. They ride the shared
+   `.app-dropdown` trigger style (context_menu.scss) — flat label + chevron,
+   with a hover background. Only the resting text colour is bumped here so
+   it reads on the sidebar's darkest surface. */
 .welcome-sidebar-footer {
     background: none;
+    border-top: 1px solid var(--border-dark);
 }
 
-/* Just the label + a bare chevron — no button box around the text. The
-   grey fill would otherwise come from the universal `box { background }`
-   reset painting the MenuButton's inner content box. */
-.welcome-sidebar-footer menubutton,
-.welcome-sidebar-footer menubutton > button,
-.welcome-sidebar-footer menubutton box,
-.welcome-sidebar-footer menubutton label {
-    background: none;
-    background-image: none;
-    border: none;
-    box-shadow: none;
-    outline: none;
-    border-radius: 0;
-    min-height: 0;
-    color: var(--text-not-so-dim);
-}
-
-.welcome-sidebar-footer menubutton > button {
-    padding: 2px 4px;
-}
-
-.welcome-sidebar-footer menubutton > button:hover,
-.welcome-sidebar-footer menubutton > button:checked {
-    background: none;
-    box-shadow: none;
-    color: var(--text-bright);
+.welcome-sidebar-footer .app-dropdown > button {
+    color: var(--text-dim);
 }
 
 .brand-box {

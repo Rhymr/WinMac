@@ -133,6 +133,10 @@ impl ContextMenu {
         popover.set_child(Some(&menu_box));
 
         let button = MenuButton::builder().valign(Align::Center).build();
+        // Every dropdown trigger in the app carries this class so one rule
+        // set (see context_menu.scss) owns the button chrome — not whatever
+        // container the dropdown happens to land in.
+        button.add_css_class("app-dropdown");
         if let Some(icon) = icon {
             button.set_icon_name(icon);
         }
@@ -160,6 +164,8 @@ impl ContextMenu {
         on_change: impl Fn(usize) + 'static,
     ) -> (MenuButton, Rc<Cell<usize>>) {
         let (button, menu) = Self::dropdown(None, options.get(initial).copied());
+        // The value-picker variant of `.app-dropdown` — a boxed combo.
+        button.add_css_class("app-combo");
         button.set_always_show_arrow(true);
 
         let selected = Rc::new(Cell::new(initial));

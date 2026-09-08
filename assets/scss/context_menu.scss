@@ -21,6 +21,62 @@ popover {
     }
 }
 
+/* Dropdown TRIGGER buttons — one style for every `MenuButton` built via
+   `ContextMenu::dropdown`, so a dropdown looks the same wherever it lives.
+   `.app-dropdown` = flat action trigger (toolbar gear, welcome
+   Configure/Help); `.app-combo` adds the boxed value-picker chrome
+   (settings Theme/Icons). */
+.app-dropdown {
+    background: none;
+
+    & > button {
+        background: none;
+        border: none;
+        border-radius: 0;
+        padding: 2px 6px;
+        min-height: 0;
+        min-width: 0;
+        color: var(--text-not-so-dim);
+        transition: background-color var(--transition-fast);
+    }
+
+    /* the universal `box { background }` reset paints the button's content
+       box otherwise */
+    & > button > box {
+        background: none;
+    }
+
+    & arrow,
+    & > button image,
+    & > button label {
+        color: inherit;
+        background: none;
+    }
+
+    & > button:hover,
+    & > button:checked {
+        background-color: var(--bg-hover);
+        color: var(--text-bright);
+    }
+}
+
+.app-combo > button {
+    background: var(--bg-mid);
+    border: 1px solid var(--border-light);
+    padding: 2px 8px;
+    min-height: 22px;
+    color: var(--text-bright);
+}
+
+.app-combo > button:hover {
+    background: var(--button-hover);
+    color: var(--text-bright);
+}
+
+.app-combo > button:checked {
+    border-color: var(--selection-bg);
+}
+
 .context-menu {
     background-color: var(--popover-bg-color);
     border: 1px solid var(--border-light);
