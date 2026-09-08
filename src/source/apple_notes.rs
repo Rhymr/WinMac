@@ -169,6 +169,13 @@ impl TextSource for AppleNotesSource {
         }
     }
 
+    /// Exempt on macOS: it's the built-in Notes app, always present, no
+    /// install step — it just needs the one-time automation permission,
+    /// which the first read prompts for. (Off macOS it isn't constructed.)
+    fn requires_install(&self) -> bool {
+        !cfg!(target_os = "macos")
+    }
+
     fn set_workspace(&self, root: Option<&Path>) {
         *self
             .workspace
