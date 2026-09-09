@@ -655,7 +655,10 @@ mod tests {
             &mut settings,
             "palette.bg-dark=#123456\npalette.text-bright=not-a-color\npalette.=#ffffff\n",
         );
-        assert_eq!(settings.palette_overrides.get("bg-dark").unwrap(), "#123456");
+        assert_eq!(
+            settings.palette_overrides.get("bg-dark").unwrap(),
+            "#123456"
+        );
         assert!(!settings.palette_overrides.contains_key("text-bright"));
         assert!(settings.palette_overrides.len() == 1);
 

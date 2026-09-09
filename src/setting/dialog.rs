@@ -266,8 +266,10 @@ enum BoundWidget {
     Spin(SpinButton),
     Entry(Entry),
     Enum {
+        button: gtk::MenuButton,
         selected: Rc<Cell<usize>>,
         values: &'static [&'static str],
+        labels: &'static [&'static str],
     },
     /// Answers for both the family key and its paired [`SettingKind::FontSize`].
     Font(FontDialogButton),
@@ -303,7 +305,9 @@ impl SettingWidgets {
                 _ => SettingValue::Int(sb.value().round() as i64),
             }),
             BoundWidget::Entry(e) => Some(SettingValue::Text(e.text().to_string())),
-            BoundWidget::Enum { selected, values } => {
+            BoundWidget::Enum {
+                selected, values, ..
+            } => {
                 let idx = selected.get().min(values.len().saturating_sub(1));
                 Some(SettingValue::Text(values[idx].to_string()))
             }
@@ -315,6 +319,62 @@ impl SettingWidgets {
                     .unwrap_or_else(|| Settings::default().font_family);
                 Some(SettingValue::Text(family))
             }
+        }
+    }
+
+    /// Push a [`SettingValue`] into the bound control — the inverse of
+    /// [`Self::value`], used by the "Reset to defaults" buttons.
+    fn set_value(&self, key: &str, kind: SettingKind, value: &SettingValue) {
+        if let SettingKind::FontSize { .. } = kind {
+            if let (Some(fb), SettingValue::Int(pt)) = (self.font_button(), value) {
+                let mut desc = fb.font_desc().unwrap_or_default();
+                desc.set_size((*pt as i32).max(1) * pango::SCALE);
+                fb.set_font_desc(&desc);
+            }
+            return;
+        }
+        match self.0.get(key) {
+            Some(BoundWidget::Check(cb)) => {
+                if let SettingValue::Bool(b) = value {
+                    cb.set_active(*b);
+                }
+            }
+            Some(BoundWidget::Spin(sb)) => match value {
+                SettingValue::Int(n) => sb.set_value(*n as f64),
+                SettingValue::Float(f) => sb.set_value(*f),
+                _ => {}
+            },
+            Some(BoundWidget::Entry(e)) => {
+                if let SettingValue::Text(t) = value {
+                    e.set_text(t);
+                }
+            }
+            Some(BoundWidget::Enum {
+                button,
+                selected,
+                values,
+                labels,
+            }) => {
+                if let SettingValue::Text(t) = value
+                    && let Some(i) = values.iter().position(|v| **v == **t)
+                {
+                    selected.set(i);
+                    if let Some(label) = labels.get(i) {
+                        button.set_label(label);
+                    }
+                }
+            }
+            Some(BoundWidget::Font(fb)) => {
+                if let SettingValue::Text(fam) = value {
+                    let size = fb.font_desc().map(|d| d.size()).unwrap_or(0);
+                    let mut desc = pango::FontDescription::from_string(fam);
+                    if size > 0 {
+                        desc.set_size(size);
+                    }
+                    fb.set_font_desc(&desc);
+                }
+            }
+            None => {}
         }
     }
 }
@@ -329,8 +389,21 @@ fn build_page(
     settings: &Settings,
     widgets: &mut SettingWidgets,
     mark_dirty: &DirtyHook,
+    reset_page: &ToggleHook,
 ) -> GtkBox {
     let page = settings_page();
+
+    let reset_btn = Button::builder()
+        .label("Reset this page to defaults")
+        .halign(Align::Start)
+        .css_classes(["flat"])
+        .build();
+    reset_btn.connect_clicked({
+        let reset_page = reset_page.clone();
+        move |_| (reset_page.borrow())(cat)
+    });
+    page.append(&reset_btn);
+
     let mut grid = form_grid();
     let mut group: Option<&str> = None;
     let mut row = 0;
@@ -386,9 +459,15 @@ fn build_page(
                     move |_| (mark_dirty.borrow())()
                 });
                 grid_field(&grid, row, &format!("{}:", spec.label), &button);
-                widgets
-                    .0
-                    .insert(spec.key, BoundWidget::Enum { selected, values });
+                widgets.0.insert(
+                    spec.key,
+                    BoundWidget::Enum {
+                        button,
+                        selected,
+                        values,
+                        labels,
+                    },
+                );
             }
             SettingKind::Font => {
                 let font_button = FontDialogButton::builder()
@@ -449,6 +528,7 @@ fn build_color_scheme_page(
     settings: &Settings,
     overrides: &Rc<RefCell<BTreeMap<String, String>>>,
     mark_dirty: &DirtyHook,
+    reset_colors: &DirtyHook,
 ) -> ScrolledWindow {
     let page = settings_page();
     let theme = settings.theme;
@@ -528,18 +608,26 @@ fn build_color_scheme_page(
         pickers.push((picker, name, default_hex));
     }
 
-    reset_all.connect_clicked({
+    // The full colour reset — shared with the page-level and global
+    // "Reset to defaults" buttons via `reset_colors`.
+    *reset_colors.borrow_mut() = Box::new({
         let overrides = overrides.clone();
         let mark_dirty = mark_dirty.clone();
-        move |_| {
+        let pickers: Vec<(ColorDialogButton, String)> =
+            pickers.into_iter().map(|(p, _, hex)| (p, hex)).collect();
+        move || {
             overrides.borrow_mut().clear();
-            for (picker, _, default_hex) in &pickers {
+            for (picker, default_hex) in &pickers {
                 if let Ok(rgba) = gdk::RGBA::parse(default_hex) {
                     picker.set_rgba(&rgba);
                 }
             }
             (mark_dirty.borrow())();
         }
+    });
+    reset_all.connect_clicked({
+        let reset_colors = reset_colors.clone();
+        move |_| (reset_colors.borrow())()
     });
 
     ScrolledWindow::builder()
@@ -627,13 +715,18 @@ pub fn show_settings_dialog(app: &Application, controller: Option<Rc<WorkspaceCo
     let overrides: Rc<RefCell<BTreeMap<String, String>>> =
         Rc::new(RefCell::new(settings.palette_overrides.clone()));
 
+    // Per-page "Reset this page" clicks route through this slot; the full
+    // colour-picker reset lives in `reset_colors`. Both filled in below.
+    let reset_page: ToggleHook = Rc::new(RefCell::new(Box::new(|_| {})));
+    let reset_colors: DirtyHook = Rc::new(RefCell::new(Box::new(|| {})));
+
     let mut widgets = SettingWidgets::default();
     for n in CATEGORY_TREE {
         if n.id == CategoryId::ColorScheme {
-            let page = build_color_scheme_page(&settings, &overrides, &mark_dirty);
+            let page = build_color_scheme_page(&settings, &overrides, &mark_dirty, &reset_colors);
             stack.add_named(&page, Some(stack_name(n.id)));
         } else {
-            let page = build_page(n.id, &settings, &mut widgets, &mark_dirty);
+            let page = build_page(n.id, &settings, &mut widgets, &mark_dirty, &reset_page);
             stack.add_named(&page, Some(stack_name(n.id)));
         }
     }
@@ -647,15 +740,20 @@ pub fn show_settings_dialog(app: &Application, controller: Option<Rc<WorkspaceCo
     main_split.append(&content);
 
     // ==========================================
-    // Bottom bar: Cancel / Apply / OK, right-aligned
+    // Bottom bar: Reset all (left) · Cancel / Apply / OK (right)
     // ==========================================
     let footer = GtkBox::new(Orientation::Horizontal, 10);
-    footer.set_halign(Align::End);
     footer.set_margin_top(12);
     footer.set_margin_bottom(12);
     footer.set_margin_start(16);
     footer.set_margin_end(16);
 
+    let reset_all_btn = Button::builder()
+        .label("Reset all to defaults")
+        .css_classes(["flat"])
+        .build();
+    let footer_spacer = GtkBox::new(Orientation::Horizontal, 0);
+    footer_spacer.set_hexpand(true);
     let cancel_btn = Button::builder().label("Cancel").build();
     let apply_btn = Button::builder().label("Apply").build();
     let ok_btn = Button::builder()
@@ -663,6 +761,8 @@ pub fn show_settings_dialog(app: &Application, controller: Option<Rc<WorkspaceCo
         .css_classes(vec!["suggested-action"])
         .build();
 
+    footer.append(&reset_all_btn);
+    footer.append(&footer_spacer);
     footer.append(&cancel_btn);
     footer.append(&apply_btn);
     footer.append(&ok_btn);
@@ -808,6 +908,44 @@ pub fn show_settings_dialog(app: &Application, controller: Option<Rc<WorkspaceCo
     *mark_dirty.borrow_mut() = Box::new({
         let f = update_apply_sensitivity.clone();
         move || f()
+    });
+
+    // Reset every widget in one category (or all categories) to its spec
+    // default — the default `SettingValue` is just `(spec.get)` on a fresh
+    // `Settings::default()`.
+    let reset_specs = {
+        let widgets = widgets.clone();
+        Rc::new(move |only: Option<CategoryId>| {
+            let defaults = Settings::default();
+            for spec in SPECS
+                .iter()
+                .filter(|s| only.is_none_or(|c| s.category == c))
+            {
+                widgets.set_value(spec.key, spec.kind, &(spec.get)(&defaults));
+            }
+        })
+    };
+    *reset_page.borrow_mut() = Box::new({
+        let reset_specs = reset_specs.clone();
+        let reset_colors = reset_colors.clone();
+        let update = update_apply_sensitivity.clone();
+        move |cat| {
+            reset_specs(Some(cat));
+            if cat == CategoryId::ColorScheme {
+                (reset_colors.borrow())();
+            }
+            update();
+        }
+    });
+    reset_all_btn.connect_clicked({
+        let reset_specs = reset_specs.clone();
+        let reset_colors = reset_colors.clone();
+        let update = update_apply_sensitivity.clone();
+        move |_| {
+            reset_specs(None);
+            (reset_colors.borrow())();
+            update();
+        }
     });
 
     let apply: Rc<dyn Fn()> = Rc::new({
