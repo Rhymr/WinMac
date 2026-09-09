@@ -417,6 +417,28 @@ spec::settings! {
         label "Editor font size" ; help "" ; live Css ;
         get |s| SettingValue::Int(s.font_size as i64) ;
         set |s, v| if let SettingValue::Int(n) = v { s.font_size = n as u32 } ;
+
+    ui_font_size: u32 = 12 ;
+        kind SettingKind::Int { min: 8, max: 24, step: 1 } ; in Appearance / "Interface" ;
+        label "Interface font size (px)" ;
+        help "Applies to the toolbar, trees, dialogs and menus — not the editor." ;
+        live Css ;
+        get |s| SettingValue::Int(s.ui_font_size as i64) ;
+        set |s, v| if let SettingValue::Int(n) = v { s.ui_font_size = n as u32 } ;
+
+    corner_radius: u32 = 0 ;
+        kind SettingKind::Int { min: 0, max: 8, step: 1 } ; in Appearance / "Interface" ;
+        label "Corner radius (px)" ;
+        help "0 keeps the classic boxy look; higher rounds buttons, menus and inputs." ;
+        live Css ;
+        get |s| SettingValue::Int(s.corner_radius as i64) ;
+        set |s, v| if let SettingValue::Int(n) = v { s.corner_radius = n as u32 } ;
+
+    animations_enabled: bool = true ;
+        kind SettingKind::Bool ; in Appearance / "Interface" ;
+        label "Enable UI animations" ; help "" ; live Css ;
+        get |s| SettingValue::Bool(s.animations_enabled) ;
+        set |s, v| if let SettingValue::Bool(b) = v { s.animations_enabled = b } ;
 }
 
 fn settings_file() -> Option<PathBuf> {

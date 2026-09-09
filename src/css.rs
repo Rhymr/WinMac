@@ -80,23 +80,15 @@ const PALETTE: &[(&str, &str, &str)] = &[
     ("destructive-text", "#e57474", "#b3261e"),
 ];
 
-/// Theme-invariant spacing/radius/motion tokens, applied consistently
-/// across every custom widget for a cohesive, modern feel.
+/// Theme-invariant tokens that don't depend on any setting. The
+/// setting-driven ones (`--radius-*`, `--transition-*`, `--ui-font-size`)
+/// are emitted by `theme_css` instead, which is appended last so it wins.
 const TOKENS: &str = r#":root {
-    /* Boxy classic look — everything is square. `--radius-*` are kept as
-       named hooks (rather than deleting them from every stylesheet) but all
-       resolve to 0. */
-    --radius-sm: 0;
-    --radius-md: 0;
-    --radius-lg: 0;
-    --transition-fast: 60ms linear;
-    --transition-normal: 90ms linear;
     /* Chrome (everything outside the editor) uses the OS UI font, classic-IDE
        style; the editor + its gutter keep the monospace `--app-font-*` set
        from Settings (see editor.scss). Pango picks the first installed
        family from the list; unknown names are skipped. */
     --ui-font-family: "SF Pro Text", "Helvetica Neue", "Segoe UI", Cantarell, "Ubuntu", "Noto Sans", sans-serif;
-    --ui-font-size: 12px;
 }
 "#;
 
@@ -153,6 +145,25 @@ fn theme_css(settings: &Settings) -> String {
     vars.push_str(&format!(
         "    --app-font-family: \"{font_family}\";\n    --app-font-size: {}pt;\n",
         settings.font_size
+    ));
+
+    // Setting-driven chrome tokens (Settings → Appearance). `--radius-*` are
+    // kept as named hooks even at 0 so the stylesheets don't need editing.
+    vars.push_str(&format!(
+        "    --ui-font-size: {}px;\n",
+        settings.ui_font_size
+    ));
+    let radius = settings.corner_radius;
+    vars.push_str(&format!(
+        "    --radius-sm: {radius}px;\n    --radius-md: {radius}px;\n    --radius-lg: {radius}px;\n"
+    ));
+    let (fast, normal) = if settings.animations_enabled {
+        ("60ms linear", "90ms linear")
+    } else {
+        ("0s", "0s")
+    };
+    vars.push_str(&format!(
+        "    --transition-fast: {fast};\n    --transition-normal: {normal};\n"
     ));
 
     format!(":root {{\n{vars}}}\n")
