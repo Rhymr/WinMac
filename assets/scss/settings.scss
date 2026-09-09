@@ -41,6 +41,13 @@
     & grid {
         background: none;
     }
+
+    /* …but a dropdown's popover menu (a `box.context-menu`) lives in the
+       node tree under `.settings-content`, so the rule above blanks its
+       surface — put it back. */
+    & .context-menu {
+        background-color: var(--popover-bg-color);
+    }
 }
 
 .settings-page {

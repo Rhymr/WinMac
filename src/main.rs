@@ -54,6 +54,13 @@ fn first_text_file(dir: &std::path::Path) -> Option<PathBuf> {
 }
 
 fn main() -> glib::ExitCode {
+    // Verbosity flags (`-v` / `--verbose`, repeatable) and `RHYMR_LOG` drive
+    // stderr logging. Parse and strip our flags before GTK sees argv —
+    // a HANDLES_OPEN app rejects options it doesn't recognise.
+    let mut args: Vec<String> = std::env::args().collect();
+    let verbosity = rhymr_rs::logging::parse_verbosity(&mut args);
+    rhymr_rs::logging::init(verbosity);
+
     // Register the resource bundle from the compiled resource file
     let resource_bytes = include_bytes!(concat!(env!("OUT_DIR"), "/compiled.gresource"));
     let resource_data = glib::Bytes::from(&resource_bytes[..]);
@@ -61,11 +68,11 @@ fn main() -> glib::ExitCode {
         &Resource::from_data(&resource_data).expect("Failed to load resources"),
     );
 
-    println!("Current dir = {:?}", std::env::current_dir().unwrap());
+    log::debug!("current dir = {:?}", std::env::current_dir());
 
     // Compile scss files into css files
     if let Err(e) = css::compile_sass() {
-        eprintln!("compile_sass failed: {e}");
+        log::error!("compile_sass failed: {e}");
         panic!("{e}");
     }
 
@@ -97,19 +104,43 @@ fn main() -> glib::ExitCode {
         css::sync_style_manager(&settings);
     };
 
-    // No path given: splash, then the workspace picker.
+    // No path given: (optionally) splash, then the workspace picker — or,
+    // when "reopen last project" is set, straight into the last workspace.
     app.connect_activate(move |app| {
         apply_theme();
+        let startup = Settings::load();
 
-        let splash = rhymr_rs::app::splash::show(app);
-        let app_for_welcome = app.clone();
-        glib::timeout_add_local_once(std::time::Duration::from_millis(1600), move || {
-            let app_for_workspace = app_for_welcome.clone();
-            rhymr_rs::app::welcome::show_welcome_dialog(&app_for_welcome, move |workspace_path| {
-                open_workspace(&app_for_workspace, workspace_path);
-            });
-            splash.close();
-        });
+        if startup.reopen_last_project
+            && let Some(recent) = rhymr_rs::workspace::recent::load_recent_workspaces()
+                .into_iter()
+                .next()
+        {
+            open_workspace(app, recent);
+            return;
+        }
+
+        let show_welcome = {
+            let app = app.clone();
+            move || {
+                let app_for_workspace = app.clone();
+                rhymr_rs::app::welcome::show_welcome_dialog(&app, move |workspace_path| {
+                    open_workspace(&app_for_workspace, workspace_path);
+                });
+            }
+        };
+
+        if startup.show_splash {
+            let splash = rhymr_rs::app::splash::show(app);
+            glib::timeout_add_local_once(
+                std::time::Duration::from_millis(u64::from(startup.splash_duration_ms)),
+                move || {
+                    show_welcome();
+                    splash.close();
+                },
+            );
+        } else {
+            show_welcome();
+        }
     });
 
     // A folder passed on the command line / via "Open With": go straight to
@@ -123,6 +154,6 @@ fn main() -> glib::ExitCode {
         }
     });
 
-    // Run application!
-    app.run()
+    // Run application! (argv with our verbosity flags already stripped)
+    app.run_with_args(&args)
 }

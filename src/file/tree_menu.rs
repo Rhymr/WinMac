@@ -16,6 +16,28 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
+/// Every directory beneath `dir` (recursively), skipping dotfiles and the
+/// build/vendor dirs the tree never shows. Used by Expand/Collapse All.
+fn descendant_dirs(dir: &Path) -> Vec<PathBuf> {
+    let mut out = Vec::new();
+    let Ok(read_dir) = fs::read_dir(dir) else {
+        return out;
+    };
+    for entry in read_dir.flatten() {
+        let name = entry.file_name();
+        let name = name.to_string_lossy();
+        if name.starts_with('.') || matches!(name.as_ref(), "target" | "node_modules") {
+            continue;
+        }
+        let path = entry.path();
+        if path.is_dir() {
+            out.extend(descendant_dirs(&path));
+            out.push(path);
+        }
+    }
+    out
+}
+
 // GTK's own "<Primary>" accelerator alias only applies to app-level actions
 // (see ui/menu.rs); for a raw EventControllerKey we have to check the
 // platform's actual primary modifier ourselves: Cmd on macOS, Ctrl elsewhere.
@@ -110,6 +132,20 @@ impl FileTree {
             file_tree_ref.show_new_submenu(&hbox_ref, target_dir_for_new.clone());
         });
 
+        // Expand All / Collapse All — on every folder row, including the
+        // workspace root.
+        if is_dir {
+            menu.add_separator();
+            let ft = self.clone();
+            let dir = path.clone();
+            menu.add_item(None, "Expand All", None, None, move || ft.expand_all(&dir));
+            let ft = self.clone();
+            let dir = path.clone();
+            menu.add_item(None, "Collapse All", None, None, move || {
+                ft.collapse_all(&dir)
+            });
+        }
+
         if !is_root {
             menu.add_separator();
 
@@ -182,6 +218,33 @@ impl FileTree {
         menu.popup_below(hbox);
     }
 
+    /// Expand `dir` and every directory beneath it (remove them all from
+    /// the collapsed set), then repaint.
+    pub(crate) fn expand_all(&self, dir: &Path) {
+        {
+            let mut collapsed = self.collapsed.borrow_mut();
+            collapsed.remove(dir);
+            for d in descendant_dirs(dir) {
+                collapsed.remove(&d);
+            }
+        }
+        self.refresh();
+        self.persist_tree_state();
+    }
+
+    /// Collapse every directory strictly beneath `dir` (`dir` itself stays
+    /// open so its now-collapsed children are visible), then repaint.
+    pub(crate) fn collapse_all(&self, dir: &Path) {
+        {
+            let mut collapsed = self.collapsed.borrow_mut();
+            for d in descendant_dirs(dir) {
+                collapsed.insert(d);
+            }
+        }
+        self.refresh();
+        self.persist_tree_state();
+    }
+
     fn show_new_submenu(&self, hbox: &GtkBox, parent_dir: PathBuf) {
         let menu = ContextMenu::new(&self.frame);
 
@@ -220,7 +283,7 @@ impl FileTree {
             fs::write(&candidate, "")
         };
         if let Err(e) = result {
-            eprintln!("Failed to create {candidate:?}: {e}");
+            log::error!("failed to create {candidate:?}: {e}");
             return;
         }
 
@@ -353,7 +416,7 @@ impl FileTree {
                         drop(collapsed);
                         self.stage_git();
                     }
-                    Err(e) => eprintln!("Failed to rename {old_path:?} to {new_path:?}: {e}"),
+                    Err(e) => log::error!("failed to rename {old_path:?} to {new_path:?}: {e}"),
                 }
             }
         }
@@ -397,7 +460,7 @@ impl FileTree {
                     file_tree_ref.select_path(&dest);
                 });
             }
-            Err(e) => eprintln!("Failed to move {src:?} to {dest:?}: {e}"),
+            Err(e) => log::error!("failed to move {src:?} to {dest:?}: {e}"),
         }
     }
 
@@ -447,7 +510,7 @@ impl FileTree {
                     file_tree_ref.select_path(&dest);
                 });
             }
-            Err(e) => eprintln!("Failed to copy {src:?} to {dest:?}: {e}"),
+            Err(e) => log::error!("failed to copy {src:?} to {dest:?}: {e}"),
         }
     }
 
@@ -528,7 +591,7 @@ impl FileTree {
                 self.stage_git();
                 self.refresh_deferred();
             }
-            Err(e) => eprintln!("Failed to delete {path:?}: {e}"),
+            Err(e) => log::error!("failed to delete {path:?}: {e}"),
         }
     }
 

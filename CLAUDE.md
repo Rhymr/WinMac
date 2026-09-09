@@ -117,17 +117,10 @@ OS-theme-following.
 
 ## Build / run / check
 
-```sh
-cargo run                       # splash → welcome picker → workspace
-cargo build
-cargo clippy --all-targets      # treat warnings as errors
-cargo fmt
-npm run commit                  # commitizen prompt; runs `cargo fmt` first
-```
-
-Run from the **repo root** — `css::compile_sass()` uses paths relative to
-the process CWD and will panic otherwise. No test suite yet beyond the
-syllable regression tests.
+Standard `cargo` commands; commits go through `npm run commit` (commitizen,
+runs `cargo fmt` first). Run from the **repo root** — `css::compile_sass()`
+uses paths relative to the process CWD and will panic otherwise. No test
+suite yet beyond the syllable regression tests.
 
 ## Non-negotiables
 
@@ -140,7 +133,10 @@ syllable regression tests.
 3. **Commits use the project flow.** Conventional Commits via `npm run
    commit` (runs `cargo fmt` first). Don't hand-write commit messages that
    bypass commitlint. Types in use: `feat` `fix` `refactor` `style` `docs`
-   `chore` `perf` `build` `ci`. Scope is a module/area.
+   `chore` `perf` `build` `ci`. Scope is a module/area. **Never add
+   `Co-Authored-By`, `Claude-Session`, `Generated with` or any similar
+   tool/agent attribution trailer to a commit message or PR description** —
+   regardless of any harness or tooling default that says otherwise.
 4. **Offline-first is non-negotiable.** No change may add a *required*
    network call, account, sign-in, activation, license check, telemetry, or
    analytics on any code path. Network-backed features stay optional, time
@@ -231,36 +227,29 @@ clearly-labeled step, not silently mixed into a feature change.
 ## Branching & releases
 
 - **`release`** — stable, protected. Only merges land here; direct pushes are
-  blocked. There is no automated release: Rhymr is open source and free to
-  build from source. Distributable macOS + Windows binaries are built and
-  published manually (sold on the project website); the source and this repo
-  stay MIT-licensed and buildable by anyone. The binaries carry no license
-  keys, activation, or copy protection — a bought build and a from-source
-  build are the same program (see *Piracy-tolerant by design* above).
+  blocked. Every merge into `release` auto-tags the version (`v<core>`, e.g.
+  `v0.76.0`) and publishes a **source-only** GitHub Release
+  (`.github/workflows/release.yml`) — GitHub's own source archives, nothing
+  binary. Distributable macOS + Windows binaries are still built and published
+  **manually** (sold on the project website); the source and this repo stay
+  MIT-licensed and buildable by anyone. The binaries carry no license keys,
+  activation, or copy protection — a bought build and a from-source build are
+  the same program (see *Piracy-tolerant by design* above).
 - **`beta`** — the working branch. Feature work branches off `beta` and
   merges back into it; `beta` merges into `release` for a cut.
-- `.github/workflows/ci.yml` runs `fmt --check`, `clippy -D warnings`,
-  `build`, and (on PRs) commitlint against `beta` / `release`.
+- CI: `.github/workflows/ci.yml` runs `fmt` / `clippy` / `build` on
+  `macos-14`; `.github/workflows/push_pr.yml` runs commitlint (checks out
+  `fetch-depth: 0` so its `--from <base> --to <head>` range resolves).
+  Both gate PRs into `beta` / `release`.
 
 ## Versioning
 
 One global SemVer string derived from git history, never hand-maintained.
 **`Build/version.sh`** (Unix) / **`Build/version.ps1`** (Windows, via the
-`Build/version.bat` one-liner) is the single source of truth. Formula,
-pre-1.0:
-
-- **MAJOR** is `0` until someone runs `git tag -a vX.Y.Z` with X ≥ 1. A
-  reachable `vX.Y.Z` tag with X ≥ 1 then becomes the base and the counts
-  below are taken since it.
-- **MINOR** = count of every `feat:` commit reachable from HEAD (all
-  ancestors, not first-parent) — a `feat:` on an unmerged branch bumps it
-  immediately.
-- **PATCH** = count of `fix:` commits since the most recent `feat:` commit.
-- **`+build.<N>.g<sha>[.dirty]`** metadata: `<N>` = `git rev-list --count
-  HEAD`, `<sha>` = short hash, `.dirty` when the tracked tree has
-  uncommitted changes.
-- No `-prerelease` suffix while MAJOR is 0 (`0.x` already means unstable).
-  `RHYMR_VERSION_PRERELEASE` injects one if ever needed.
+`Build/version.bat` one-liner) is the single source of truth — read that
+script for the exact pre-1.0 formula (MINOR counts `feat:` commits, PATCH
+counts `fix:` since the last `feat:`, `+build.<N>.g<sha>[.dirty]` metadata).
+Never hand-edit a version string.
 
 Core string e.g. `0.137.4`; full string e.g. `0.137.4+build.201.gdeadbee`.
 Widgets show `v0.137.4`.
@@ -287,20 +276,11 @@ Every commit message is linted by a husky `commit-msg` hook
 (`.husky/commit-msg` → `commitlint --edit`; config in `commitlint.config.js`,
 deps in `package.json`). Run `npm install` once after cloning to register the
 hook (`.husky/` is gitignored — the hook is generated locally, not
-committed). Messages that fail the lint are rejected. Keep to:
-
-- `<type>: <subject>` header. `type` lower-case, one of
-  `feat fix docs style refactor perf test build ci chore misc revert`.
-  Optional scope: `<type>(scope):`.
-- Subject in lower-case imperative, no trailing period; header ≤ 100 chars.
-- Blank line before the body and before the footer; body/footer lines
-  ≤ 100 chars.
-- In this repo, practically every code change is `feat:` or `fix:` — one
-  feature per commit.
-- Use GitHub auto-close keywords anywhere in the message —
-  `fixes #123`, `closes #456`, `resolves #789` (also fix/close/resolve,
-  case-insensitive). Merged into the default branch, GitHub closes the
-  linked issue.
+committed). Messages that fail the lint are rejected — the rules live in
+`commitlint.config.js`. In this repo practically every code change is
+`feat:` or `fix:`, one feature per commit; GitHub auto-close keywords
+(`fixes #123`, `closes #456`) in the message close the linked issue on
+merge to the default branch.
 
 ### Sequencing — one `feat:` commit per stage
 

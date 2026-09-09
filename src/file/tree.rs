@@ -15,7 +15,41 @@ use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
 const IGNORED_ENTRIES: [&str; 2] = ["target", "node_modules"];
-const INDENT_PX: i32 = 16;
+
+/// Project-tree display options, loaded from `Settings` once per `refresh`
+/// (Settings → Editor → File Tree).
+pub(crate) struct TreeOpts {
+    show_dotfiles: bool,
+    folders_first: bool,
+    sort_case_sensitive: bool,
+    indent_px: i32,
+    /// Extra entry names to hide, on top of [`IGNORED_ENTRIES`].
+    extra_ignored: Vec<String>,
+}
+
+impl TreeOpts {
+    fn load() -> Self {
+        let s = crate::setting::Settings::load();
+        Self {
+            show_dotfiles: s.tree_show_dotfiles,
+            folders_first: s.tree_folders_first,
+            sort_case_sensitive: s.tree_sort_case_sensitive,
+            indent_px: s.tree_indent_px as i32,
+            extra_ignored: s
+                .tree_extra_ignored
+                .split(',')
+                .map(|p| p.trim().to_string())
+                .filter(|p| !p.is_empty())
+                .collect(),
+        }
+    }
+
+    fn is_hidden(&self, name: &str) -> bool {
+        (!self.show_dotfiles && name.starts_with('.'))
+            || IGNORED_ENTRIES.contains(&name)
+            || self.extra_ignored.iter().any(|p| p == name)
+    }
+}
 
 /// The tree's rendering/data model. Context menus, keyboard shortcuts, and
 /// every file-mutating operation (new/rename/cut/copy/paste/delete/move)
@@ -42,7 +76,8 @@ pub struct FileTree {
     // Empty whenever the workspace isn't a git repo.
     git_statuses: Rc<RefCell<HashMap<PathBuf, GitFileStatus>>>,
     // Absolute paths git ignores (one per ignored dir). A row whose path
-    // is, or is under, one of these is greyed goldenrod (`.file-ignored`).
+    // is, or is under, one of these sits on a goldenrod background
+    // (`.file-ignored`).
     ignored: Rc<RefCell<HashSet<PathBuf>>>,
     // Decoded once and shared as *paintable data*, not as widgets: a GTK
     // widget can only ever have one parent, so reusing the same Image
@@ -160,12 +195,37 @@ impl FileTree {
             });
     }
 
-    /// Point the tree at a workspace folder and populate it from disk.
+    /// Point the tree at a workspace folder and populate it from disk,
+    /// restoring which folders were folded last time this project was open.
     pub fn set_root_path(&self, path: PathBuf) {
+        let session = crate::workspace::session::load(&path);
+        {
+            let mut collapsed = self.collapsed.borrow_mut();
+            collapsed.clear();
+            for rel in &session.collapsed_dirs {
+                collapsed.insert(path.join(rel));
+            }
+        }
         self.root_path.replace(Some(path));
-        self.collapsed.borrow_mut().clear();
         self.clipboard.replace(None);
         self.refresh();
+    }
+
+    /// Write the current set of folded folders (root-relative) back to the
+    /// per-workspace session file. Cheap; called after every fold change.
+    pub(crate) fn persist_tree_state(&self) {
+        let Some(root) = self.root_path.borrow().clone() else {
+            return;
+        };
+        let mut rels: Vec<String> = self
+            .collapsed
+            .borrow()
+            .iter()
+            .filter_map(|p| p.strip_prefix(&root).ok())
+            .map(|p| p.to_string_lossy().into_owned())
+            .collect();
+        rels.sort();
+        crate::workspace::session::update(&root, |s| s.collapsed_dirs = rels);
     }
 
     /// Re-walk the workspace folder and rebuild the displayed rows.
@@ -181,6 +241,7 @@ impl FileTree {
         let Some(root) = self.root_path.borrow().clone() else {
             return;
         };
+        let opts = TreeOpts::load();
 
         let (mut git_statuses, ignored) = if root.join(".git").is_dir() {
             let git = crate::git::ops::GitController::new(&root);
@@ -215,17 +276,17 @@ impl FileTree {
 
         // The workspace root itself is the first, always-visible row; its
         // children (the real entries) collapse/expand underneath it.
-        let root_row = self.build_row(&root, true, 0, true);
+        let root_row = self.build_row(&root, true, 0, true, &opts);
         self.file_list.append(&root_row);
         self.entries.borrow_mut().push((root.clone(), true));
 
         let collapsed = self.collapsed.borrow();
         if !collapsed.contains(&root) {
             let mut collected = Vec::new();
-            collect_entries(&root, 1, &collapsed, &mut collected);
+            collect_entries(&root, 1, &collapsed, &opts, &mut collected);
 
             for (path, is_dir, depth) in collected {
-                let row = self.build_row(&path, is_dir, depth, false);
+                let row = self.build_row(&path, is_dir, depth, false, &opts);
                 self.file_list.append(&row);
                 self.entries.borrow_mut().push((path, is_dir));
             }
@@ -279,11 +340,12 @@ impl FileTree {
         is_dir: bool,
         depth: usize,
         is_root: bool,
+        opts: &TreeOpts,
     ) -> ListBoxRow {
         let hbox = GtkBox::new(Orientation::Horizontal, 0);
         hbox.set_valign(Align::Center);
         hbox.set_css_classes(&["file-list-row"]);
-        hbox.set_margin_start(INDENT_PX * depth as i32);
+        hbox.set_margin_start(opts.indent_px * depth as i32);
         if is_root {
             hbox.add_css_class("file-tree-header");
         }
@@ -379,8 +441,9 @@ impl FileTree {
             label
         };
 
-        // Git-ignored entries (and anything under an ignored dir) go
-        // goldenrod, JetBrains-style — but not the workspace root itself.
+        // Git-ignored entries (and anything under an ignored dir) sit on a
+        // goldenrod background, JetBrains-style — but not the workspace
+        // root itself.
         if !is_root && self.is_ignored(path) {
             name_label.add_css_class("file-ignored");
         }
@@ -407,6 +470,7 @@ impl FileTree {
                 }
                 drop(collapsed);
                 file_tree_ref.refresh();
+                file_tree_ref.persist_tree_state();
             });
             hbox.add_controller(toggle_click);
         } else {
@@ -533,6 +597,7 @@ fn collect_entries(
     dir: &Path,
     depth: usize,
     collapsed: &HashSet<PathBuf>,
+    opts: &TreeOpts,
     entries: &mut Vec<(PathBuf, bool, usize)>,
 ) {
     let Ok(read_dir) = fs::read_dir(dir) else {
@@ -541,22 +606,25 @@ fn collect_entries(
 
     let mut items: Vec<_> = read_dir.filter_map(|entry| entry.ok()).collect();
     items.sort_by(|a, b| {
-        let a_is_dir = a.path().is_dir();
-        let b_is_dir = b.path().is_dir();
-        match (a_is_dir, b_is_dir) {
-            (true, false) => Ordering::Less,
-            (false, true) => Ordering::Greater,
-            _ => a
-                .file_name()
-                .to_ascii_lowercase()
-                .cmp(&b.file_name().to_ascii_lowercase()),
+        if opts.folders_first {
+            match (a.path().is_dir(), b.path().is_dir()) {
+                (true, false) => return Ordering::Less,
+                (false, true) => return Ordering::Greater,
+                _ => {}
+            }
+        }
+        let (an, bn) = (a.file_name(), b.file_name());
+        if opts.sort_case_sensitive {
+            an.cmp(&bn)
+        } else {
+            an.to_ascii_lowercase().cmp(&bn.to_ascii_lowercase())
         }
     });
 
     for item in items {
         let name = item.file_name();
         let name_str = name.to_string_lossy();
-        if name_str.starts_with('.') || IGNORED_ENTRIES.contains(&name_str.as_ref()) {
+        if opts.is_hidden(&name_str) {
             continue;
         }
 
@@ -565,7 +633,7 @@ fn collect_entries(
         entries.push((path.clone(), is_dir, depth));
 
         if is_dir && !collapsed.contains(&path) {
-            collect_entries(&path, depth + 1, collapsed, entries);
+            collect_entries(&path, depth + 1, collapsed, opts, entries);
         }
     }
 }

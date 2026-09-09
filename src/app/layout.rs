@@ -5,7 +5,7 @@ use crate::workspace::controller::WorkspaceController;
 #[cfg(target_os = "windows")]
 use gtk::MenuButton;
 use gtk::prelude::*;
-use gtk::{Box as GtkBox, Label, Orientation, Paned};
+use gtk::{Box as GtkBox, Label, Orientation, Paned, glib};
 use libadwaita::prelude::*;
 use libadwaita::{Application, ApplicationWindow};
 #[cfg(any(target_os = "windows", target_os = "macos"))]
@@ -13,17 +13,16 @@ use libadwaita::{HeaderBar, ToolbarView, WindowTitle};
 use std::cell::Cell;
 use std::rc::Rc;
 
-/// Height (px) the bottom Rhyme Search panel opens to.
-const RHYME_PANEL_HEIGHT: i32 = 240;
-
 pub fn build_ui(app: &Application) -> (ApplicationWindow, Rc<WorkspaceController>) {
+    let startup = crate::setting::Settings::load();
+
     // CSS is loaded once, up front, in main.rs — the welcome window needs it
     // too and is shown before this function ever runs.
     let main_window = ApplicationWindow::builder()
         .application(app)
         .title("Rhymr")
-        .default_width(1280)
-        .default_height(720)
+        .default_width((startup.window_width as i32).max(640))
+        .default_height((startup.window_height as i32).max(480))
         .build();
 
     let (main_layout, workspace_controller) = create_main_layout();
@@ -88,6 +87,10 @@ pub fn build_ui(app: &Application) -> (ApplicationWindow, Rc<WorkspaceController
 }
 
 pub fn create_main_layout() -> (GtkBox, Rc<WorkspaceController>) {
+    // Startup-only sizing (Settings → Appearance & Behavior → Window &
+    // Startup). A per-workspace remembered size still wins over these.
+    let startup = crate::setting::Settings::load();
+
     let workspace_controller = Rc::new(WorkspaceController::new());
 
     let mut file_tree = FileTree::new();
@@ -125,10 +128,6 @@ pub fn create_main_layout() -> (GtkBox, Rc<WorkspaceController>) {
         source_panel.connect_open(move |title, body| ws.open_readonly(&title, &body));
     }
     source_panel.start();
-    {
-        let sp = source_panel.clone();
-        workspace_controller.set_root_listener(move |root| sp.set_workspace_root(root));
-    }
 
     // The project tree and every source tree stack in one column that
     // scrolls as a single list (each inner tree grows to its content;
@@ -147,7 +146,11 @@ pub fn create_main_layout() -> (GtkBox, Rc<WorkspaceController>) {
 
     // file tree column | editor, flush against each other (only the tree's
     // 1px right border separates them — no draggable "gap").
-    let content_pane = create_horizontal_split(&left_scroller, workspace.get_widget(), 300);
+    let content_pane = create_horizontal_split(
+        &left_scroller,
+        workspace.get_widget(),
+        (startup.left_panel_width as i32).clamp(120, 900),
+    );
     content_pane.set_hexpand(true);
 
     // Left tool-window stripe (vertical "Project" label) toggles the column.
@@ -172,11 +175,13 @@ pub fn create_main_layout() -> (GtkBox, Rc<WorkspaceController>) {
     outer_split.set_shrink_end_child(false);
     outer_split.set_vexpand(true);
 
-    let remembered = Rc::new(Cell::new(RHYME_PANEL_HEIGHT));
+    let default_rhyme_height = (startup.rhyme_panel_height as i32).max(80);
+    let remembered = Rc::new(Cell::new(default_rhyme_height));
     let bottom_stripe = {
         let outer_split = outer_split.clone();
         let rhyme_frame = rhyme_frame.clone();
         let remembered = remembered.clone();
+        let controller = workspace_controller.clone();
         crate::app::chrome::bottom_stripe(false, move |show| {
             let total = outer_split.height();
             if show {
@@ -189,8 +194,55 @@ pub fn create_main_layout() -> (GtkBox, Rc<WorkspaceController>) {
                 }
                 rhyme_frame.set_visible(false);
             }
+            if let Some(root) = controller.get_root_path() {
+                crate::workspace::session::update(&root, |s| {
+                    s.rhyme_panel_height = Some(remembered.get());
+                    s.rhyme_panel_visible = Some(show);
+                });
+            }
         })
     };
+
+    // Restore the left-panel width and remembered Rhyme-panel height once
+    // the workspace root is known, and keep the source panel pointed at it.
+    {
+        let sp = source_panel.clone();
+        let content_pane = content_pane.clone();
+        let remembered = remembered.clone();
+        workspace_controller.set_root_listener(move |root| {
+            if let Some(r) = root.as_deref() {
+                let s = crate::workspace::session::load(r);
+                if let Some(w) = s.left_panel_width {
+                    content_pane.set_position(w.clamp(120, 900));
+                }
+                remembered.set(s.rhyme_panel_height.unwrap_or(default_rhyme_height));
+            }
+            sp.set_workspace_root(root);
+        });
+    }
+
+    // Persist the left-panel width on drag, debounced so a drag isn't a
+    // burst of file writes.
+    {
+        let controller = workspace_controller.clone();
+        let generation = Rc::new(Cell::new(0u64));
+        content_pane.connect_position_notify(move |pane| {
+            let width = pane.position();
+            let this = generation.get() + 1;
+            generation.set(this);
+            let (generation, controller) = (generation.clone(), controller.clone());
+            glib::timeout_add_local_once(std::time::Duration::from_millis(400), move || {
+                if generation.get() != this {
+                    return;
+                }
+                if let Some(root) = controller.get_root_path() {
+                    crate::workspace::session::update(&root, |s| {
+                        s.left_panel_width = Some(width);
+                    });
+                }
+            });
+        });
+    }
 
     let main_box = GtkBox::new(Orientation::Vertical, 0);
     main_box.append(&crate::app::chrome::main_toolbar(&workspace_controller));

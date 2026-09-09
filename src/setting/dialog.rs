@@ -1,27 +1,28 @@
-use super::{IconTheme, NotesCacheScope, Settings, Theme};
+use super::spec::{CATEGORY_TREE, CategoryId, LiveApply, SettingKind, SettingValue};
+use super::{SPECS, Settings};
 use crate::app::context_menu::ContextMenu;
+use crate::app::keymap::{self, Keymap};
 use crate::workspace::controller::WorkspaceController;
 use gtk::prelude::*;
 use gtk::{
-    Align, Box as GtkBox, Button, CheckButton, FontDialog, FontDialogButton, Grid, Label, ListBox,
-    ListBoxRow, Orientation, SearchEntry, Separator, SpinButton, Stack, Window, pango,
+    Align, Box as GtkBox, Button, CheckButton, ColorDialog, ColorDialogButton, Entry,
+    EventSequenceState, FontDialog, FontDialogButton, GestureClick, Grid, Label, ListBox,
+    ListBoxRow, Orientation, ScrolledWindow, SearchEntry, Separator, SpinButton, Stack, Window,
+    gdk, pango,
 };
 use libadwaita::Application;
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::rc::Rc;
 
-/// `(stack name, sidebar label, breadcrumb parent group)` — the parent
-/// group is shown before the label in the content header, JetBrains-style
-/// ("Appearance & Behavior › Appearance"). An empty parent shows just the
-/// label.
-const CATEGORIES: [(&str, &str, &str); 6] = [
-    ("appearance", "Appearance", "Appearance & Behavior"),
-    ("editor", "Editor", ""),
-    ("rhyme", "Rhyme Highlighting", "Editor"),
-    ("completion", "Completions", "Editor"),
-    ("git", "Git", "Version Control"),
-    ("sources", "Sources", ""),
-];
+/// Per-depth indent for a child row in the category tree.
+const CAT_INDENT_PX: i32 = 14;
+
+/// Late-bound callback slots: the value dropdowns and the tree chevrons are
+/// built before the closures they need exist, so they call through one of
+/// these, filled in once those closures are defined.
+type DirtyHook = Rc<RefCell<Box<dyn Fn()>>>;
+type ToggleHook = Rc<RefCell<Box<dyn Fn(CategoryId)>>>;
 
 /// A category page: a tight vertical stack of section headers and form
 /// grids, on the flat content background (no inset panel).
@@ -81,6 +82,18 @@ fn grid_check(grid: &Grid, row: i32, check: &CheckButton) {
     grid.attach(check, 0, row, 2, 1);
 }
 
+/// Decimal places a float spin button should show for a given step
+/// (0.05 -> 2, 0.1 -> 1, 1.0 -> 0), capped at 4.
+fn decimals_for(step: f64) -> u32 {
+    let mut places = 0;
+    let mut scaled = step.abs();
+    while places < 4 && (scaled.fract() > 1e-9) {
+        scaled *= 10.0;
+        places += 1;
+    }
+    places
+}
+
 /// A wrapped, dimmed explanatory paragraph under a group.
 fn description_label(text: &str) -> Label {
     Label::builder()
@@ -90,6 +103,729 @@ fn description_label(text: &str) -> Label {
         .max_width_chars(60)
         .margin_top(4)
         .css_classes(["dim-label", "caption"])
+        .build()
+}
+
+// ===========================================================================
+// Category tree helpers (data from `spec::CATEGORY_TREE`)
+// ===========================================================================
+
+fn node(id: CategoryId) -> Option<&'static super::spec::CategoryNode> {
+    CATEGORY_TREE.iter().find(|n| n.id == id)
+}
+
+fn has_children(id: CategoryId) -> bool {
+    CATEGORY_TREE.iter().any(|n| n.parent == Some(id))
+}
+
+/// Number of parent hops to a top-level node.
+fn depth(id: CategoryId) -> i32 {
+    let mut d = 0;
+    let mut cur = node(id).and_then(|n| n.parent);
+    while let Some(pid) = cur {
+        d += 1;
+        cur = node(pid).and_then(|n| n.parent);
+    }
+    d
+}
+
+/// The `Stack` child name for a category — also its search anchor.
+fn stack_name(id: CategoryId) -> &'static str {
+    match id {
+        CategoryId::Appearance => "appearance",
+        CategoryId::AppearanceWindow => "window",
+        CategoryId::ColorScheme => "colorscheme",
+        CategoryId::EditorGeneral => "editor",
+        CategoryId::EditorRhyme => "rhyme",
+        CategoryId::EditorCompletion => "completion",
+        CategoryId::EditorFileTree => "filetree",
+        CategoryId::Keymap => "keymap",
+        CategoryId::VersionControlGit => "git",
+        CategoryId::ToolsNetwork => "sources",
+        CategoryId::Advanced => "advanced",
+    }
+}
+
+/// "Appearance & Behavior  ›  Appearance" — the group prefix (for a
+/// top-level node) or the parent-label chain, then this node's label.
+fn breadcrumb(id: CategoryId) -> String {
+    let Some(n) = node(id) else {
+        return String::new();
+    };
+    let mut parts: Vec<&str> = Vec::new();
+    if n.parent.is_none() && !n.breadcrumb_parent.is_empty() {
+        parts.push(n.breadcrumb_parent);
+    }
+    let mut chain: Vec<&str> = Vec::new();
+    let mut cur = n.parent;
+    while let Some(pid) = cur {
+        if let Some(p) = node(pid) {
+            chain.push(p.label);
+            cur = p.parent;
+        } else {
+            break;
+        }
+    }
+    chain.reverse();
+    parts.extend(chain);
+    parts.push(n.label);
+    parts.join("  \u{203a}  ")
+}
+
+/// Does `id`'s label, one of its settings' label/description/group, or any
+/// descendant match the lowercased `query`?
+fn category_matches(id: CategoryId, query: &str) -> bool {
+    if let Some(n) = node(id)
+        && n.label.to_lowercase().contains(query)
+    {
+        return true;
+    }
+    if SPECS.iter().any(|s| {
+        s.category == id
+            && (s.label.to_lowercase().contains(query)
+                || s.description.to_lowercase().contains(query)
+                || s.group.to_lowercase().contains(query))
+    }) {
+        return true;
+    }
+    CATEGORY_TREE
+        .iter()
+        .any(|n| n.parent == Some(id) && category_matches(n.id, query))
+}
+
+/// Rebuild `list`'s rows from `CATEGORY_TREE`, hiding rows under a collapsed
+/// ancestor (ignored while `query` is non-empty — search shows every match,
+/// fully expanded). Returns the `CategoryId` at each row index.
+fn build_category_rows(
+    list: &ListBox,
+    collapsed: &HashSet<CategoryId>,
+    query: &str,
+    toggle: &Rc<dyn Fn(CategoryId)>,
+) -> Vec<CategoryId> {
+    while let Some(child) = list.first_child() {
+        list.remove(&child);
+    }
+
+    let mut shown = Vec::new();
+    for n in CATEGORY_TREE {
+        if query.is_empty() {
+            let mut hidden = false;
+            let mut cur = n.parent;
+            while let Some(pid) = cur {
+                if collapsed.contains(&pid) {
+                    hidden = true;
+                    break;
+                }
+                cur = node(pid).and_then(|p| p.parent);
+            }
+            if hidden {
+                continue;
+            }
+        } else if !category_matches(n.id, query) {
+            continue;
+        }
+
+        let hbox = GtkBox::new(Orientation::Horizontal, 4);
+        hbox.set_margin_start(12 + CAT_INDENT_PX * depth(n.id));
+        hbox.set_margin_top(6);
+        hbox.set_margin_bottom(6);
+        hbox.set_margin_end(12);
+
+        if has_children(n.id) {
+            let expanded = !query.is_empty() || !collapsed.contains(&n.id);
+            let chevron = Label::new(Some(if expanded { "\u{25be}" } else { "\u{25b8}" }));
+            chevron.add_css_class("dir-chevron");
+            let gesture = GestureClick::new();
+            let toggle = toggle.clone();
+            let id = n.id;
+            gesture.connect_released(move |g, _, _, _| {
+                g.set_state(EventSequenceState::Claimed);
+                toggle(id);
+            });
+            chevron.add_controller(gesture);
+            hbox.append(&chevron);
+        } else {
+            let spacer = Label::new(None);
+            spacer.set_width_request(12);
+            hbox.append(&spacer);
+        }
+
+        hbox.append(&Label::builder().label(n.label).halign(Align::Start).build());
+
+        let row = ListBoxRow::new();
+        row.set_child(Some(&hbox));
+        list.append(&row);
+        shown.push(n.id);
+    }
+    shown
+}
+
+// ===========================================================================
+// Setting widgets: one bound control per setting, read back generically
+// ===========================================================================
+
+enum BoundWidget {
+    Check(CheckButton),
+    Spin(SpinButton),
+    Entry(Entry),
+    Enum {
+        button: gtk::MenuButton,
+        selected: Rc<Cell<usize>>,
+        values: &'static [&'static str],
+        labels: &'static [&'static str],
+    },
+    /// Answers for both the family key and its paired [`SettingKind::FontSize`].
+    Font(FontDialogButton),
+}
+
+#[derive(Default)]
+struct SettingWidgets(HashMap<&'static str, BoundWidget>);
+
+impl SettingWidgets {
+    fn font_button(&self) -> Option<&FontDialogButton> {
+        self.0.values().find_map(|w| match w {
+            BoundWidget::Font(fb) => Some(fb),
+            _ => None,
+        })
+    }
+
+    /// The control's current value as a [`SettingValue`] of the shape
+    /// `kind` expects, or `None` when no widget is bound for `key`.
+    fn value(&self, key: &str, kind: SettingKind) -> Option<SettingValue> {
+        if let SettingKind::FontSize { min, max } = kind {
+            let desc = self.font_button()?.font_desc().unwrap_or_default();
+            let pt = if desc.size() > 0 {
+                (desc.size() / pango::SCALE) as i64
+            } else {
+                i64::from(Settings::default().font_size)
+            };
+            return Some(SettingValue::Int(pt.clamp(min, max)));
+        }
+        match self.0.get(key)? {
+            BoundWidget::Check(cb) => Some(SettingValue::Bool(cb.is_active())),
+            BoundWidget::Spin(sb) => Some(match kind {
+                SettingKind::Float { .. } => SettingValue::Float(sb.value()),
+                _ => SettingValue::Int(sb.value().round() as i64),
+            }),
+            BoundWidget::Entry(e) => Some(SettingValue::Text(e.text().to_string())),
+            BoundWidget::Enum {
+                selected, values, ..
+            } => {
+                let idx = selected.get().min(values.len().saturating_sub(1));
+                Some(SettingValue::Text(values[idx].to_string()))
+            }
+            BoundWidget::Font(fb) => {
+                let desc = fb.font_desc().unwrap_or_default();
+                let family = desc
+                    .family()
+                    .map(|f| f.to_string())
+                    .unwrap_or_else(|| Settings::default().font_family);
+                Some(SettingValue::Text(family))
+            }
+        }
+    }
+
+    /// Push a [`SettingValue`] into the bound control — the inverse of
+    /// [`Self::value`], used by the "Reset to defaults" buttons.
+    fn set_value(&self, key: &str, kind: SettingKind, value: &SettingValue) {
+        if let SettingKind::FontSize { .. } = kind {
+            if let (Some(fb), SettingValue::Int(pt)) = (self.font_button(), value) {
+                let mut desc = fb.font_desc().unwrap_or_default();
+                desc.set_size((*pt as i32).max(1) * pango::SCALE);
+                fb.set_font_desc(&desc);
+            }
+            return;
+        }
+        match self.0.get(key) {
+            Some(BoundWidget::Check(cb)) => {
+                if let SettingValue::Bool(b) = value {
+                    cb.set_active(*b);
+                }
+            }
+            Some(BoundWidget::Spin(sb)) => match value {
+                SettingValue::Int(n) => sb.set_value(*n as f64),
+                SettingValue::Float(f) => sb.set_value(*f),
+                _ => {}
+            },
+            Some(BoundWidget::Entry(e)) => {
+                if let SettingValue::Text(t) = value {
+                    e.set_text(t);
+                }
+            }
+            Some(BoundWidget::Enum {
+                button,
+                selected,
+                values,
+                labels,
+            }) => {
+                if let SettingValue::Text(t) = value
+                    && let Some(i) = values.iter().position(|v| **v == **t)
+                {
+                    selected.set(i);
+                    if let Some(label) = labels.get(i) {
+                        button.set_label(label);
+                    }
+                }
+            }
+            Some(BoundWidget::Font(fb)) => {
+                if let SettingValue::Text(fam) = value {
+                    let size = fb.font_desc().map(|d| d.size()).unwrap_or(0);
+                    let mut desc = pango::FontDescription::from_string(fam);
+                    if size > 0 {
+                        desc.set_size(size);
+                    }
+                    fb.set_font_desc(&desc);
+                }
+            }
+            None => {}
+        }
+    }
+}
+
+/// Build one category's page from every [`SPECS`] entry in that category:
+/// a checkbox for `Bool`, a spin button for `Int`, a value dropdown for
+/// `Enum`, a font picker for `Font` (its `FontSize` sibling rides along).
+/// Section headers come from the specs' `group`; a `description` renders
+/// under the control, and a `LiveApply::Restart` setting gets a note.
+fn build_page(
+    cat: CategoryId,
+    settings: &Settings,
+    widgets: &mut SettingWidgets,
+    mark_dirty: &DirtyHook,
+    reset_page: &ToggleHook,
+) -> GtkBox {
+    let page = settings_page();
+
+    let reset_btn = Button::builder()
+        .label("Reset this page to defaults")
+        .halign(Align::Start)
+        .css_classes(["flat"])
+        .build();
+    reset_btn.connect_clicked({
+        let reset_page = reset_page.clone();
+        move |_| (reset_page.borrow())(cat)
+    });
+    page.append(&reset_btn);
+
+    if cat == CategoryId::Advanced {
+        page.append(&description_label(
+            "For power users — the defaults suit most workflows.",
+        ));
+    }
+
+    let mut grid = form_grid();
+    let mut group: Option<&str> = None;
+    let mut row = 0;
+
+    for spec in SPECS.iter().filter(|s| s.category == cat) {
+        if matches!(spec.kind, SettingKind::FontSize { .. }) {
+            continue; // owned by the paired Font widget
+        }
+        if group != Some(spec.group) {
+            group = Some(spec.group);
+            if !spec.group.is_empty() {
+                page.append(&section_header(spec.group));
+            }
+            grid = form_grid();
+            page.append(&grid);
+            row = 0;
+        }
+
+        match spec.kind {
+            SettingKind::Bool => {
+                let active = matches!((spec.get)(settings), SettingValue::Bool(true));
+                let check = CheckButton::builder()
+                    .label(spec.label)
+                    .active(active)
+                    .build();
+                grid_check(&grid, row, &check);
+                widgets.0.insert(spec.key, BoundWidget::Check(check));
+            }
+            SettingKind::Int { min, max, step } => {
+                let spin = SpinButton::with_range(min as f64, max as f64, step.max(1) as f64);
+                if let SettingValue::Int(n) = (spec.get)(settings) {
+                    spin.set_value(n as f64);
+                }
+                grid_field(&grid, row, &format!("{}:", spec.label), &spin);
+                widgets.0.insert(spec.key, BoundWidget::Spin(spin));
+            }
+            SettingKind::Float { min, max, step } => {
+                let spin = SpinButton::with_range(min, max, step);
+                spin.set_digits(decimals_for(step));
+                if let SettingValue::Float(f) = (spec.get)(settings) {
+                    spin.set_value(f);
+                }
+                grid_field(&grid, row, &format!("{}:", spec.label), &spin);
+                widgets.0.insert(spec.key, BoundWidget::Spin(spin));
+            }
+            SettingKind::Enum { values, labels } => {
+                let initial = match (spec.get)(settings) {
+                    SettingValue::Text(t) => values.iter().position(|v| **v == *t).unwrap_or(0),
+                    _ => 0,
+                };
+                let (button, selected) = ContextMenu::select_dropdown(labels, initial, {
+                    let mark_dirty = mark_dirty.clone();
+                    move |_| (mark_dirty.borrow())()
+                });
+                grid_field(&grid, row, &format!("{}:", spec.label), &button);
+                widgets.0.insert(
+                    spec.key,
+                    BoundWidget::Enum {
+                        button,
+                        selected,
+                        values,
+                        labels,
+                    },
+                );
+            }
+            SettingKind::Font => {
+                let font_button = FontDialogButton::builder()
+                    .dialog(&FontDialog::builder().title("Font").build())
+                    .valign(Align::Center)
+                    .build();
+                font_button.set_use_size(true);
+                let family = match (spec.get)(settings) {
+                    SettingValue::Text(t) => t,
+                    _ => Settings::default().font_family,
+                };
+                font_button.set_font_desc(&pango::FontDescription::from_string(&format!(
+                    "{} {}",
+                    family, settings.font_size
+                )));
+                grid_field(&grid, row, &format!("{}:", spec.label), &font_button);
+                widgets.0.insert(spec.key, BoundWidget::Font(font_button));
+            }
+            SettingKind::Text => {
+                let entry = Entry::builder().hexpand(true).build();
+                if let SettingValue::Text(t) = (spec.get)(settings) {
+                    entry.set_text(&t);
+                }
+                grid_field(&grid, row, &format!("{}:", spec.label), &entry);
+                widgets.0.insert(spec.key, BoundWidget::Entry(entry));
+            }
+            SettingKind::FontSize { .. } => {}
+        }
+
+        if !spec.description.is_empty() {
+            page.append(&description_label(spec.description));
+        }
+        if spec.live == LiveApply::Restart {
+            page.append(&description_label("(restart required)"));
+        }
+        row += 1;
+    }
+    page
+}
+
+/// `#rrggbb` for a `gdk::RGBA` (alpha dropped).
+fn hex_from_rgba(c: &gdk::RGBA) -> String {
+    let to = |x: f32| (x.clamp(0.0, 1.0) * 255.0).round() as u8;
+    format!(
+        "#{:02x}{:02x}{:02x}",
+        to(c.red()),
+        to(c.green()),
+        to(c.blue())
+    )
+}
+
+/// The Color Scheme page: a scrollable list of every `css::PALETTE` entry
+/// with a colour picker and a per-row Reset, plus a "Reset all" button.
+/// Edits accumulate in `overrides` (the `palette.<name>` map); a value
+/// equal to the current theme's default is dropped, so Reset really clears
+/// the override rather than pinning the default.
+fn build_color_scheme_page(
+    settings: &Settings,
+    overrides: &Rc<RefCell<BTreeMap<String, String>>>,
+    mark_dirty: &DirtyHook,
+    reset_colors: &DirtyHook,
+) -> ScrolledWindow {
+    let page = settings_page();
+    let theme = settings.theme;
+
+    let reset_all = Button::builder()
+        .label("Reset all colours to theme default")
+        .halign(Align::Start)
+        .build();
+    page.append(&reset_all);
+    page.append(&description_label(
+        "Overrides apply on top of the current theme and are saved as palette.<name> lines.",
+    ));
+
+    let grid = form_grid();
+    grid.set_margin_top(8);
+    page.append(&grid);
+
+    // (picker, default hex) per palette entry — reused by the reset wiring.
+    let mut pickers: Vec<(ColorDialogButton, &'static str, String)> = Vec::new();
+
+    for (i, (name, _, _)) in crate::css::PALETTE.iter().enumerate() {
+        let row = i as i32;
+        let default_hex = crate::css::palette_default(name, theme)
+            .unwrap_or("#000000")
+            .to_string();
+        let current_hex = overrides
+            .borrow()
+            .get(*name)
+            .cloned()
+            .unwrap_or_else(|| default_hex.clone());
+
+        let picker = ColorDialogButton::builder()
+            .dialog(&ColorDialog::builder().with_alpha(false).build())
+            .valign(Align::Center)
+            .build();
+        if let Ok(rgba) = gdk::RGBA::parse(&current_hex) {
+            picker.set_rgba(&rgba);
+        }
+        let reset = Button::builder()
+            .label("Reset")
+            .css_classes(["flat"])
+            .build();
+
+        grid_field(&grid, row, name, &picker);
+        grid.attach(&reset, 2, row, 1, 1);
+
+        // Picker edits -> the overrides map (default value clears it).
+        picker.connect_rgba_notify({
+            let overrides = overrides.clone();
+            let mark_dirty = mark_dirty.clone();
+            let name = *name;
+            let default_hex = default_hex.clone();
+            move |p| {
+                let hex = hex_from_rgba(&p.rgba());
+                {
+                    let mut map = overrides.borrow_mut();
+                    if hex.eq_ignore_ascii_case(&default_hex) {
+                        map.remove(name);
+                    } else {
+                        map.insert(name.to_string(), hex);
+                    }
+                }
+                (mark_dirty.borrow())();
+            }
+        });
+
+        reset.connect_clicked({
+            let picker = picker.clone();
+            let default_hex = default_hex.clone();
+            move |_| {
+                if let Ok(rgba) = gdk::RGBA::parse(&default_hex) {
+                    picker.set_rgba(&rgba); // fires rgba_notify -> map cleared
+                }
+            }
+        });
+
+        pickers.push((picker, name, default_hex));
+    }
+
+    // The full colour reset — shared with the page-level and global
+    // "Reset to defaults" buttons via `reset_colors`.
+    *reset_colors.borrow_mut() = Box::new({
+        let overrides = overrides.clone();
+        let mark_dirty = mark_dirty.clone();
+        let pickers: Vec<(ColorDialogButton, String)> =
+            pickers.into_iter().map(|(p, _, hex)| (p, hex)).collect();
+        move || {
+            overrides.borrow_mut().clear();
+            for (picker, default_hex) in &pickers {
+                if let Ok(rgba) = gdk::RGBA::parse(default_hex) {
+                    picker.set_rgba(&rgba);
+                }
+            }
+            (mark_dirty.borrow())();
+        }
+    });
+    reset_all.connect_clicked({
+        let reset_colors = reset_colors.clone();
+        move |_| (reset_colors.borrow())()
+    });
+
+    ScrolledWindow::builder()
+        .hscrollbar_policy(gtk::PolicyType::Never)
+        .vexpand(true)
+        .child(&page)
+        .build()
+}
+
+/// A small modal that captures the next key chord and writes it onto
+/// `action` in `keymap` (unbinding whatever else held that chord), then
+/// calls `on_done`. Esc cancels.
+fn capture_shortcut(
+    parent: Option<&Window>,
+    action: &'static str,
+    keymap: &Rc<RefCell<Keymap>>,
+    on_done: Rc<dyn Fn()>,
+) {
+    let win = Window::builder()
+        .modal(true)
+        .default_width(320)
+        .title("Press shortcut")
+        .css_classes(["settings-window"])
+        .build();
+    if let Some(p) = parent {
+        win.set_transient_for(Some(p));
+    }
+    let body = GtkBox::builder()
+        .orientation(Orientation::Vertical)
+        .spacing(6)
+        .margin_top(20)
+        .margin_bottom(20)
+        .margin_start(24)
+        .margin_end(24)
+        .build();
+    body.append(
+        &Label::builder()
+            .label("Press the new shortcut")
+            .halign(Align::Start)
+            .build(),
+    );
+    let hint = Label::builder()
+        .label("Esc to cancel")
+        .halign(Align::Start)
+        .css_classes(["dim-label", "caption"])
+        .build();
+    body.append(&hint);
+    win.set_child(Some(&body));
+
+    let key = gtk::EventControllerKey::new();
+    key.connect_key_pressed({
+        let win = win.clone();
+        let keymap = keymap.clone();
+        let hint = hint.clone();
+        move |_, keyval, _, state| {
+            if keyval == gdk::Key::Escape {
+                win.close();
+                return gtk::glib::Propagation::Stop;
+            }
+            if keymap::is_modifier(keyval) {
+                return gtk::glib::Propagation::Proceed;
+            }
+            let Some(accel) = keymap::accel_from(keyval, state) else {
+                hint.set_text("Add ⌘ / Ctrl / Alt — Esc to cancel");
+                return gtk::glib::Propagation::Stop;
+            };
+            {
+                let mut km = keymap.borrow_mut();
+                if let Some(other) = km.action_for_accel(&accel, action) {
+                    km.set(other, Some(keymap::UNBOUND));
+                }
+                km.set(action, Some(&accel));
+            }
+            on_done();
+            win.close();
+            gtk::glib::Propagation::Stop
+        }
+    });
+    win.add_controller(key);
+    win.present();
+}
+
+/// The Keymap page: every `keymap::ACTIONS` entry grouped by area, each row
+/// showing its current binding with Change / Reset. Edits accumulate in
+/// `keymap`; `touched` gates the dialog's Apply, `refresh` (returned via
+/// `reset_slot`) re-labels every row.
+fn build_keymap_page(
+    keymap: &Rc<RefCell<Keymap>>,
+    touched: &Rc<Cell<bool>>,
+    mark_dirty: &DirtyHook,
+    reset_slot: &DirtyHook,
+) -> ScrolledWindow {
+    let page = settings_page();
+    page.append(&description_label(
+        "Rebind an action's shortcut with Change. A chord already in use is taken from its old action.",
+    ));
+
+    let mut group: Option<&str> = None;
+    let mut grid = form_grid();
+    let mut row = 0;
+    let mut binding_labels: Vec<(Label, &'static str)> = Vec::new();
+
+    for spec in keymap::ACTIONS {
+        if group != Some(spec.group) {
+            group = Some(spec.group);
+            page.append(&section_header(spec.group));
+            grid = form_grid();
+            page.append(&grid);
+            row = 0;
+        }
+
+        let accel_label = Label::builder()
+            .label(keymap::pretty(&keymap.borrow().accel(spec.action)))
+            .halign(Align::Start)
+            .width_request(120)
+            .css_classes(["settings-field-label"])
+            .build();
+        let change = Button::builder()
+            .label("Change")
+            .css_classes(["flat"])
+            .build();
+        let reset = Button::builder()
+            .label("Reset")
+            .css_classes(["flat"])
+            .build();
+
+        let controls = GtkBox::new(Orientation::Horizontal, 6);
+        controls.append(&accel_label);
+        controls.append(&change);
+        controls.append(&reset);
+        grid_field(&grid, row, spec.label, &controls);
+
+        binding_labels.push((accel_label.clone(), spec.action));
+        row += 1;
+
+        let action = spec.action;
+        change.connect_clicked({
+            let keymap = keymap.clone();
+            let touched = touched.clone();
+            let mark_dirty = mark_dirty.clone();
+            let reset_slot = reset_slot.clone();
+            move |btn| {
+                let parent = btn.root().and_downcast::<Window>();
+                let touched = touched.clone();
+                let mark_dirty = mark_dirty.clone();
+                let reset_slot = reset_slot.clone();
+                capture_shortcut(
+                    parent.as_ref(),
+                    action,
+                    &keymap,
+                    Rc::new(move || {
+                        touched.set(true);
+                        (reset_slot.borrow())(); // re-labels every row
+                        (mark_dirty.borrow())();
+                    }),
+                );
+            }
+        });
+        reset.connect_clicked({
+            let keymap = keymap.clone();
+            let touched = touched.clone();
+            let mark_dirty = mark_dirty.clone();
+            let reset_slot = reset_slot.clone();
+            move |_| {
+                keymap.borrow_mut().set(action, None);
+                touched.set(true);
+                (reset_slot.borrow())();
+                (mark_dirty.borrow())();
+            }
+        });
+    }
+
+    // `reset_slot` re-labels every row from the current keymap — also the
+    // per-page / global "Reset to defaults" hook, which first clears the
+    // whole keymap.
+    *reset_slot.borrow_mut() = Box::new({
+        let keymap = keymap.clone();
+        move || {
+            let km = keymap.borrow();
+            for (label, action) in &binding_labels {
+                label.set_text(&keymap::pretty(&km.accel(action)));
+            }
+        }
+    });
+
+    ScrolledWindow::builder()
+        .hscrollbar_policy(gtk::PolicyType::Never)
+        .vexpand(true)
+        .child(&page)
         .build()
 }
 
@@ -115,7 +851,7 @@ pub fn show_settings_dialog(app: &Application, controller: Option<Rc<WorkspaceCo
     let root = GtkBox::new(Orientation::Vertical, 0);
 
     // ==========================================
-    // Sidebar: search + category list
+    // Sidebar: search + collapsible category tree
     // ==========================================
     let sidebar = GtkBox::builder()
         .orientation(Orientation::Vertical)
@@ -136,25 +872,11 @@ pub fn show_settings_dialog(app: &Application, controller: Option<Rc<WorkspaceCo
         .css_classes(vec!["settings-category-list"])
         .build();
 
-    for (_, label, _) in CATEGORIES {
-        let row = ListBoxRow::new();
-        let row_label = Label::builder()
-            .label(label)
-            .halign(Align::Start)
-            .margin_top(8)
-            .margin_bottom(8)
-            .margin_start(12)
-            .margin_end(12)
-            .build();
-        row.set_child(Some(&row_label));
-        category_list.append(&row);
-    }
-
     sidebar.append(&search_entry);
     sidebar.append(&category_list);
 
     // ==========================================
-    // Content: header + the selected category's page
+    // Content: breadcrumb header + one Stack page per category
     // ==========================================
     let content = GtkBox::builder()
         .orientation(Orientation::Vertical)
@@ -162,7 +884,6 @@ pub fn show_settings_dialog(app: &Application, controller: Option<Rc<WorkspaceCo
         .css_classes(vec!["settings-content"])
         .build();
 
-    // Breadcrumb-style header ("Appearance & Behavior › Appearance").
     let header_label = Label::builder()
         .halign(Align::Start)
         .margin_top(14)
@@ -176,152 +897,43 @@ pub fn show_settings_dialog(app: &Application, controller: Option<Rc<WorkspaceCo
     let stack = Stack::new();
     stack.set_vexpand(true);
 
-    // ==========================================
-    // Appearance: theme + app-wide font (the font dialog button covers both
-    // family and size in one native picker)
-    // ==========================================
-    // Late-bound "widgets changed" hook — the dropdowns are built before
-    // `update_apply_sensitivity` exists, so their `on_change` calls through
-    // this slot, which is filled in once that closure is defined.
-    let mark_dirty: Rc<RefCell<Box<dyn Fn()>>> = Rc::new(RefCell::new(Box::new(|| {})));
+    // Late-bound "widgets changed" hook — the value dropdowns are built
+    // before `update_apply_sensitivity` exists, so their `on_change` calls
+    // through this slot, filled in once that closure is defined.
+    let mark_dirty: DirtyHook = Rc::new(RefCell::new(Box::new(|| {})));
 
-    let (theme_dropdown, theme_selected) = ContextMenu::select_dropdown(
-        &["Dark", "Light"],
-        if settings.theme == Theme::Dark { 0 } else { 1 },
-        {
-            let mark_dirty = mark_dirty.clone();
-            move |_| (mark_dirty.borrow())()
-        },
-    );
+    // Editor color-scheme overrides, edited on the Color Scheme page and
+    // merged back into `Settings` by `read_current`.
+    let overrides: Rc<RefCell<BTreeMap<String, String>>> =
+        Rc::new(RefCell::new(settings.palette_overrides.clone()));
 
-    // Icon set: "Color" is the JetBrains NetIcons colour glyphs; "Monochrome"
-    // is the flat grey set, which then follows the light/dark theme.
-    let (icon_theme_dropdown, icon_theme_selected) = ContextMenu::select_dropdown(
-        &["Color", "Monochrome"],
-        if settings.icon_theme == IconTheme::Color {
-            0
-        } else {
-            1
-        },
-        {
-            let mark_dirty = mark_dirty.clone();
-            move |_| (mark_dirty.borrow())()
-        },
-    );
+    // Per-page "Reset this page" clicks route through this slot; the full
+    // colour-picker reset lives in `reset_colors`, and re-labelling the
+    // Keymap rows in `reset_keymap`. All filled in below.
+    let reset_page: ToggleHook = Rc::new(RefCell::new(Box::new(|_| {})));
+    let reset_colors: DirtyHook = Rc::new(RefCell::new(Box::new(|| {})));
+    let reset_keymap: DirtyHook = Rc::new(RefCell::new(Box::new(|| {})));
 
-    let font_button = FontDialogButton::builder()
-        .dialog(&FontDialog::builder().title("Font").build())
-        .valign(Align::Center)
-        .build();
-    font_button.set_use_size(true);
-    font_button.set_font_desc(&pango::FontDescription::from_string(&format!(
-        "{} {}",
-        settings.font_family, settings.font_size
-    )));
+    // Editable copy of the keymap; `keymap_touched` gates Apply since the
+    // keymap lives outside `Settings` and the dirty-check.
+    let keymap_edits: Rc<RefCell<Keymap>> = Rc::new(RefCell::new(Keymap::load()));
+    let keymap_touched = Rc::new(Cell::new(false));
 
-    let appearance_page = settings_page();
-    let appearance_grid = form_grid();
-    grid_field(&appearance_grid, 0, "Theme:", &theme_dropdown);
-    grid_field(&appearance_grid, 1, "Icons:", &icon_theme_dropdown);
-    grid_field(&appearance_grid, 2, "Editor font:", &font_button);
-    appearance_page.append(&appearance_grid);
-    stack.add_named(&appearance_page, Some("appearance"));
-
-    let gutter_toggle = CheckButton::builder()
-        .label("Show syllable count in the gutter")
-        .active(settings.show_syllable_gutter)
-        .build();
-    let vcs_gutter_toggle = CheckButton::builder()
-        .label("Show VCS change markers in the gutter")
-        .active(settings.show_vcs_gutter)
-        .build();
-    let auto_indent_toggle = CheckButton::builder()
-        .label("Auto-indent new lines")
-        .active(settings.auto_indent)
-        .build();
-    let tab_width_spin = SpinButton::with_range(1.0, 8.0, 1.0);
-    tab_width_spin.set_value(settings.tab_width as f64);
-
-    let editor_page = settings_page();
-    editor_page.append(&section_header("Gutter"));
-    let gutter_grid = form_grid();
-    grid_check(&gutter_grid, 0, &gutter_toggle);
-    grid_check(&gutter_grid, 1, &vcs_gutter_toggle);
-    editor_page.append(&gutter_grid);
-    editor_page.append(&section_header("Indentation"));
-    let indent_grid = form_grid();
-    grid_check(&indent_grid, 0, &auto_indent_toggle);
-    grid_field(&indent_grid, 1, "Tab width:", &tab_width_spin);
-    editor_page.append(&indent_grid);
-    stack.add_named(&editor_page, Some("editor"));
-
-    let rhyme_toggle = CheckButton::builder()
-        .label("Highlight rhyming syllables")
-        .active(settings.rhyme_highlighting)
-        .build();
-    let rhyme_stop_at_blank_line_toggle = CheckButton::builder()
-        .label("Don't match rhymes across a blank line")
-        .active(settings.rhyme_stop_at_blank_line)
-        .build();
-    let rhyme_page = settings_page();
-    let rhyme_grid = form_grid();
-    grid_check(&rhyme_grid, 0, &rhyme_toggle);
-    grid_check(&rhyme_grid, 1, &rhyme_stop_at_blank_line_toggle);
-    rhyme_page.append(&rhyme_grid);
-    rhyme_page.append(&description_label(
-        "Colors the background of syllables that rhyme with another word elsewhere in the document.",
-    ));
-    stack.add_named(&rhyme_page, Some("rhyme"));
-
-    let completion_toggle = CheckButton::builder()
-        .label("Enable dictionary word completion")
-        .active(settings.word_completion)
-        .build();
-    let completion_page = settings_page();
-    let completion_grid = form_grid();
-    grid_check(&completion_grid, 0, &completion_toggle);
-    completion_page.append(&completion_grid);
-    completion_page.append(&description_label(
-        "Suggests words from the bundled dictionary as you type. Tab or Enter accepts a suggestion.",
-    ));
-    stack.add_named(&completion_page, Some("completion"));
-
-    let git_toggle = CheckButton::builder()
-        .label("Automatically stage changes when saving")
-        .active(settings.git_autostage)
-        .build();
-    let git_page = settings_page();
-    let git_grid = form_grid();
-    grid_check(&git_grid, 0, &git_toggle);
-    git_page.append(&git_grid);
-    stack.add_named(&git_page, Some("git"));
-
-    // External text sources (Apple Notes today).
-    let (notes_cache_dropdown, notes_cache_selected) = ContextMenu::select_dropdown(
-        &["This workspace", "All workspaces"],
-        if settings.notes_cache_scope == NotesCacheScope::User {
-            1
-        } else {
-            0
-        },
-        {
-            let mark_dirty = mark_dirty.clone();
-            move |_| (mark_dirty.borrow())()
-        },
-    );
-    let sources_page = settings_page();
-    let sources_grid = form_grid();
-    grid_field(
-        &sources_grid,
-        0,
-        "Apple Notes cache:",
-        &notes_cache_dropdown,
-    );
-    sources_page.append(&sources_grid);
-    sources_page.append(&description_label(
-        "Where the Apple Notes snapshot is stored. \"All workspaces\" keeps one shared copy under your user config dir instead of per-project .rhymr/.",
-    ));
-    stack.add_named(&sources_page, Some("sources"));
+    let mut widgets = SettingWidgets::default();
+    for n in CATEGORY_TREE {
+        let page: gtk::Widget = match n.id {
+            CategoryId::ColorScheme => {
+                build_color_scheme_page(&settings, &overrides, &mark_dirty, &reset_colors).upcast()
+            }
+            CategoryId::Keymap => {
+                build_keymap_page(&keymap_edits, &keymap_touched, &mark_dirty, &reset_keymap)
+                    .upcast()
+            }
+            _ => build_page(n.id, &settings, &mut widgets, &mark_dirty, &reset_page).upcast(),
+        };
+        stack.add_named(&page, Some(stack_name(n.id)));
+    }
+    let widgets = Rc::new(widgets);
 
     content.append(&stack);
 
@@ -331,15 +943,20 @@ pub fn show_settings_dialog(app: &Application, controller: Option<Rc<WorkspaceCo
     main_split.append(&content);
 
     // ==========================================
-    // Bottom bar: Cancel / Apply / OK, right-aligned
+    // Bottom bar: Reset all (left) · Cancel / Apply / OK (right)
     // ==========================================
     let footer = GtkBox::new(Orientation::Horizontal, 10);
-    footer.set_halign(Align::End);
     footer.set_margin_top(12);
     footer.set_margin_bottom(12);
     footer.set_margin_start(16);
     footer.set_margin_end(16);
 
+    let reset_all_btn = Button::builder()
+        .label("Reset all to defaults")
+        .css_classes(["flat"])
+        .build();
+    let footer_spacer = GtkBox::new(Orientation::Horizontal, 0);
+    footer_spacer.set_hexpand(true);
     let cancel_btn = Button::builder().label("Cancel").build();
     let apply_btn = Button::builder().label("Apply").build();
     let ok_btn = Button::builder()
@@ -347,6 +964,8 @@ pub fn show_settings_dialog(app: &Application, controller: Option<Rc<WorkspaceCo
         .css_classes(vec!["suggested-action"])
         .build();
 
+    footer.append(&reset_all_btn);
+    footer.append(&footer_spacer);
     footer.append(&cancel_btn);
     footer.append(&apply_btn);
     footer.append(&ok_btn);
@@ -359,139 +978,203 @@ pub fn show_settings_dialog(app: &Application, controller: Option<Rc<WorkspaceCo
     // ==========================================
     // Wiring
     // ==========================================
-    let stack_for_select = stack.clone();
-    let header_for_select = header_label.clone();
-    category_list.connect_row_selected(move |_, row| {
-        if let Some(row) = row {
-            let (name, label, parent) = CATEGORIES[row.index() as usize];
-            stack_for_select.set_visible_child_name(name);
-            let header = if parent.is_empty() {
-                label.to_string()
-            } else {
-                format!("{parent}  \u{203a}  {label}")
-            };
-            header_for_select.set_text(&header);
-        }
-    });
-    category_list.select_row(category_list.row_at_index(0).as_ref());
+    let collapsed: Rc<RefCell<HashSet<CategoryId>>> = Rc::new(RefCell::new(HashSet::new()));
+    let visible_cats: Rc<RefCell<Vec<CategoryId>>> = Rc::new(RefCell::new(Vec::new()));
+    let selected_cat = Rc::new(Cell::new(CATEGORY_TREE[0].id));
 
-    let category_list_for_search = category_list.clone();
-    search_entry.connect_search_changed(move |entry| {
-        let query = entry.text().to_lowercase();
-        let mut index = 0;
-        while let Some(row) = category_list_for_search.row_at_index(index) {
-            let (_, label, _) = CATEGORIES[index as usize];
-            row.set_visible(query.is_empty() || label.to_lowercase().contains(&query));
-            index += 1;
+    // Chevron clicks call this through a slot (it needs `rebuild`, which in
+    // turn needs it — same cycle as `mark_dirty`).
+    let toggle_slot: ToggleHook = Rc::new(RefCell::new(Box::new(|_| {})));
+    let toggle: Rc<dyn Fn(CategoryId)> = Rc::new({
+        let toggle_slot = toggle_slot.clone();
+        move |id| (toggle_slot.borrow())(id)
+    });
+
+    let rebuild: Rc<dyn Fn()> = Rc::new({
+        let list = category_list.clone();
+        let collapsed = collapsed.clone();
+        let search_entry = search_entry.clone();
+        let toggle = toggle.clone();
+        let visible_cats = visible_cats.clone();
+        let selected_cat = selected_cat.clone();
+        move || {
+            let query = search_entry.text().to_lowercase();
+            let shown = build_category_rows(&list, &collapsed.borrow(), &query, &toggle);
+            let want = shown
+                .iter()
+                .position(|c| *c == selected_cat.get())
+                .unwrap_or(0);
+            visible_cats.replace(shown);
+            list.select_row(list.row_at_index(want as i32).as_ref());
         }
     });
+
+    *toggle_slot.borrow_mut() = Box::new({
+        let collapsed = collapsed.clone();
+        let rebuild = rebuild.clone();
+        move |id| {
+            {
+                let mut c = collapsed.borrow_mut();
+                if !c.remove(&id) {
+                    c.insert(id);
+                }
+            }
+            rebuild();
+        }
+    });
+
+    category_list.connect_row_selected({
+        let stack = stack.clone();
+        let header_label = header_label.clone();
+        let visible_cats = visible_cats.clone();
+        let selected_cat = selected_cat.clone();
+        move |_, row| {
+            let Some(row) = row else { return };
+            let idx = row.index();
+            if idx < 0 {
+                return;
+            }
+            let Some(&id) = visible_cats.borrow().get(idx as usize) else {
+                return;
+            };
+            selected_cat.set(id);
+            stack.set_visible_child_name(stack_name(id));
+            header_label.set_text(&breadcrumb(id));
+        }
+    });
+
+    search_entry.connect_search_changed({
+        let rebuild = rebuild.clone();
+        move |_| rebuild()
+    });
+
+    rebuild();
 
     let dialog_for_cancel = dialog.clone();
     cancel_btn.connect_clicked(move |_| {
         dialog_for_cancel.close();
     });
 
-    // Reads the dialog's current widget state into a `Settings` value —
-    // shared by the dirty-check below and by the actual save, so there's
-    // one place that knows how to turn widgets into a `Settings`.
+    // What's currently saved on disk — Apply is enabled only once a widget
+    // diverges from this, and it's refreshed after each save. Seeding
+    // `read_current` from a clone of it also carries `Settings`' private
+    // `unknown` passthrough (keys a newer build wrote) through the
+    // dirty-check and the save.
+    let baseline = Rc::new(RefCell::new(settings));
+
+    // One place that turns the dialog's widgets back into a `Settings`.
     let read_current: Rc<dyn Fn() -> Settings> = Rc::new({
-        let gutter_toggle = gutter_toggle.clone();
-        let vcs_gutter_toggle = vcs_gutter_toggle.clone();
-        let auto_indent_toggle = auto_indent_toggle.clone();
-        let tab_width_spin = tab_width_spin.clone();
-        let rhyme_toggle = rhyme_toggle.clone();
-        let rhyme_stop_at_blank_line_toggle = rhyme_stop_at_blank_line_toggle.clone();
-        let completion_toggle = completion_toggle.clone();
-        let git_toggle = git_toggle.clone();
-        let theme_selected = theme_selected.clone();
-        let icon_theme_selected = icon_theme_selected.clone();
-        let notes_cache_selected = notes_cache_selected.clone();
-        let font_button = font_button.clone();
+        let widgets = widgets.clone();
+        let baseline = baseline.clone();
+        let overrides = overrides.clone();
         move || {
-            let font_desc = font_button.font_desc().unwrap_or_else(|| {
-                pango::FontDescription::from_string(&Settings::default().font_family)
-            });
-            let font_family = font_desc
-                .family()
-                .map(|f| f.to_string())
-                .unwrap_or_else(|| Settings::default().font_family);
-            let font_size = if font_desc.size() > 0 {
-                (font_desc.size() / pango::SCALE).max(6) as u32
-            } else {
-                Settings::default().font_size
-            };
-            Settings {
-                show_syllable_gutter: gutter_toggle.is_active(),
-                show_vcs_gutter: vcs_gutter_toggle.is_active(),
-                rhyme_highlighting: rhyme_toggle.is_active(),
-                rhyme_stop_at_blank_line: rhyme_stop_at_blank_line_toggle.is_active(),
-                word_completion: completion_toggle.is_active(),
-                auto_indent: auto_indent_toggle.is_active(),
-                tab_width: tab_width_spin.value() as u32,
-                git_autostage: git_toggle.is_active(),
-                notes_cache_scope: if notes_cache_selected.get() == 1 {
-                    NotesCacheScope::User
-                } else {
-                    NotesCacheScope::Workspace
-                },
-                theme: if theme_selected.get() == 0 {
-                    Theme::Dark
-                } else {
-                    Theme::Light
-                },
-                icon_theme: if icon_theme_selected.get() == 0 {
-                    IconTheme::Color
-                } else {
-                    IconTheme::Monochrome
-                },
-                font_family,
-                font_size,
+            let mut current = baseline.borrow().clone();
+            for spec in SPECS {
+                if let Some(value) = widgets.value(spec.key, spec.kind) {
+                    (spec.set)(&mut current, value);
+                }
             }
+            current.palette_overrides = overrides.borrow().clone();
+            current
         }
     });
-
-    // What's currently saved on disk — Apply is only enabled once the
-    // widgets diverge from this, and it's refreshed after every save so
-    // Apply goes back to disabled until something changes again.
-    let baseline = Rc::new(RefCell::new(settings));
 
     apply_btn.set_sensitive(false);
     let update_apply_sensitivity: Rc<dyn Fn()> = Rc::new({
         let apply_btn = apply_btn.clone();
         let read_current = read_current.clone();
         let baseline = baseline.clone();
+        let keymap_touched = keymap_touched.clone();
         move || {
-            apply_btn.set_sensitive(read_current() != *baseline.borrow());
+            apply_btn.set_sensitive(keymap_touched.get() || read_current() != *baseline.borrow());
         }
     });
 
-    for toggle in [
-        &gutter_toggle,
-        &vcs_gutter_toggle,
-        &auto_indent_toggle,
-        &rhyme_toggle,
-        &rhyme_stop_at_blank_line_toggle,
-        &completion_toggle,
-        &git_toggle,
-    ] {
+    for w in widgets.0.values() {
         let f = update_apply_sensitivity.clone();
-        toggle.connect_toggled(move |_| f());
+        match w {
+            BoundWidget::Check(cb) => {
+                cb.connect_toggled(move |_| f());
+            }
+            BoundWidget::Spin(sb) => {
+                sb.connect_value_changed(move |_| f());
+            }
+            BoundWidget::Font(fb) => {
+                fb.connect_font_desc_notify(move |_| f());
+            }
+            BoundWidget::Entry(e) => {
+                e.connect_changed(move |_| f());
+            }
+            // Value dropdowns route through `mark_dirty` (set below).
+            BoundWidget::Enum { .. } => {}
+        }
     }
-    let f = update_apply_sensitivity.clone();
-    tab_width_spin.connect_value_changed(move |_| f());
-    let f = update_apply_sensitivity.clone();
-    font_button.connect_font_desc_notify(move |_| f());
-    // Now that `update_apply_sensitivity` exists, point the dropdowns'
-    // late-bound change hook at it.
     *mark_dirty.borrow_mut() = Box::new({
         let f = update_apply_sensitivity.clone();
         move || f()
+    });
+
+    // Reset every widget in one category (or all categories) to its spec
+    // default — the default `SettingValue` is just `(spec.get)` on a fresh
+    // `Settings::default()`.
+    let reset_specs = {
+        let widgets = widgets.clone();
+        Rc::new(move |only: Option<CategoryId>| {
+            let defaults = Settings::default();
+            for spec in SPECS
+                .iter()
+                .filter(|s| only.is_none_or(|c| s.category == c))
+            {
+                widgets.set_value(spec.key, spec.kind, &(spec.get)(&defaults));
+            }
+        })
+    };
+    // Clear the whole keymap back to defaults, then re-label its rows.
+    let reset_keymap_to_defaults = {
+        let keymap_edits = keymap_edits.clone();
+        let keymap_touched = keymap_touched.clone();
+        let reset_keymap = reset_keymap.clone();
+        Rc::new(move || {
+            *keymap_edits.borrow_mut() = Keymap::default();
+            keymap_touched.set(true);
+            (reset_keymap.borrow())();
+        })
+    };
+
+    *reset_page.borrow_mut() = Box::new({
+        let reset_specs = reset_specs.clone();
+        let reset_colors = reset_colors.clone();
+        let reset_keymap_to_defaults = reset_keymap_to_defaults.clone();
+        let update = update_apply_sensitivity.clone();
+        move |cat| {
+            match cat {
+                CategoryId::ColorScheme => (reset_colors.borrow())(),
+                CategoryId::Keymap => reset_keymap_to_defaults(),
+                _ => reset_specs(Some(cat)),
+            }
+            update();
+        }
+    });
+    reset_all_btn.connect_clicked({
+        let reset_specs = reset_specs.clone();
+        let reset_colors = reset_colors.clone();
+        let reset_keymap_to_defaults = reset_keymap_to_defaults.clone();
+        let update = update_apply_sensitivity.clone();
+        move |_| {
+            reset_specs(None);
+            (reset_colors.borrow())();
+            reset_keymap_to_defaults();
+            update();
+        }
     });
 
     let apply: Rc<dyn Fn()> = Rc::new({
         let read_current = read_current.clone();
         let baseline = baseline.clone();
         let update_apply_sensitivity = update_apply_sensitivity.clone();
+        let keymap_edits = keymap_edits.clone();
+        let keymap_touched = keymap_touched.clone();
+        let app = app.clone();
         move || {
             let current = read_current();
             current.save();
@@ -504,6 +1187,12 @@ pub fn show_settings_dialog(app: &Application, controller: Option<Rc<WorkspaceCo
             if let Some(controller) = &controller {
                 controller.apply_settings(&current);
             }
+            {
+                let keymap = keymap_edits.borrow();
+                keymap.save();
+                keymap.apply(&app);
+            }
+            keymap_touched.set(false);
             baseline.replace(current);
             update_apply_sensitivity();
         }

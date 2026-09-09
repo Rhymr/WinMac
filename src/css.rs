@@ -25,7 +25,8 @@ const CSS_FILES: [&str; 14] = [
 /// The single source of truth for both palettes — `theme_css()` below is
 /// the only place that reads this, so base.scss carries no hardcoded
 /// `:root` colors of its own to drift out of sync with a second copy here.
-const PALETTE: &[(&str, &str, &str)] = &[
+/// The Color Scheme settings page builds a picker per entry.
+pub(crate) const PALETTE: &[(&str, &str, &str)] = &[
     // Dark column = classic Darcula; light column = classic "IntelliJ Light".
     ("bg-darkest", "#2b2b2b", "#ffffff"),
     ("bg-dark", "#3c3f41", "#ececec"),
@@ -48,9 +49,11 @@ const PALETTE: &[(&str, &str, &str)] = &[
     ("text-modified", "#d19a66", "#a85f1d"),
     ("text-new", "#6fbf73", "#1f8a3d"),
     ("text-renamed", "#61afef", "#1568c9"),
-    // Git-ignored entries and read-only external-source trees — the muted
-    // goldenrod JetBrains uses for ignored / excluded nodes.
-    ("text-ignored", "#9e8b63", "#8a7a4a"),
+    // Git-ignored entries and read-only external-source trees — instead of
+    // tinting the label text, the row sits on this muted goldenrod so the
+    // name keeps its default colour and the "ignored / read-only" state
+    // reads as a highlight.
+    ("bg-ignored", "#544628", "#ede0b3"),
     // VCS gutter change bars (JetBrains convention: green add / blue modify).
     ("vcs-added", "#59a869", "#4a8f3c"),
     ("vcs-modified", "#4a88c7", "#3573b8"),
@@ -78,23 +81,15 @@ const PALETTE: &[(&str, &str, &str)] = &[
     ("destructive-text", "#e57474", "#b3261e"),
 ];
 
-/// Theme-invariant spacing/radius/motion tokens, applied consistently
-/// across every custom widget for a cohesive, modern feel.
+/// Theme-invariant tokens that don't depend on any setting. The
+/// setting-driven ones (`--radius-*`, `--transition-*`, `--ui-font-size`)
+/// are emitted by `theme_css` instead, which is appended last so it wins.
 const TOKENS: &str = r#":root {
-    /* Boxy classic look — everything is square. `--radius-*` are kept as
-       named hooks (rather than deleting them from every stylesheet) but all
-       resolve to 0. */
-    --radius-sm: 0;
-    --radius-md: 0;
-    --radius-lg: 0;
-    --transition-fast: 60ms linear;
-    --transition-normal: 90ms linear;
     /* Chrome (everything outside the editor) uses the OS UI font, classic-IDE
        style; the editor + its gutter keep the monospace `--app-font-*` set
        from Settings (see editor.scss). Pango picks the first installed
        family from the list; unknown names are skipped. */
     --ui-font-family: "SF Pro Text", "Helvetica Neue", "Segoe UI", Cantarell, "Ubuntu", "Noto Sans", sans-serif;
-    --ui-font-size: 12px;
 }
 "#;
 
@@ -107,7 +102,7 @@ pub fn compile_sass() -> Result<(), Box<dyn std::error::Error>> {
         let scss_path = css_file.replace("{1}", "scss");
         let css_path = css_file.replace("{1}", "css");
 
-        println!("Compiling {scss_path}");
+        log::debug!("compiling {scss_path}");
         let css_output = grass::from_path(&scss_path, &Options::default())?;
         fs::write(css_path, css_output)?;
     }
@@ -115,27 +110,49 @@ pub fn compile_sass() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
+/// The themed default for palette entry `name`, with no user override
+/// applied — the Color Scheme settings page seeds each picker from this.
+pub(crate) fn palette_default(name: &str, theme: Theme) -> Option<&'static str> {
+    PALETTE
+        .iter()
+        .find(|(n, ..)| *n == name)
+        .map(|(_, dark, light)| if theme == Theme::Dark { *dark } else { *light })
+}
+
 /// The runtime-generated `:root { ... }` block: theme-invariant tokens,
-/// the active theme's palette, and the current font settings. Appended
-/// after the compiled SCSS so it's the single place driving both the
-/// custom-widget palette and (via matching `--accent-*`/`--destructive-*`
-/// names) libadwaita's own chrome — see `sync_style_manager` for the other
-/// half of theme switching, which points `AdwStyleManager` at the same
-/// `Settings.theme`.
+/// the active theme's palette (with any `Settings::palette_overrides`
+/// applied), and the current font settings. Appended after the compiled
+/// SCSS so it's the single place driving both the custom-widget palette and
+/// (via matching `--accent-*`/`--destructive-*` names) libadwaita's own
+/// chrome — see `sync_style_manager` for the other half of theme switching,
+/// which points `AdwStyleManager` at the same `Settings.theme`.
 fn theme_css(settings: &Settings) -> String {
     let is_dark = settings.theme == Theme::Dark;
+    // A user color-scheme override wins over the themed default, for both
+    // our own `--name` vars and the libadwaita mirror below.
+    let color = |name: &str, themed: &str| -> String {
+        settings
+            .palette_overrides
+            .get(name)
+            .cloned()
+            .unwrap_or_else(|| themed.to_string())
+    };
+
     let mut vars = String::new();
     for (name, dark, light) in PALETTE {
-        let value = if is_dark { dark } else { light };
-        vars.push_str(&format!("    --{name}: {value};\n"));
+        let themed = if is_dark { dark } else { light };
+        vars.push_str(&format!("    --{name}: {};\n", color(name, themed)));
     }
 
     // Mirror the accent/destructive roles onto libadwaita's own named
     // colors so native Adwaita chrome (the header bar, its buttons) reads
     // as part of the same system rather than stock GNOME blue/red.
-    let selection_bg = if is_dark { "#2f65ca" } else { "#2675bf" };
-    let selection_hover = if is_dark { "#365880" } else { "#4080c0" };
-    let destructive = if is_dark { "#c75450" } else { "#c0392b" };
+    let selection_bg = color("selection-bg", if is_dark { "#2f65ca" } else { "#2675bf" });
+    let selection_hover = color(
+        "selection-hover",
+        if is_dark { "#365880" } else { "#4080c0" },
+    );
+    let destructive = color("destructive", if is_dark { "#c75450" } else { "#c0392b" });
     vars.push_str(&format!(
         "    --accent-bg-color: {selection_bg};\n    --accent-color: {selection_hover};\n    --accent-fg-color: #ffffff;\n"
     ));
@@ -151,6 +168,25 @@ fn theme_css(settings: &Settings) -> String {
     vars.push_str(&format!(
         "    --app-font-family: \"{font_family}\";\n    --app-font-size: {}pt;\n",
         settings.font_size
+    ));
+
+    // Setting-driven chrome tokens (Settings → Appearance). `--radius-*` are
+    // kept as named hooks even at 0 so the stylesheets don't need editing.
+    vars.push_str(&format!(
+        "    --ui-font-size: {}px;\n",
+        settings.ui_font_size
+    ));
+    let radius = settings.corner_radius;
+    vars.push_str(&format!(
+        "    --radius-sm: {radius}px;\n    --radius-md: {radius}px;\n    --radius-lg: {radius}px;\n"
+    ));
+    let (fast, normal) = if settings.animations_enabled {
+        ("60ms linear", "90ms linear")
+    } else {
+        ("0s", "0s")
+    };
+    vars.push_str(&format!(
+        "    --transition-fast: {fast};\n    --transition-normal: {normal};\n"
     ));
 
     format!(":root {{\n{vars}}}\n")
@@ -181,7 +217,7 @@ fn build_css(settings: &Settings) -> String {
                 combined_css.push_str(css);
                 combined_css.push('\n');
             }
-            Err(err) => eprintln!("Failed to compile {scss_path}: {err}"),
+            Err(err) => log::error!("failed to compile {scss_path}: {err}"),
         }
     }
 

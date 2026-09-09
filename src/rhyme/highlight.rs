@@ -1,11 +1,12 @@
 use super::score::{Syllable, Thresholds, find_rhymes, syllables_from_pronunciation};
+use crate::setting::Theme;
 use cmudict_fast::{Cmudict, Symbol};
 use gtk::TextTag;
 use gtk::prelude::*;
 use hypher::Lang;
 use rphonetic::{DoubleMetaphone, Encoder};
-use sourceview5::Buffer as SourceBuffer;
-use std::cell::Cell;
+use sourceview5::{Buffer as SourceBuffer, View as SourceView};
+use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 use std::str::FromStr;
@@ -17,24 +18,104 @@ use std::sync::OnceLock;
 /// "current and previous lines" window.
 const LINE_WINDOW: usize = 3;
 
-/// How long to wait after the last keystroke before recomputing rhyme
-/// groups — mirrors the autosave debounce in `editor/mod.rs`.
-const RHYME_DEBOUNCE: std::time::Duration = std::time::Duration::from_millis(400);
+/// How long to wait after scrolling stops before repainting rhyme tags for
+/// the new viewport. No recompute happens here — the groups are already
+/// known — so this only needs to be short enough to feel instant.
+const RHYME_SCROLL_DEBOUNCE: std::time::Duration = std::time::Duration::from_millis(120);
+
+/// Extra lines painted above and below the visible range, so ordinary
+/// short scrolls reveal already-coloured text instead of waiting on
+/// [`RHYME_SCROLL_DEBOUNCE`]. Only the paint is bounded — grouping is always
+/// whole-document, so colours and the legend never depend on what's
+/// on-screen.
+const PAINT_MARGIN_LINES: i32 = 64;
 
 const CMUDICT_TXT: &str = include_str!("../../assets/dictionary/cmudict.dict");
 
-/// Background colors cycled across rhyme groups, in the order groups first
-/// appear in the document. Darker/more saturated than a foreground palette
-/// would be, so the editor's light text (see `assets/styles/rhymr.xml`)
-/// stays readable sitting on top of them. 24 evenly-spaced hues so real
-/// documents (which can easily have 15-20+ distinct rhyme groups) mostly
-/// get a unique color instead of two unrelated groups coincidentally
-/// sharing one.
-const PALETTE: [&str; 24] = [
-    "#a32828", "#a34728", "#a36628", "#a38428", "#a3a328", "#84a328", "#66a328", "#47a328",
-    "#28a328", "#28a347", "#28a366", "#28a384", "#28a3a3", "#2884a3", "#2865a3", "#2847a3",
-    "#2828a3", "#4728a3", "#6528a3", "#8428a3", "#a328a3", "#a32884", "#a32866", "#a32847",
+/// Foreground colors cycled across rhyme groups, in the order groups first
+/// appear in the document — JetBrains-style, distinguishing rhyme groups
+/// by *text* color the way an IDE colors keyword vs string vs number,
+/// rather than a highlighter-pen background fill (issue #1). 24
+/// evenly-spaced hues so real documents (which can easily have 15-20+
+/// distinct rhyme groups) mostly get a unique color instead of two
+/// unrelated groups coincidentally sharing one; past 24 the assignment
+/// wraps (`color_cursor % tags.len()`).
+///
+/// Two hand-tuned sets: `DARK` is bright/pastel to sit on the Darcula
+/// editor background (`#2b2b2b`) next to its `#a9b7c6` body text; `LIGHT`
+/// is deeper and more saturated for the IntelliJ-Light background
+/// (`#ffffff`). These are `GtkTextTag` `foreground` values picked in Rust
+/// (like `editor::vcs_colors` / `syllable_green`), *not* CSS variables —
+/// the "three things stay in lockstep" rule in CLAUDE.md governs only the
+/// CSS palette / libadwaita / GtkSourceView-scheme triad, not this.
+const RHYME_PALETTE_DARK: [&str; 24] = [
+    "#d57b7b", "#d5927b", "#d5a87b", "#d5bf7b", "#d5d57b", "#bfd57b", "#a8d57b", "#92d57b",
+    "#7bd57b", "#7bd592", "#7bd5a8", "#7bd5bf", "#7bd5d5", "#7bbfd5", "#7ba8d5", "#7b92d5",
+    "#7b7bd5", "#927bd5", "#a87bd5", "#bf7bd5", "#d57bd5", "#d57bbf", "#d57ba8", "#d57b92",
 ];
+
+const RHYME_PALETTE_LIGHT: [&str; 24] = [
+    "#a32929", "#a34729", "#a36629", "#a38529", "#a3a329", "#85a329", "#66a329", "#47a329",
+    "#29a329", "#29a347", "#29a366", "#29a385", "#29a3a3", "#2985a3", "#2966a3", "#2947a3",
+    "#2929a3", "#4729a3", "#6629a3", "#8529a3", "#a329a3", "#a32985", "#a32966", "#a32947",
+];
+
+/// The rhyme-group foreground palette for `theme`.
+fn rhyme_palette(theme: Theme) -> &'static [&'static str; 24] {
+    match theme {
+        Theme::Dark => &RHYME_PALETTE_DARK,
+        Theme::Light => &RHYME_PALETTE_LIGHT,
+    }
+}
+
+/// The rhyme engine's runtime-tunable numbers (Settings → Editor → Rhyme
+/// Highlighting). `Default` reproduces the module constants above, so an
+/// unconfigured build scores exactly as before.
+#[derive(Clone, Copy, PartialEq)]
+pub struct RhymeTuning {
+    /// Lines of look-back when comparing for rhymes (`LINE_WINDOW`).
+    pub line_window: usize,
+    /// Minimum length-normalized span score to merge syllables into a
+    /// colour group (`MERGE_THRESHOLD`).
+    pub merge_threshold: f32,
+    /// Anchor-and-extend detection thresholds ([`Thresholds`]).
+    pub thresholds: Thresholds,
+    /// Distinct hues cycled across groups before the palette wraps; clamped
+    /// to `1..=24` (the palette length).
+    pub hue_count: usize,
+    /// Extra lines painted above/below the viewport (`PAINT_MARGIN_LINES`).
+    pub paint_margin: usize,
+    /// Debounce before repainting after a scroll (`RHYME_SCROLL_DEBOUNCE`).
+    pub scroll_debounce_ms: u64,
+}
+
+impl Default for RhymeTuning {
+    fn default() -> Self {
+        Self {
+            line_window: LINE_WINDOW,
+            merge_threshold: MERGE_THRESHOLD,
+            thresholds: Thresholds::default(),
+            hue_count: RHYME_PALETTE_DARK.len(),
+            paint_margin: PAINT_MARGIN_LINES as usize,
+            scroll_debounce_ms: RHYME_SCROLL_DEBOUNCE.as_millis() as u64,
+        }
+    }
+}
+
+impl RhymeTuning {
+    fn hues(&self) -> usize {
+        self.hue_count.clamp(1, RHYME_PALETTE_DARK.len())
+    }
+}
+
+/// Foreground applied to the *other* rhyme groups while one is hovered, so
+/// the hovered group stands out — a low-contrast grey that still reads.
+fn dim_grey(theme: Theme) -> &'static str {
+    match theme {
+        Theme::Dark => "#5c5c5c",
+        Theme::Light => "#b0b0b0",
+    }
+}
 
 /// Common function/filler words excluded from rhyme matching — nearly every
 /// document has *some* other word ending in the same sound as "of" or "is"
@@ -514,10 +595,11 @@ fn stanza_bounded_window_start(
     lines: &[LineSyllables],
     i: usize,
     stop_at_blank_line: bool,
+    line_window: usize,
 ) -> usize {
     let mut start = i;
     for k in (0..i).rev() {
-        if i - k > LINE_WINDOW || (stop_at_blank_line && lines[k].is_blank) {
+        if i - k > line_window || (stop_at_blank_line && lines[k].is_blank) {
             break;
         }
         start = k;
@@ -534,22 +616,26 @@ fn stanza_bounded_window_start(
 /// character span so recomputes keep assigning the same colors to the same
 /// rhymes instead of reshuffling (a plain `HashMap`'s iteration order isn't
 /// stable across runs).
-fn score_lines(lines: &[LineSyllables], stop_at_blank_line: bool) -> Vec<Vec<(usize, usize)>> {
+fn score_lines(
+    lines: &[LineSyllables],
+    stop_at_blank_line: bool,
+    tuning: &RhymeTuning,
+) -> Vec<Vec<(usize, usize)>> {
     let mut uf = UnionFind::new();
     let mut node_of: HashMap<(usize, usize), usize> = HashMap::new();
-    let thresholds = Thresholds::default();
 
     for i in 0..lines.len() {
-        let window_start = stanza_bounded_window_start(lines, i, stop_at_blank_line);
+        let window_start =
+            stanza_bounded_window_start(lines, i, stop_at_blank_line, tuning.line_window);
         for j in window_start..=i {
-            for span in find_rhymes(&lines[i].syllables, &lines[j].syllables, &thresholds) {
+            for span in find_rhymes(&lines[i].syllables, &lines[j].syllables, &tuning.thresholds) {
                 // Comparing a line against itself always scores a trivial
                 // full match on the identity span — not a real rhyme.
                 if i == j && span.a == span.b {
                     continue;
                 }
                 let len = (span.a.end - span.a.start) as f32;
-                if span.score / len < MERGE_THRESHOLD {
+                if span.score / len < tuning.merge_threshold {
                     continue;
                 }
 
@@ -593,35 +679,78 @@ fn score_lines(lines: &[LineSyllables], stop_at_blank_line: bool) -> Vec<Vec<(us
     groups
 }
 
-fn create_tags(buffer: &SourceBuffer) -> Vec<TextTag> {
-    PALETTE
-        .into_iter()
+fn create_tags(buffer: &SourceBuffer, theme: Theme) -> Vec<TextTag> {
+    rhyme_palette(theme)
+        .iter()
         .enumerate()
-        .map(|(i, color)| {
+        .map(|(i, &color)| {
             buffer
-                .create_tag(Some(&format!("rhymr-rhyme-{i}")), &[("background", &color)])
+                .create_tag(Some(&format!("rhymr-rhyme-{i}")), &[("foreground", &color)])
                 .expect("tag name is unique per buffer")
         })
         .collect()
 }
 
-fn apply_group(buffer: &SourceBuffer, tag: &TextTag, members: &[(usize, usize)]) {
-    for &(s, e) in members {
-        let start = buffer.iter_at_offset(s as i32);
-        let end = buffer.iter_at_offset(e as i32);
-        buffer.apply_tag(tag, &start, &end);
-    }
+/// One rhyme group: which palette slot colors it, that color's hex (for
+/// the current `theme`), a representative word (for the legend), and every
+/// character span it covers (for hover-to-emphasise).
+#[derive(Clone, Debug)]
+pub struct RhymeGroup {
+    pub color_index: usize,
+    pub color: String,
+    pub label: String,
+    pub spans: Vec<(usize, usize)>,
 }
 
-fn recompute(buffer: &SourceBuffer, tags: &[TextTag]) {
-    let start_iter = buffer.start_iter();
-    let end_iter = buffer.end_iter();
-    for tag in tags {
-        buffer.remove_tag(tag, &start_iter, &end_iter);
+/// The word a character `offset` falls inside, lower-cased — for the legend
+/// label. A group's stored spans start mid-word (onset consonants are
+/// trimmed by `orthographic_syllables`), so widen out to the surrounding
+/// word. The `&str` counterpart of the buffer-based lookup this used to do:
+/// it uses the same word-character rule as [`tokenize`] so the label always
+/// matches the spans that produced it, and it needs no `TextBuffer` — so it
+/// runs on the worker thread alongside the rest of [`compute_groups`].
+fn word_at_str(text: &str, offset: usize) -> String {
+    let chars: Vec<char> = text.chars().collect();
+    let is_word = |c: char| c.is_alphabetic() || c == '\'';
+    if offset >= chars.len() || !is_word(chars[offset]) {
+        return String::new();
     }
+    let mut start = offset;
+    while start > 0 && is_word(chars[start - 1]) {
+        start -= 1;
+    }
+    let mut end = offset + 1;
+    while end < chars.len() && is_word(chars[end]) {
+        end += 1;
+    }
+    chars[start..end]
+        .iter()
+        .collect::<String>()
+        .trim_matches('\'')
+        .to_lowercase()
+}
 
-    let text = buffer.text(&start_iter, &end_iter, false).to_string();
-    let word_spans = tokenize(&text);
+/// One rhyme group as produced off the buffer: the character spans it
+/// covers (relative to the text slice [`compute_groups`] ran on) and a
+/// representative lower-cased word for the legend. The palette slot and hex
+/// color are assigned later, on the main thread, from the live theme — see
+/// [`apply_groups`].
+#[derive(Clone, Debug)]
+struct RawGroup {
+    spans: Vec<(usize, usize)>,
+    label: String,
+}
+
+/// Pure, `Send`-safe rhyme grouping over `text` — everything the recompute
+/// does that doesn't touch a `TextBuffer`, so it can run on a worker
+/// thread. Returned spans are character offsets into `text` (0 = first
+/// char); callers add the slice's absolute base offset before touching a
+/// buffer. `stop_at_blank_line` comes from
+/// `Settings::rhyme_stop_at_blank_line` — passed in, never read from disk
+/// here. Groups come back in color-assignment order: document-wide
+/// exact-key fallback groups first, then the Hirjee & Brown scored groups.
+fn compute_groups(text: &str, stop_at_blank_line: bool, tuning: &RhymeTuning) -> Vec<RawGroup> {
+    let word_spans = tokenize(text);
 
     // Out-of-dictionary words (slang, proper nouns) have no phoneme data to
     // score against the Hirjee & Brown model, so they keep the original
@@ -652,68 +781,431 @@ fn recompute(buffer: &SourceBuffer, tags: &[TextTag]) {
         }
     }
 
-    let lines = build_lines(&text, &word_spans);
-    let stop_at_blank_line = crate::setting::Settings::load().rhyme_stop_at_blank_line;
-    let scored_groups = score_lines(&lines, stop_at_blank_line);
+    let lines = build_lines(text, &word_spans);
+    let scored_groups = score_lines(&lines, stop_at_blank_line, tuning);
 
-    let all_groups = fallback_groups
+    fallback_groups
         .iter()
         .filter(|m| m.len() >= 2)
-        .chain(scored_groups.iter().filter(|m| m.len() >= 2));
-    for (color_cursor, members) in all_groups.enumerate() {
-        apply_group(buffer, &tags[color_cursor % tags.len()], members);
+        .chain(scored_groups.iter().filter(|m| m.len() >= 2))
+        .map(|members| {
+            let anchor = members.iter().map(|&(s, _)| s).min().unwrap_or(0);
+            RawGroup {
+                spans: members.clone(),
+                label: word_at_str(text, anchor),
+            }
+        })
+        .collect()
+}
+
+/// Turn the worker's [`RawGroup`]s into display groups: assign each the next
+/// palette slot (`k % 24`, in the worker's document order) and the hex for
+/// `theme`. No buffer access — grouping and colour assignment are
+/// whole-document, so they don't depend on what's currently on screen.
+/// Painting those colours into the buffer is [`paint_viewport`]'s job.
+fn build_display_groups(theme: Theme, computed: &[RawGroup], hue_count: usize) -> Vec<RhymeGroup> {
+    let palette = rhyme_palette(theme);
+    let hues = hue_count.clamp(1, palette.len());
+    computed
+        .iter()
+        .enumerate()
+        .map(|(i, raw)| {
+            let color_index = i % hues;
+            RhymeGroup {
+                color_index,
+                color: palette[color_index].to_string(),
+                label: raw.label.clone(),
+                spans: raw.spans.clone(),
+            }
+        })
+        .collect()
+}
+
+/// Inclusive line range currently visible in `view`, or a sane top-of-buffer
+/// span when the view isn't laid out yet (a `vadjustment::changed` repaint
+/// follows once geometry is known).
+fn viewport_line_range(view: &SourceView, buffer: &SourceBuffer) -> (i32, i32) {
+    let rect = view.visible_rect();
+    if rect.height() <= 0 {
+        return (0, buffer.line_count().saturating_sub(1).min(400));
     }
+    let (top, _) = view.line_at_y(rect.y());
+    let (bottom, _) = view.line_at_y(rect.y() + rect.height());
+    (top.line(), bottom.line())
+}
+
+/// Paint the rhyme-group colours for the lines around `state.view`'s
+/// viewport (± [`PAINT_MARGIN_LINES`]) and clear them everywhere they were
+/// painted last time but no longer are. The heavy work — grouping — already
+/// ran off-thread; this only issues `apply_tag` calls for the spans on
+/// screen, so it stays cheap no matter how large the document is.
+fn paint_viewport(state: &RecomputeState) {
+    let buffer = &state.buffer;
+    let last_line = buffer.line_count().saturating_sub(1);
+    let (mut first, mut last) = viewport_line_range(&state.view, buffer);
+    let margin = state.tuning.get().paint_margin as i32;
+    first = (first - margin).max(0);
+    last = (last + margin).min(last_line);
+
+    let start_off = buffer.iter_at_line(first).map(|i| i.offset()).unwrap_or(0);
+    let end_off = buffer
+        .iter_at_line(last + 1)
+        .unwrap_or_else(|| buffer.end_iter())
+        .offset();
+
+    // Clear the union of what we painted last time and what we're about to
+    // paint, so spans that scrolled out of range lose their colour.
+    let (prev_start, prev_end) = state.last_painted.get();
+    let clear_start = buffer.iter_at_offset(prev_start.min(start_off));
+    let clear_end = buffer.iter_at_offset(prev_end.max(end_off));
+    for tag in &state.tags {
+        buffer.remove_tag(tag, &clear_start, &clear_end);
+    }
+
+    for group in state.groups.borrow().iter() {
+        let tag = &state.tags[group.color_index];
+        for &(s, e) in &group.spans {
+            let (s, e) = (s as i32, e as i32);
+            if e <= start_off || s >= end_off {
+                continue;
+            }
+            let a = buffer.iter_at_offset(s);
+            let b = buffer.iter_at_offset(e);
+            buffer.apply_tag(tag, &a, &b);
+        }
+    }
+
+    state.last_painted.set((start_off, end_off));
+}
+
+/// Coalesced, debounced [`paint_viewport`] for scroll events — a burst of
+/// `value-changed` signals repaints once, shortly after scrolling stops.
+fn schedule_viewport_repaint(state: &RecomputeState) {
+    if state.repaint_pending.replace(true) {
+        return;
+    }
+    let debounce = std::time::Duration::from_millis(state.tuning.get().scroll_debounce_ms);
+    let state = state.clone();
+    glib::timeout_add_local_once(debounce, move || {
+        state.repaint_pending.set(false);
+        paint_viewport(&state);
+    });
+}
+
+type GroupsCallback = Box<dyn Fn(&[RhymeGroup])>;
+
+/// Shared state a [`RhymeHighlight`] hands to every recompute: enough to
+/// snapshot the buffer, run [`compute_groups`] off-thread, and repaint on
+/// the main thread once the result is still current.
+#[derive(Clone)]
+struct RecomputeState {
+    view: SourceView,
+    buffer: SourceBuffer,
+    tags: Vec<TextTag>,
+    dim_tag: TextTag,
+    theme: Rc<Cell<Theme>>,
+    stop_at_blank_line: Rc<Cell<bool>>,
+    /// The engine's runtime-tunable numbers (Settings → Rhyme Highlighting),
+    /// snapshotted into each worker run; kept current with
+    /// [`RhymeHighlight::set_tuning`].
+    tuning: Rc<Cell<RhymeTuning>>,
+    /// Debounce before a recompute, in ms; kept current with
+    /// [`RhymeHighlight::set_debounce_ms`].
+    debounce_ms: Rc<Cell<u64>>,
+    /// Bumped by every edit, setting change and `detach`; a compute whose
+    /// captured value no longer matches is discarded instead of painting.
+    generation: Rc<Cell<u64>>,
+    /// The whole-document groups from the last recompute — what the legend
+    /// and hover-emphasis read. Painting is viewport-scoped (see
+    /// [`paint_viewport`]) but this list is complete.
+    groups: Rc<RefCell<Vec<RhymeGroup>>>,
+    /// Character range `paint_viewport` last coloured, so the next paint
+    /// knows what to clear.
+    last_painted: Rc<Cell<(i32, i32)>>,
+    /// Set while a debounced scroll repaint is already queued.
+    repaint_pending: Rc<Cell<bool>>,
+    emphasised: Rc<Cell<Option<usize>>>,
+    on_groups: Rc<RefCell<Option<GroupsCallback>>>,
+}
+
+/// Debounce, compute rhyme groups on a worker thread, then — if no newer
+/// request has been made in the meantime — repaint `state.buffer` on the
+/// main thread. The heavy phase (tokenize + CMUdict + Hirjee & Brown
+/// scoring, all of [`compute_groups`]) never runs on the GTK main thread;
+/// only the whole-buffer tag clear + the viewport's `apply_tag` calls do. A
+/// stale `generation` (a newer edit, or `detach`) makes a late result a
+/// no-op rather than a panic.
+fn spawn_recompute(state: &RecomputeState, debounce: std::time::Duration) {
+    let this_gen = state.generation.get() + 1;
+    state.generation.set(this_gen);
+
+    // Snapshot everything the worker needs *now*, on the main thread — the
+    // buffer text and the setting. `TextIter`/`TextBuffer` never cross the
+    // thread boundary.
+    let text = state
+        .buffer
+        .text(&state.buffer.start_iter(), &state.buffer.end_iter(), false)
+        .to_string();
+    let stop_val = state.stop_at_blank_line.get();
+    let tuning = state.tuning.get();
+    let state = state.clone();
+
+    glib::spawn_future_local(async move {
+        if !debounce.is_zero() {
+            glib::timeout_future(debounce).await;
+        }
+        if state.generation.get() != this_gen {
+            return;
+        }
+
+        let computed =
+            match gio::spawn_blocking(move || compute_groups(&text, stop_val, &tuning)).await {
+                Ok(groups) => groups,
+                Err(_) => {
+                    log::warn!("rhyme: worker thread panicked; skipping this recompute");
+                    return;
+                }
+            };
+        if state.generation.get() != this_gen {
+            return;
+        }
+
+        state.groups.replace(build_display_groups(
+            state.theme.get(),
+            &computed,
+            state.tuning.get().hues(),
+        ));
+
+        // The edit that triggered this shifted offsets, so drop every rhyme
+        // tag once; `paint_viewport` then recolours the visible range.
+        let start = state.buffer.start_iter();
+        let end = state.buffer.end_iter();
+        for tag in &state.tags {
+            state.buffer.remove_tag(tag, &start, &end);
+        }
+        state.buffer.remove_tag(&state.dim_tag, &start, &end);
+        state.last_painted.set((0, 0));
+        state.emphasised.set(None);
+        paint_viewport(&state);
+
+        if let Some(cb) = state.on_groups.borrow().as_ref() {
+            cb(&state.groups.borrow());
+        }
+    });
 }
 
 /// A live `attach()` — dropping/`detach()`-ing this stops recoloring the
 /// buffer and clears whatever rhyme-group colors are currently applied, so
 /// toggling the setting off doesn't leave stale highlights behind.
 pub struct RhymeHighlight {
-    buffer: SourceBuffer,
-    tags: Vec<TextTag>,
+    /// Everything a recompute needs; also the source of truth for the
+    /// buffer/tags/theme/groups the query & mutation methods below read.
+    state: RecomputeState,
     handler_id: Option<glib::SignalHandlerId>,
+    /// The scroll adjustment and the handler ids for the viewport-repaint
+    /// signals, disconnected on `detach`.
+    scroll_handlers: Vec<(gtk::Adjustment, glib::SignalHandlerId)>,
 }
 
 impl RhymeHighlight {
     pub fn detach(mut self) {
+        // Invalidate any compute still in flight so its late `.await`
+        // resumption paints nothing.
+        self.state.generation.set(self.state.generation.get() + 1);
         if let Some(id) = self.handler_id.take() {
-            self.buffer.disconnect(id);
+            self.state.buffer.disconnect(id);
         }
-        let start = self.buffer.start_iter();
-        let end = self.buffer.end_iter();
-        for tag in &self.tags {
-            self.buffer.remove_tag(tag, &start, &end);
+        for (adj, id) in self.scroll_handlers.drain(..) {
+            adj.disconnect(id);
+        }
+        let start = self.state.buffer.start_iter();
+        let end = self.state.buffer.end_iter();
+        for tag in &self.state.tags {
+            self.state.buffer.remove_tag(tag, &start, &end);
+        }
+        self.state
+            .buffer
+            .remove_tag(&self.state.dim_tag, &start, &end);
+        self.state.groups.borrow_mut().clear();
+        if let Some(cb) = self.state.on_groups.borrow().as_ref() {
+            cb(&[]);
+        }
+    }
+
+    /// Re-point every rhyme tag at `theme`'s palette. A `GtkTextTag`'s
+    /// `foreground` recolors every range it's already applied to, so a live
+    /// theme switch (Settings → Appearance) needs no recompute — just this
+    /// plus refreshing the legend's stored hex colors.
+    pub fn set_theme(&self, theme: Theme) {
+        if self.state.theme.replace(theme) == theme {
+            return;
+        }
+        let palette = rhyme_palette(theme);
+        for (i, tag) in self.state.tags.iter().enumerate() {
+            tag.set_foreground(Some(palette[i % palette.len()]));
+        }
+        self.state.dim_tag.set_foreground(Some(dim_grey(theme)));
+        for group in self.state.groups.borrow_mut().iter_mut() {
+            group.color = palette[group.color_index].to_string();
+        }
+        self.notify_groups();
+    }
+
+    /// Update the stanza-break rule (Settings → Rhyme) live: re-runs the
+    /// debounced recompute so already-open tabs pick up the change without
+    /// a reload. No-op if unchanged.
+    pub fn set_stop_at_blank_line(&self, stop: bool) {
+        if self.state.stop_at_blank_line.replace(stop) == stop {
+            return;
+        }
+        spawn_recompute(&self.state, self.debounce());
+    }
+
+    /// Update the scoring tunables (Settings → Editor → Rhyme Highlighting)
+    /// live. A change re-runs the debounced recompute; a hue-count-only
+    /// change still recolours through the recompute's `build_display_groups`.
+    /// No-op if unchanged.
+    pub fn set_tuning(&self, tuning: RhymeTuning) {
+        if self.state.tuning.replace(tuning) == tuning {
+            return;
+        }
+        spawn_recompute(&self.state, self.debounce());
+    }
+
+    /// Update the recompute debounce (ms) live. Takes effect on the next
+    /// edit or tuning change — no recompute of its own.
+    pub fn set_debounce_ms(&self, ms: u64) {
+        self.state.debounce_ms.set(ms);
+    }
+
+    fn debounce(&self) -> std::time::Duration {
+        std::time::Duration::from_millis(self.state.debounce_ms.get())
+    }
+
+    /// Emphasise one rhyme group by dimming every *other* group's spans;
+    /// `None` clears the emphasis. O(spans) only on a group transition —
+    /// repeated motion within the same word does nothing, and it never
+    /// recomputes. Call from a pointer-motion handler on the view.
+    pub fn emphasise_group(&self, group: Option<usize>) {
+        if self.state.emphasised.get() == group {
+            return;
+        }
+        self.state.emphasised.set(group);
+
+        let start = self.state.buffer.start_iter();
+        let end = self.state.buffer.end_iter();
+        self.state
+            .buffer
+            .remove_tag(&self.state.dim_tag, &start, &end);
+
+        if let Some(target) = group {
+            for (i, g) in self.state.groups.borrow().iter().enumerate() {
+                if i == target {
+                    continue;
+                }
+                for &(s, e) in &g.spans {
+                    let s = self.state.buffer.iter_at_offset(s as i32);
+                    let e = self.state.buffer.iter_at_offset(e as i32);
+                    self.state.buffer.apply_tag(&self.state.dim_tag, &s, &e);
+                }
+            }
+        }
+    }
+
+    /// Index of the rhyme group whose spans contain character `offset`, if
+    /// any — for turning a hover position into a group to emphasise.
+    pub fn group_at_offset(&self, offset: usize) -> Option<usize> {
+        self.state
+            .groups
+            .borrow()
+            .iter()
+            .position(|g| g.spans.iter().any(|&(s, e)| offset >= s && offset < e))
+    }
+
+    /// Register `f` to receive the active rhyme groups whenever they
+    /// change; fires once immediately with the current set.
+    pub fn connect_groups_changed(&self, f: impl Fn(&[RhymeGroup]) + 'static) {
+        *self.state.on_groups.borrow_mut() = Some(Box::new(f));
+        self.notify_groups();
+    }
+
+    fn notify_groups(&self) {
+        if let Some(cb) = self.state.on_groups.borrow().as_ref() {
+            cb(&self.state.groups.borrow());
         }
     }
 }
 
-/// Recolors words in `buffer` by rhyme group, recomputing (debounced) on
-/// every edit.
-pub fn attach(buffer: &SourceBuffer) -> RhymeHighlight {
-    let tags = create_tags(buffer);
-    recompute(buffer, &tags);
+/// Recolors words in `view`'s `buffer` by rhyme group, recomputing
+/// (debounced, on a worker thread) on every edit and repainting the visible
+/// range on scroll. `theme` picks the foreground palette; keep it current
+/// with [`RhymeHighlight::set_theme`]. `stop_at_blank_line`, `tuning` and
+/// `debounce_ms` are the initial `Settings` values (Editor → Rhyme
+/// Highlighting); keep them current with [`RhymeHighlight::set_stop_at_blank_line`],
+/// [`RhymeHighlight::set_tuning`] and [`RhymeHighlight::set_debounce_ms`].
+/// Subscribe to the active-group list with
+/// [`RhymeHighlight::connect_groups_changed`].
+pub fn attach(
+    view: &SourceView,
+    buffer: &SourceBuffer,
+    theme: Theme,
+    stop_at_blank_line: bool,
+    tuning: RhymeTuning,
+    debounce_ms: u64,
+) -> RhymeHighlight {
+    let tags = create_tags(buffer, theme);
+    // Created last, so it wins over the color tags where they overlap.
+    let dim_tag = buffer
+        .create_tag(Some("rhymr-rhyme-dim"), &[("foreground", &dim_grey(theme))])
+        .expect("tag name is unique per buffer");
 
-    let generation = Rc::new(Cell::new(0u64));
-    let tags_for_signal = tags.clone();
-    let handler_id = buffer.connect_changed(move |buf| {
-        let this_generation = generation.get() + 1;
-        generation.set(this_generation);
-
-        let generation_for_timeout = generation.clone();
-        let buf_owned = buf.clone();
-        let tags_for_timeout = tags_for_signal.clone();
-        glib::timeout_add_local_once(RHYME_DEBOUNCE, move || {
-            if generation_for_timeout.get() != this_generation {
-                return;
-            }
-            recompute(&buf_owned, &tags_for_timeout);
-        });
-    });
-
-    RhymeHighlight {
+    let state = RecomputeState {
+        view: view.clone(),
         buffer: buffer.clone(),
         tags,
+        dim_tag,
+        theme: Rc::new(Cell::new(theme)),
+        stop_at_blank_line: Rc::new(Cell::new(stop_at_blank_line)),
+        tuning: Rc::new(Cell::new(tuning)),
+        debounce_ms: Rc::new(Cell::new(debounce_ms)),
+        generation: Rc::new(Cell::new(0u64)),
+        groups: Rc::new(RefCell::new(Vec::new())),
+        last_painted: Rc::new(Cell::new((0, 0))),
+        repaint_pending: Rc::new(Cell::new(false)),
+        emphasised: Rc::new(Cell::new(None)),
+        on_groups: Rc::new(RefCell::new(None)),
+    };
+
+    let handler_id = buffer.connect_changed({
+        let state = state.clone();
+        move |_| {
+            let debounce = std::time::Duration::from_millis(state.debounce_ms.get());
+            spawn_recompute(&state, debounce);
+        }
+    });
+
+    // Repaint the coloured range as the viewport moves — grouping is
+    // unchanged, so this is a cheap `apply_tag` sweep, not a recompute.
+    let mut scroll_handlers = Vec::new();
+    if let Some(vadj) = gtk::prelude::ScrollableExt::vadjustment(view) {
+        for signal in ["value-changed", "changed"] {
+            let state = state.clone();
+            let id = vadj.connect_local(signal, false, move |_| {
+                schedule_viewport_repaint(&state);
+                None
+            });
+            scroll_handlers.push((vadj.clone(), id));
+        }
+    }
+
+    // Initial pass, off-thread on the next tick — `attach` never blocks,
+    // even on a large file just loaded into the buffer.
+    spawn_recompute(&state, std::time::Duration::ZERO);
+
+    RhymeHighlight {
+        state,
         handler_id: Some(handler_id),
+        scroll_handlers,
     }
 }
 
@@ -835,7 +1327,7 @@ mod tests {
         let lines = build_lines(text, &spans);
         assert_eq!(lines.len(), 2);
 
-        let groups = score_lines(&lines, true);
+        let groups = score_lines(&lines, true, &RhymeTuning::default());
         let cat = spans.iter().find(|s| s.text == "cat").unwrap();
         let hat = spans.iter().find(|s| s.text == "hat").unwrap();
         assert!(
@@ -858,7 +1350,7 @@ mod tests {
         let built = build_lines(&text, &spans);
         assert_eq!(built.len(), lines.len());
 
-        let groups = score_lines(&built, true);
+        let groups = score_lines(&built, true, &RhymeTuning::default());
         let cat = spans.iter().find(|s| s.text == "cat").unwrap();
         let hat = spans.iter().find(|s| s.text == "hat").unwrap();
         assert!(
@@ -880,7 +1372,7 @@ mod tests {
         assert_eq!(lines.len(), 3);
         assert!(lines[1].is_blank);
 
-        let groups = score_lines(&lines, true);
+        let groups = score_lines(&lines, true, &RhymeTuning::default());
         let cat = spans.iter().find(|s| s.text == "cat").unwrap();
         let hat = spans.iter().find(|s| s.text == "hat").unwrap();
         assert!(
@@ -896,7 +1388,7 @@ mod tests {
         let spans = tokenize(text);
         let lines = build_lines(text, &spans);
 
-        let groups = score_lines(&lines, false);
+        let groups = score_lines(&lines, false, &RhymeTuning::default());
         let cat = spans.iter().find(|s| s.text == "cat").unwrap();
         let hat = spans.iter().find(|s| s.text == "hat").unwrap();
         assert!(
@@ -918,7 +1410,7 @@ mod tests {
         let text = "the vibe felt heavy\nprotecting the legacy";
         let spans = tokenize(text);
         let lines = build_lines(text, &spans);
-        let groups = score_lines(&lines, true);
+        let groups = score_lines(&lines, true, &RhymeTuning::default());
 
         let heavy = spans.iter().find(|s| s.text == "heavy").unwrap();
         let legacy = spans.iter().find(|s| s.text == "legacy").unwrap();
@@ -940,5 +1432,60 @@ mod tests {
         // "the" is a stopword and "xyzzyplonk" isn't in the dictionary —
         // only "cat"'s syllable should make it in.
         assert_eq!(lines[0].syllables.len(), 1);
+    }
+
+    #[test]
+    fn word_at_str_widens_a_mid_word_offset_to_the_whole_lowercased_word() {
+        let text = "I saw a Cat today";
+        assert_eq!(word_at_str(text, 8), "cat", "first char of the word");
+        assert_eq!(word_at_str(text, 9), "cat", "mid-word char");
+        assert_eq!(word_at_str(text, 10), "cat", "last char of the word");
+        assert_eq!(word_at_str(text, 1), "", "whitespace offset");
+        // An apostrophe inside a word stays; a stray leading/trailing one is
+        // trimmed (matches `tokenize`, which only counts `'` mid-word).
+        assert_eq!(word_at_str("don't stop", 2), "don't");
+    }
+
+    #[test]
+    fn compute_groups_labels_each_group_with_the_word_at_its_earliest_span() {
+        let text = "I saw a cat\nI saw a hat";
+        let spans = tokenize(text);
+        let cat = spans.iter().find(|s| s.text == "cat").unwrap();
+        let hat = spans.iter().find(|s| s.text == "hat").unwrap();
+
+        let groups = compute_groups(text, true, &RhymeTuning::default());
+        // cat/hat still land in one computed group — the compute/apply
+        // split leaves the underlying grouping untouched.
+        let rhyme = groups.iter().find(|g| {
+            g.spans.iter().any(|m| falls_within(m, cat))
+                && g.spans.iter().any(|m| falls_within(m, hat))
+        });
+        assert!(rhyme.is_some(), "cat/hat should share a computed group");
+        // Every group's label is the word at its earliest span.
+        for g in &groups {
+            let anchor = g.spans.iter().map(|&(s, _)| s).min().unwrap();
+            assert_eq!(g.label, word_at_str(text, anchor), "group {g:?}");
+            assert!(!g.label.is_empty(), "group {g:?}");
+        }
+    }
+
+    #[test]
+    fn build_display_groups_assigns_palette_slots_in_document_order() {
+        // Colour assignment must stay `k % 24` over the worker's group
+        // order, independent of the viewport — that's what keeps colours
+        // and the legend stable while scrolling.
+        let raw: Vec<RawGroup> = (0..27)
+            .map(|i| RawGroup {
+                spans: vec![(i * 10, i * 10 + 3)],
+                label: format!("w{i}"),
+            })
+            .collect();
+        let groups = build_display_groups(Theme::Dark, &raw, 24);
+        assert_eq!(groups.len(), 27);
+        for (i, g) in groups.iter().enumerate() {
+            assert_eq!(g.color_index, i % 24, "group {i}");
+            assert_eq!(g.color, RHYME_PALETTE_DARK[i % 24]);
+            assert_eq!(g.spans, raw[i].spans);
+        }
     }
 }

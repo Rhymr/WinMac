@@ -271,7 +271,9 @@ fn render_results(list: &ListBox, words: Vec<(String, usize)>) {
 /// worker thread (see `handle_submit`). Never panics; a build/timeout/
 /// transport failure yields [`LookupResult::Failed`].
 fn fetch_rhymes(word: &str) -> LookupResult {
+    log::debug!("datamuse rhyme lookup for {word:?}");
     let Ok(rt) = Runtime::new() else {
+        log::warn!("rhyme lookup for {word:?}: could not build a tokio runtime");
         return LookupResult::Failed;
     };
 
@@ -309,10 +311,16 @@ fn fetch_rhymes(word: &str) -> LookupResult {
             (any_ok, unique)
         };
 
-        match tokio::time::timeout(crate::config::RHYME_LOOKUP_TIMEOUT, lookup).await {
-            Ok((true, unique)) => LookupResult::Words(unique.into_iter().collect()),
+        match tokio::time::timeout(crate::config::rhyme_lookup_timeout(), lookup).await {
+            Ok((true, unique)) => {
+                log::debug!("datamuse returned {} rhymes for {word:?}", unique.len());
+                LookupResult::Words(unique.into_iter().collect())
+            }
             // every request failed, or we timed out
-            _ => LookupResult::Failed,
+            _ => {
+                log::warn!("rhyme lookup for {word:?} failed or timed out (offline?)");
+                LookupResult::Failed
+            }
         }
     })
 }

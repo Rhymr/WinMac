@@ -201,9 +201,9 @@ pub fn left_stripe<F: Fn(bool) + 'static>(project_visible: bool, on_toggle: F) -
         .valign(Align::Fill)
         .build();
 
-    // Label on top (reads bottom-to-top), a small padded icon beneath it —
-    // JetBrains tool-window stripe convention.
-    let content = GtkBox::new(Orientation::Vertical, 2);
+    // Label on top (reads bottom-to-top), the icon beneath it — same
+    // icon↔text gap as the bottom "Rhyme Search" stripe.
+    let content = GtkBox::new(Orientation::Vertical, 4);
     content.set_halign(Align::Center);
     content.append(&VerticalLabel::new("Project"));
     content.append(&img("folder", 12));

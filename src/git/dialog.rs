@@ -10,7 +10,11 @@ use libadwaita::Application;
 use std::path::PathBuf;
 use std::rc::Rc;
 
-const REMOTE: &str = "origin";
+/// The configured remote name (Settings → Version Control → Git),
+/// `"origin"` unless changed.
+fn remote() -> String {
+    crate::setting::Settings::load().git_remote_name
+}
 
 pub fn show_commit_dialog(app: &Application, controller: Rc<WorkspaceController>) {
     let Some(parent) = app.active_window() else {
@@ -137,7 +141,7 @@ pub fn show_commit_dialog(app: &Application, controller: Rc<WorkspaceController>
             )
             .to_string();
         let message = if text.trim().is_empty() {
-            "Update".to_string()
+            crate::setting::Settings::load().git_default_commit_message
         } else {
             text.trim().to_string()
         };
@@ -147,7 +151,7 @@ pub fn show_commit_dialog(app: &Application, controller: Rc<WorkspaceController>
                 refresh_file_tree(&controller);
                 dialog_for_commit.close();
             }
-            Err(e) => eprintln!("Commit failed: {e}"),
+            Err(e) => log::error!("commit failed: {e}"),
         }
     });
 
@@ -155,28 +159,44 @@ pub fn show_commit_dialog(app: &Application, controller: Rc<WorkspaceController>
 }
 
 pub fn show_push_dialog(app: &Application, controller: Rc<WorkspaceController>) {
+    let remote = remote();
     confirm_then_run(
         app,
         controller,
         "Push",
-        |branch| format!("Push '{branch}' to {REMOTE}?"),
+        {
+            let remote = remote.clone();
+            move |branch| format!("Push '{branch}' to {remote}?")
+        },
         "Push",
-        |git| git.push(REMOTE),
+        {
+            let remote = remote.clone();
+            move |git| git.push(&remote)
+        },
+        &remote,
     );
 }
 
 pub fn show_pull_dialog(app: &Application, controller: Rc<WorkspaceController>) {
+    let remote = remote();
     confirm_then_run(
         app,
         controller,
         "Update Project",
-        |branch| {
-            format!(
-                "Pull '{branch}' from {REMOTE}? This fast-forwards only — it won't merge or rebase if the branches have diverged."
-            )
+        {
+            let remote = remote.clone();
+            move |branch| {
+                format!(
+                    "Pull '{branch}' from {remote}? This fast-forwards only — it won't merge or rebase if the branches have diverged."
+                )
+            }
         },
         "Pull",
-        |git| git.pull(REMOTE),
+        {
+            let remote = remote.clone();
+            move |git| git.pull(&remote)
+        },
+        &remote,
     );
 }
 
@@ -188,12 +208,18 @@ pub fn show_fetch_dialog(app: &Application, controller: Rc<WorkspaceController>)
         return;
     };
 
+    let remote = remote();
     let (dialog, content, status_label) =
-        build_progress_dialog(&parent, "Fetch", &format!("Fetching from {REMOTE}…"));
+        build_progress_dialog(&parent, "Fetch", &format!("Fetching from {remote}…"));
     dialog.present();
-    run_git_op(dialog, content, status_label, root, controller, |git| {
-        git.fetch(REMOTE)
-    });
+    run_git_op(
+        dialog,
+        content,
+        status_label,
+        root,
+        controller,
+        move |git| git.fetch(&remote),
+    );
 }
 
 /// Shows a Cancel/[`action_label`] confirmation with `confirm_text(branch)`
@@ -207,6 +233,7 @@ fn confirm_then_run(
     confirm_text: impl Fn(&str) -> String + 'static,
     action_label: &str,
     op: impl Fn(&GitController) -> Result<String, String> + Clone + Send + 'static,
+    remote: &str,
 ) {
     let Some(parent) = app.active_window() else {
         return;
@@ -216,11 +243,11 @@ fn confirm_then_run(
     };
 
     let git = GitController::new(&root);
-    if !git.has_remote(REMOTE) {
+    if !git.has_remote(remote) {
         show_message_dialog(
             &parent,
             title,
-            &format!("No '{REMOTE}' remote is configured for this project."),
+            &format!("No '{remote}' remote is configured for this project."),
         );
         return;
     }

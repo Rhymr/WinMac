@@ -2,6 +2,20 @@ use git2::Repository;
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
+/// Split a `"Name <email>"` author string into its parts, falling back to a
+/// safe default if it isn't in that shape. Used only when git has no
+/// `user.name` / `user.email` configured (see `Settings::git_signature_fallback`).
+fn parse_author(raw: &str) -> (String, String) {
+    if let Some((name, rest)) = raw.split_once('<') {
+        let name = name.trim();
+        let email = rest.trim_end_matches('>').trim();
+        if !name.is_empty() && !email.is_empty() {
+            return (name.to_string(), email.to_string());
+        }
+    }
+    ("Rhymr".to_string(), "rhymr@local".to_string())
+}
+
 /// A file's status relative to HEAD, simplified to the categories the file
 /// tree colors differently. Checked in this priority order (a renamed file
 /// that also changed content still reads as "Renamed", matching `git
@@ -68,7 +82,10 @@ pub fn line_changes(
         Some(&mut opts),
     ) {
         Ok(patch) => patch,
-        Err(_) => return out,
+        Err(e) => {
+            log::trace!("line_changes: diff for {rel:?} failed: {e}");
+            return out;
+        }
     };
 
     for h in 0..patch.num_hunks() {
@@ -113,6 +130,7 @@ impl GitController {
 
     /// Commit all modified/new .txt files with a specific message
     pub fn commit_all(&self, message: &str) -> Result<git2::Oid, String> {
+        log::info!("git commit in {:?}", self.repo_path);
         let repo = Repository::open(&self.repo_path).map_err(|e| e.to_string())?;
         let mut index = repo.index().map_err(|e| e.to_string())?;
 
@@ -125,9 +143,14 @@ impl GitController {
         let tree_id = index.write_tree().map_err(|e| e.to_string())?;
         let tree = repo.find_tree(tree_id).map_err(|e| e.to_string())?;
 
-        let signature = repo
-            .signature()
-            .unwrap_or_else(|_| git2::Signature::now("Pneuma", "pneuma@local").unwrap());
+        let signature = match repo.signature() {
+            Ok(sig) => sig,
+            Err(_) => {
+                let (name, email) =
+                    parse_author(&crate::setting::Settings::load().git_signature_fallback);
+                git2::Signature::now(&name, &email).map_err(|e| e.to_string())?
+            }
+        };
 
         let parent_commit = match repo.head() {
             Ok(head) => Some(head.peel_to_commit().map_err(|e| e.to_string())?),
@@ -139,15 +162,21 @@ impl GitController {
             None => vec![],
         };
 
-        repo.commit(
-            Some("HEAD"),
-            &signature,
-            &signature,
-            message,
-            &tree,
-            &parents,
-        )
-        .map_err(|e| e.to_string())
+        let oid = repo
+            .commit(
+                Some("HEAD"),
+                &signature,
+                &signature,
+                message,
+                &tree,
+                &parents,
+            )
+            .map_err(|e| {
+                log::warn!("git commit failed: {e}");
+                e.to_string()
+            })?;
+        log::info!("git commit {oid}");
+        Ok(oid)
     }
 
     /// Absolute paths of tracked/untracked files that differ from HEAD —
@@ -240,6 +269,7 @@ impl GitController {
 
     /// Fetch `remote_name`, returning a one-line human-readable summary.
     pub fn fetch(&self, remote_name: &str) -> Result<String, String> {
+        log::info!("git fetch from {remote_name}");
         let repo = Repository::open(&self.repo_path).map_err(|e| e.to_string())?;
         let mut remote = repo.find_remote(remote_name).map_err(|e| e.to_string())?;
         let mut fetch_opts = git2::FetchOptions::new();
@@ -265,6 +295,7 @@ impl GitController {
     /// this app doesn't have; it reports back instead so the user can
     /// resolve it another way (e.g. the terminal).
     pub fn pull(&self, remote_name: &str) -> Result<String, String> {
+        log::info!("git pull from {remote_name}");
         let repo = Repository::open(&self.repo_path).map_err(|e| e.to_string())?;
         let branch_name = self
             .current_branch_name()
@@ -291,6 +322,9 @@ impl GitController {
             return Ok("Already up to date.".to_string());
         }
         if !analysis.is_fast_forward() {
+            log::warn!(
+                "git pull: '{branch_name}' has diverged from {remote_name} — not fast-forwardable"
+            );
             return Err(format!(
                 "'{branch_name}' has diverged from {remote_name}/{branch_name} — can't fast-forward. Resolve manually."
             ));
@@ -313,6 +347,7 @@ impl GitController {
     /// Push the current branch to `remote_name`, creating/updating the same
     /// branch name there.
     pub fn push(&self, remote_name: &str) -> Result<String, String> {
+        log::info!("git push to {remote_name}");
         let repo = Repository::open(&self.repo_path).map_err(|e| e.to_string())?;
         let branch_name = self
             .current_branch_name()
@@ -325,8 +360,12 @@ impl GitController {
         let refspec = format!("refs/heads/{branch_name}:refs/heads/{branch_name}");
         remote
             .push(&[refspec.as_str()], Some(&mut push_opts))
-            .map_err(|e| e.to_string())?;
+            .map_err(|e| {
+                log::warn!("git push failed: {e}");
+                e.to_string()
+            })?;
 
+        log::info!("git push: '{branch_name}' → {remote_name}");
         Ok(format!("Pushed '{branch_name}' to {remote_name}."))
     }
 }
@@ -378,5 +417,9 @@ pub fn stage_all_changes(workspace_root: &Path) {
     // stages files that were deleted from the working tree.
     let _ = index.add_all(["*"].iter(), git2::IndexAddOption::DEFAULT, None);
     let _ = index.update_all(["*"].iter(), None);
-    let _ = index.write();
+    if let Err(e) = index.write() {
+        log::warn!("git autostage: writing the index failed: {e}");
+    } else {
+        log::debug!("git autostage: staged all changes in {workspace_root:?}");
+    }
 }

@@ -27,6 +27,7 @@ pub fn fetch_apple_notes() -> Result<Vec<NoteRow>, String> {
         end tell
         "#;
 
+    log::debug!("apple-notes: running osascript to read Notes");
     let output = Command::new("osascript")
         .arg("-e")
         .arg(script)
@@ -34,11 +35,10 @@ pub fn fetch_apple_notes() -> Result<Vec<NoteRow>, String> {
         .map_err(|e| format!("running osascript: {e}"))?;
 
     if !output.status.success() {
-        return Err(format!(
-            "osascript exited {}: {}",
-            output.status,
-            String::from_utf8_lossy(&output.stderr).trim()
-        ));
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        let stderr = stderr.trim();
+        log::error!("apple-notes: osascript exited {}: {stderr}", output.status);
+        return Err(format!("osascript exited {}: {stderr}", output.status));
     }
 
     let raw = String::from_utf8_lossy(&output.stdout);

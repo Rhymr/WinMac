@@ -39,6 +39,8 @@ pub struct SourcePanel {
     on_open: Rc<RefCell<Option<Rc<OpenFn>>>>,
     /// `tx` for "please reload source #i" — the poll loop owns the `rx`.
     reload_tx: Rc<RefCell<Option<mpsc::Sender<usize>>>>,
+    /// Current workspace root — the fold state is persisted per workspace.
+    root: Rc<RefCell<Option<PathBuf>>>,
 }
 
 impl Default for SourcePanel {
@@ -75,7 +77,22 @@ impl SourcePanel {
             collapsed: Rc::new(RefCell::new(HashSet::new())),
             on_open: Rc::new(RefCell::new(None)),
             reload_tx: Rc::new(RefCell::new(None)),
+            root: Rc::new(RefCell::new(None)),
         }
+    }
+
+    fn section_key(id: &str) -> String {
+        format!("\u{1}{id}")
+    }
+
+    /// Persist the current fold set for this workspace.
+    fn persist(&self) {
+        let Some(root) = self.root.borrow().clone() else {
+            return;
+        };
+        let mut keys: Vec<String> = self.collapsed.borrow().iter().cloned().collect();
+        keys.sort();
+        crate::workspace::session::update(&root, |s| s.collapsed_sources = Some(keys));
     }
 
     pub fn get_widget(&self) -> &Frame {
@@ -110,10 +127,11 @@ impl SourcePanel {
                     return;
                 }
                 let load_tx = load_tx.clone();
-                std::thread::spawn(move || {
-                    if let Ok(tree) = source.load() {
+                std::thread::spawn(move || match source.load() {
+                    Ok(tree) => {
                         let _ = load_tx.send((idx, tree));
                     }
+                    Err(e) => log::warn!("source {:?} load failed: {e}", source.id()),
                 });
             }
         };
@@ -125,7 +143,7 @@ impl SourcePanel {
         {
             let spawn_load = spawn_load.clone();
             let n = self.registry.sources().len();
-            glib::timeout_add_local(crate::config::APPLE_NOTES_REFRESH, move || {
+            glib::timeout_add_local(crate::config::apple_notes_refresh(), move || {
                 for i in 0..n {
                     spawn_load(i);
                 }
@@ -155,12 +173,34 @@ impl SourcePanel {
         });
     }
 
-    /// Re-point every source at `root`'s `.rhymr/` cache, repaint from that
-    /// cache, and ask for a fresh load. Called when the project changes.
+    /// Re-point every source at `root`'s `.rhymr/` cache, restore its fold
+    /// state, repaint, and ask for a fresh load. Called when the project
+    /// changes.
     pub fn set_workspace_root(&self, root: Option<PathBuf>) {
         for source in self.registry.sources() {
             source.set_workspace(root.as_deref());
         }
+        *self.root.borrow_mut() = root.clone();
+
+        // Restore folds; a workspace the user has never touched here starts
+        // with every source section folded (Apple Notes defaults collapsed).
+        {
+            let mut collapsed = self.collapsed.borrow_mut();
+            collapsed.clear();
+            let saved = root
+                .as_deref()
+                .map(crate::workspace::session::load)
+                .and_then(|s| s.collapsed_sources);
+            match saved {
+                Some(keys) => collapsed.extend(keys),
+                None => {
+                    for source in self.registry.sources() {
+                        collapsed.insert(Self::section_key(source.id()));
+                    }
+                }
+            }
+        }
+
         self.repaint_from_cache();
         for i in 0..self.registry.sources().len() {
             self.request_reload(i);
@@ -220,6 +260,7 @@ impl SourcePanel {
         }
         drop(c);
         self.rebuild();
+        self.persist();
     }
 
     /// Every folder key under source `idx` (its section stays expanded).
@@ -252,6 +293,7 @@ impl SourcePanel {
         }
         drop(c);
         self.rebuild();
+        self.persist();
     }
 
     fn collapse_all(&self, idx: usize) {
@@ -262,6 +304,7 @@ impl SourcePanel {
         }
         drop(c);
         self.rebuild();
+        self.persist();
     }
 
     /// The Expand All / Collapse All / Refresh menu shared by the section
@@ -277,6 +320,18 @@ impl SourcePanel {
         menu.add_separator();
         let p = self.clone();
         menu.add_item(Some("search"), "Refresh", None, None, move || {
+            p.request_reload(idx)
+        });
+        menu.popup_at(&self.frame, x, y);
+    }
+
+    /// The one-item menu shown on a source that has nothing loaded yet —
+    /// "Install" kicks off a load (for Apple Notes on macOS, the first run
+    /// triggers the OS automation-permission prompt).
+    fn source_menu_unloaded(&self, idx: usize, x: f64, y: f64) {
+        let menu = ContextMenu::new(&self.frame);
+        let p = self.clone();
+        menu.add_item(Some("search"), "Install", None, None, move || {
             p.request_reload(idx)
         });
         menu.popup_at(&self.frame, x, y);
@@ -298,10 +353,16 @@ impl SourcePanel {
             }
             any = true;
 
+            // "Not ready" = nothing has loaded into this source's tree yet
+            // (never synced, cache empty, or offline). It renders as a
+            // single collapsed row with the unloaded-folder icon and an
+            // Install-only menu, never a bare header over empty space.
+            let ready = trees.get(idx).is_some_and(|t| !t.is_empty());
+
             let section_key = format!("\u{1}{}", source.id());
-            let expanded = !self.is_collapsed(&section_key);
+            let expanded = ready && !self.is_collapsed(&section_key);
             self.list
-                .append(&self.section_row(idx, source, expanded, &section_key));
+                .append(&self.section_row(idx, source, ready, expanded, &section_key));
             if !expanded {
                 continue;
             }
@@ -368,41 +429,67 @@ impl SourcePanel {
         &self,
         idx: usize,
         source: &Arc<dyn TextSource>,
+        ready: bool,
         expanded: bool,
         key: &str,
     ) -> gtk::ListBoxRow {
         let hbox = Self::row_box(0);
         hbox.add_css_class("file-tree-header");
-        hbox.append(&Self::chevron(expanded));
+        if ready {
+            hbox.append(&Self::chevron(expanded));
+        } else {
+            // Keep the icon column aligned with a loaded source's rows.
+            let spacer = Label::new(None);
+            spacer.set_css_classes(&["dir-chevron"]);
+            hbox.append(&spacer);
+        }
         {
-            let icon = icons::img(source.icon(), 16);
+            // Nothing loaded yet → the "unloaded folder" glyph, JetBrains's
+            // cue for a dependency root that hasn't been resolved.
+            let icon_name = if ready {
+                source.icon()
+            } else {
+                "folder-unloaded"
+            };
+            let icon = icons::img(icon_name, 16);
             icon.set_css_classes(&["file-icon"]);
             hbox.append(&icon);
         }
         // "Apple Notes  [read only]" reads as one bold phrase — every
-        // external source is read-only.
+        // external source is read-only, so the whole row sits on the
+        // goldenrod `.file-ignored` background, the same cue the file tree
+        // uses for ignored / excluded nodes.
         let label = Label::new(Some(&format!("{}  [read only]", source.label())));
-        label.set_css_classes(&["dir-label"]);
+        label.set_css_classes(&["dir-label", "file-ignored"]);
         hbox.append(&label);
 
-        let panel = self.clone();
-        let key = key.to_string();
-        let click = GestureClick::new();
-        click.set_button(1);
-        click.connect_released(move |_, _, _, _| panel.toggle_collapsed(key.clone()));
-        hbox.add_controller(click);
-        self.attach_source_menu(&hbox, idx);
+        if ready {
+            let panel = self.clone();
+            let key = key.to_string();
+            let click = GestureClick::new();
+            click.set_button(1);
+            click.connect_released(move |_, _, _, _| panel.toggle_collapsed(key.clone()));
+            hbox.add_controller(click);
+        }
+        self.attach_source_menu(&hbox, idx, ready);
 
         Self::wrap(hbox)
     }
 
-    /// Right-click on a section / folder row → Expand All / Collapse All /
-    /// Refresh for that source.
-    fn attach_source_menu(&self, hbox: &GtkBox, idx: usize) {
+    /// Right-click on a section / folder row → the full Expand All /
+    /// Collapse All / Refresh menu once the source has content, or just
+    /// "Install" while it hasn't.
+    fn attach_source_menu(&self, hbox: &GtkBox, idx: usize, ready: bool) {
         let panel = self.clone();
         let menu_click = GestureClick::new();
         menu_click.set_button(3);
-        menu_click.connect_pressed(move |_, _, x, y| panel.source_menu(idx, x, y));
+        menu_click.connect_pressed(move |_, _, x, y| {
+            if ready {
+                panel.source_menu(idx, x, y);
+            } else {
+                panel.source_menu_unloaded(idx, x, y);
+            }
+        });
         hbox.add_controller(menu_click);
     }
 
@@ -423,7 +510,7 @@ impl SourcePanel {
             hbox.append(&img);
         }
         let label = Label::new(Some(name));
-        label.set_css_classes(&["dir-label"]);
+        label.set_css_classes(&["dir-label", "file-ignored"]);
         hbox.append(&label);
 
         let panel = self.clone();
@@ -431,7 +518,8 @@ impl SourcePanel {
         click.set_button(1);
         click.connect_released(move |_, _, _, _| panel.toggle_collapsed(key.clone()));
         hbox.add_controller(click);
-        self.attach_source_menu(&hbox, idx);
+        // A folder row only exists once the source has loaded content.
+        self.attach_source_menu(&hbox, idx, true);
 
         Self::wrap(hbox)
     }
@@ -449,6 +537,7 @@ impl SourcePanel {
             hbox.append(&img);
         }
         let label = Label::new(Some(title));
+        label.set_css_classes(&["file-ignored"]);
         hbox.append(&label);
 
         let panel = self.clone();
