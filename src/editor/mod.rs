@@ -25,6 +25,21 @@ use std::rc::Rc;
 /// gutter's per-line diff vs HEAD.
 const VCS_DEBOUNCE: std::time::Duration = std::time::Duration::from_millis(400);
 
+/// Bundle the rhyme-engine tunables from `settings` for
+/// `rhyme::highlight::attach` / `RhymeHighlight::set_tuning`.
+fn rhyme_tuning(settings: &Settings) -> crate::rhyme::highlight::RhymeTuning {
+    crate::rhyme::highlight::RhymeTuning {
+        line_window: settings.rhyme_line_window as usize,
+        merge_threshold: settings.rhyme_merge_threshold as f32,
+        hue_count: settings.rhyme_hue_count as usize,
+        thresholds: crate::rhyme::score::Thresholds {
+            anchor: settings.rhyme_anchor as f32,
+            extend: settings.rhyme_extend as f32,
+            jump: settings.rhyme_jump as f32,
+        },
+    }
+}
+
 /// Per-line syllable-count cache for the gutter renderer: 0-based line
 /// number → (hash of the line's text, count). `count_syllables` runs ~20
 /// backtracking regex passes per word, and the gutter re-queries every
@@ -597,6 +612,8 @@ impl TextEditor {
                     &self.buffer,
                     settings.theme,
                     settings.rhyme_stop_at_blank_line,
+                    rhyme_tuning(settings),
+                    u64::from(settings.rhyme_debounce_ms),
                 );
                 let legend = self.rhyme_legend.clone();
                 let legend_on = self.rhyme_legend_on.clone();
@@ -611,13 +628,15 @@ impl TextEditor {
                     handle.detach(); // fires groups_changed(&[]) -> legend hides
                 }
             }
-            // Already attached and staying on — push a live theme switch
-            // and stanza-break-rule change through so open tabs follow the
-            // settings without a reload.
+            // Already attached and staying on — push a live theme switch,
+            // stanza-break rule and engine-tuning change through so open
+            // tabs follow the settings without a reload.
             (true, true) => {
                 if let Some(handle) = rhyme_slot.as_ref() {
                     handle.set_theme(settings.theme);
                     handle.set_stop_at_blank_line(settings.rhyme_stop_at_blank_line);
+                    handle.set_tuning(rhyme_tuning(settings));
+                    handle.set_debounce_ms(u64::from(settings.rhyme_debounce_ms));
                 }
             }
             (false, false) => {}

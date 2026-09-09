@@ -80,6 +80,18 @@ fn grid_check(grid: &Grid, row: i32, check: &CheckButton) {
     grid.attach(check, 0, row, 2, 1);
 }
 
+/// Decimal places a float spin button should show for a given step
+/// (0.05 -> 2, 0.1 -> 1, 1.0 -> 0), capped at 4.
+fn decimals_for(step: f64) -> u32 {
+    let mut places = 0;
+    let mut scaled = step.abs();
+    while places < 4 && (scaled.fract() > 1e-9) {
+        scaled *= 10.0;
+        places += 1;
+    }
+    places
+}
+
 /// A wrapped, dimmed explanatory paragraph under a group.
 fn description_label(text: &str) -> Label {
     Label::builder()
@@ -281,7 +293,10 @@ impl SettingWidgets {
         }
         match self.0.get(key)? {
             BoundWidget::Check(cb) => Some(SettingValue::Bool(cb.is_active())),
-            BoundWidget::Spin(sb) => Some(SettingValue::Int(sb.value().round() as i64)),
+            BoundWidget::Spin(sb) => Some(match kind {
+                SettingKind::Float { .. } => SettingValue::Float(sb.value()),
+                _ => SettingValue::Int(sb.value().round() as i64),
+            }),
             BoundWidget::Enum { selected, values } => {
                 let idx = selected.get().min(values.len().saturating_sub(1));
                 Some(SettingValue::Text(values[idx].to_string()))
@@ -342,6 +357,15 @@ fn build_page(
                 let spin = SpinButton::with_range(min as f64, max as f64, step.max(1) as f64);
                 if let SettingValue::Int(n) = (spec.get)(settings) {
                     spin.set_value(n as f64);
+                }
+                grid_field(&grid, row, &format!("{}:", spec.label), &spin);
+                widgets.0.insert(spec.key, BoundWidget::Spin(spin));
+            }
+            SettingKind::Float { min, max, step } => {
+                let spin = SpinButton::with_range(min, max, step);
+                spin.set_digits(decimals_for(step));
+                if let SettingValue::Float(f) = (spec.get)(settings) {
+                    spin.set_value(f);
                 }
                 grid_field(&grid, row, &format!("{}:", spec.label), &spin);
                 widgets.0.insert(spec.key, BoundWidget::Spin(spin));

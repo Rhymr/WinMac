@@ -13,6 +13,7 @@ use super::Settings;
 pub enum SettingValue {
     Bool(bool),
     Int(i64),
+    Float(f64),
     Text(String),
 }
 
@@ -23,6 +24,8 @@ impl SettingValue {
         match self {
             SettingValue::Bool(b) => b.to_string(),
             SettingValue::Int(n) => n.to_string(),
+            // `{}` round-trips and drops trailing zeros ("3.25", "0", "1.5").
+            SettingValue::Float(f) => format!("{f}"),
             SettingValue::Text(s) => s.replace(['\n', '\r'], ""),
         }
     }
@@ -37,6 +40,13 @@ pub enum SettingKind {
         min: i64,
         max: i64,
         step: i64,
+    },
+    /// A fractional number. `step` also fixes the spin button's shown
+    /// decimal places.
+    Float {
+        min: f64,
+        max: f64,
+        step: f64,
     },
     /// A closed set: `values` are the on-disk tokens, `labels` the UI
     /// strings — index-aligned, equal length.
@@ -71,6 +81,11 @@ impl SettingKind {
                 .parse::<i64>()
                 .ok()
                 .map(|n| SettingValue::Int(n.clamp(min, max))),
+            SettingKind::Float { min, max, .. } => raw
+                .parse::<f64>()
+                .ok()
+                .filter(|f| f.is_finite())
+                .map(|f| SettingValue::Float(f.clamp(min, max))),
             SettingKind::Enum { values, .. } => values
                 .contains(&raw)
                 .then(|| SettingValue::Text(raw.to_string())),

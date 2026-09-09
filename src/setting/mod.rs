@@ -185,6 +185,52 @@ spec::settings! {
         get |s| SettingValue::Bool(s.rhyme_hover_emphasis) ;
         set |s, v| if let SettingValue::Bool(b) = v { s.rhyme_hover_emphasis = b } ;
 
+    rhyme_line_window: u32 = 3 ;
+        kind SettingKind::Int { min: 1, max: 8, step: 1 } ; in EditorRhyme / "Engine" ;
+        label "Lines of look-back" ; help "" ; live Editor ;
+        get |s| SettingValue::Int(s.rhyme_line_window as i64) ;
+        set |s, v| if let SettingValue::Int(n) = v { s.rhyme_line_window = n as u32 } ;
+
+    rhyme_hue_count: u32 = 24 ;
+        kind SettingKind::Int { min: 6, max: 24, step: 1 } ; in EditorRhyme / "Engine" ;
+        label "Distinct group colours before the palette repeats" ; help "" ; live Editor ;
+        get |s| SettingValue::Int(s.rhyme_hue_count as i64) ;
+        set |s, v| if let SettingValue::Int(n) = v { s.rhyme_hue_count = n as u32 } ;
+
+    rhyme_debounce_ms: u32 = 400 ;
+        kind SettingKind::Int { min: 100, max: 2000, step: 50 } ; in EditorRhyme / "Engine" ;
+        label "Recompute delay after the last keystroke (ms)" ; help "" ; live Editor ;
+        get |s| SettingValue::Int(s.rhyme_debounce_ms as i64) ;
+        set |s, v| if let SettingValue::Int(n) = v { s.rhyme_debounce_ms = n as u32 } ;
+
+    rhyme_merge_threshold: f64 = 3.25 ;
+        kind SettingKind::Float { min: 1.0, max: 6.0, step: 0.05 } ; in EditorRhyme / "Engine" ;
+        label "Merge threshold" ;
+        help "Minimum length-normalised score for two syllables to join the same colour group. Higher = fewer, stricter groups." ;
+        live Editor ;
+        get |s| SettingValue::Float(s.rhyme_merge_threshold) ;
+        set |s, v| if let SettingValue::Float(f) = v { s.rhyme_merge_threshold = f } ;
+
+    rhyme_anchor: f64 = 1.5 ;
+        kind SettingKind::Float { min: 0.0, max: 5.0, step: 0.1 } ; in EditorRhyme / "Engine" ;
+        label "Anchor threshold" ; help "" ; live Editor ;
+        get |s| SettingValue::Float(s.rhyme_anchor) ;
+        set |s, v| if let SettingValue::Float(f) = v { s.rhyme_anchor = f } ;
+
+    rhyme_extend: f64 = 0.0 ;
+        kind SettingKind::Float { min: 0.0, max: 5.0, step: 0.1 } ; in EditorRhyme / "Engine" ;
+        label "Extend threshold" ; help "" ; live Editor ;
+        get |s| SettingValue::Float(s.rhyme_extend) ;
+        set |s, v| if let SettingValue::Float(f) = v { s.rhyme_extend = f } ;
+
+    rhyme_jump: f64 = 2.5 ;
+        kind SettingKind::Float { min: 0.0, max: 5.0, step: 0.1 } ; in EditorRhyme / "Engine" ;
+        label "Jump threshold" ;
+        help "Anchor-and-extend detection tunables from Hirjee & Brown. Defaults suit most lyrics; changing them alters how aggressively near-rhymes are detected." ;
+        live Editor ;
+        get |s| SettingValue::Float(s.rhyme_jump) ;
+        set |s, v| if let SettingValue::Float(f) = v { s.rhyme_jump = f } ;
+
     word_completion: bool = false ;
         kind SettingKind::Bool ; in EditorCompletion / "" ;
         label "Enable dictionary word completion" ;
@@ -400,6 +446,22 @@ mod tests {
         parse_into(&mut settings, "tab_width=999\nfont_size=2\n");
         assert_eq!(settings.tab_width, 8);
         assert_eq!(settings.font_size, 6);
+    }
+
+    #[test]
+    fn floats_round_trip_and_clamp_on_load() {
+        let mut settings = Settings::default();
+        parse_into(
+            &mut settings,
+            "rhyme_merge_threshold=2.75\nrhyme_anchor=99\nrhyme_extend=-1\n",
+        );
+        assert_eq!(settings.rhyme_merge_threshold, 2.75);
+        assert_eq!(settings.rhyme_anchor, 5.0); // clamped to max
+        assert_eq!(settings.rhyme_extend, 0.0); // clamped to min
+
+        let mut again = Settings::default();
+        parse_into(&mut again, &serialize(&settings));
+        assert_eq!(settings, again);
     }
 
     #[test]
