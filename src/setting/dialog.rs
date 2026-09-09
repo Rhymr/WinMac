@@ -419,6 +419,10 @@ pub fn show_settings_dialog(app: &Application, controller: Option<Rc<WorkspaceCo
         let icon_theme_selected = icon_theme_selected.clone();
         let notes_cache_selected = notes_cache_selected.clone();
         let font_button = font_button.clone();
+        // The loaded-from-disk value, kept only so its passthrough store of
+        // keys a newer build wrote (`Settings`' private `unknown`) survives
+        // a save — the dialog has no widget for those.
+        let disk = settings.clone();
         move || {
             let font_desc = font_button.font_desc().unwrap_or_else(|| {
                 pango::FontDescription::from_string(&Settings::default().font_family)
@@ -460,6 +464,7 @@ pub fn show_settings_dialog(app: &Application, controller: Option<Rc<WorkspaceCo
                 },
                 font_family,
                 font_size,
+                ..disk.clone()
             }
         }
     });

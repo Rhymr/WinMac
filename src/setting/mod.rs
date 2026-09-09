@@ -1,5 +1,7 @@
 pub mod dialog;
+pub mod spec;
 
+use spec::{SettingKind, SettingValue};
 use std::fs;
 use std::path::PathBuf;
 
@@ -13,14 +15,14 @@ pub enum Theme {
 }
 
 impl Theme {
-    fn as_str(self) -> &'static str {
+    pub(crate) fn as_str(self) -> &'static str {
         match self {
             Theme::Dark => "dark",
             Theme::Light => "light",
         }
     }
 
-    fn parse(s: &str) -> Option<Self> {
+    pub(crate) fn parse(s: &str) -> Option<Self> {
         match s {
             "dark" => Some(Theme::Dark),
             "light" => Some(Theme::Light),
@@ -39,14 +41,14 @@ pub enum IconTheme {
 }
 
 impl IconTheme {
-    fn as_str(self) -> &'static str {
+    pub(crate) fn as_str(self) -> &'static str {
         match self {
             IconTheme::Color => "color",
             IconTheme::Monochrome => "monochrome",
         }
     }
 
-    fn parse(s: &str) -> Option<Self> {
+    pub(crate) fn parse(s: &str) -> Option<Self> {
         match s {
             "color" => Some(IconTheme::Color),
             "monochrome" => Some(IconTheme::Monochrome),
@@ -67,14 +69,14 @@ pub enum NotesCacheScope {
 }
 
 impl NotesCacheScope {
-    fn as_str(self) -> &'static str {
+    pub(crate) fn as_str(self) -> &'static str {
         match self {
             NotesCacheScope::Workspace => "workspace",
             NotesCacheScope::User => "user",
         }
     }
 
-    fn parse(s: &str) -> Option<Self> {
+    pub(crate) fn parse(s: &str) -> Option<Self> {
         match s {
             "workspace" => Some(NotesCacheScope::Workspace),
             "user" => Some(NotesCacheScope::User),
@@ -83,64 +85,134 @@ impl NotesCacheScope {
     }
 }
 
-/// User-configurable app behavior, persisted across launches. New
-/// `TextEditor`s read this at construction time — changing a setting takes
-/// effect for tabs opened afterward, not ones already open.
-#[derive(Clone, PartialEq)]
-pub struct Settings {
-    pub show_syllable_gutter: bool,
-    pub show_vcs_gutter: bool,
-    pub rhyme_highlighting: bool,
-    /// Whether the rhyme highlighter treats a blank line as a stanza
-    /// boundary it won't compare across, even if the other line is within
-    /// its line-lookback window. On by default since rhyme schemes rarely
-    /// intentionally reach across a stanza break; off lets the highlighter
-    /// also catch schemes that do.
-    pub rhyme_stop_at_blank_line: bool,
-    /// Show the active-rhyme-group legend strip under the editor.
-    pub show_rhyme_legend: bool,
-    /// Let hovering a rhyming word emphasise its group (dim the others).
-    pub rhyme_hover_emphasis: bool,
-    pub word_completion: bool,
-    pub auto_indent: bool,
-    pub tab_width: u32,
-    pub git_autostage: bool,
-    pub notes_cache_scope: NotesCacheScope,
-    pub theme: Theme,
-    pub icon_theme: IconTheme,
-    pub font_family: String,
-    pub font_size: u32,
-}
+// ===========================================================================
+// The registry. One entry per setting -> the `Settings` struct, its
+// `Default`, and the `SPECS` table that `load` / `save` (and, from the next
+// commit, the settings dialog) read. New `TextEditor`s read `Settings` at
+// construction; live changes reach open tabs through
+// `WorkspaceController::apply_settings`.
+// ===========================================================================
+spec::settings! {
+    show_syllable_gutter: bool = true ;
+        kind SettingKind::Bool ; in EditorGeneral / "Gutter" ;
+        label "Show syllable count in the gutter" ; help "" ; live Editor ;
+        get |s| SettingValue::Bool(s.show_syllable_gutter) ;
+        set |s, v| if let SettingValue::Bool(b) = v { s.show_syllable_gutter = b } ;
 
-impl Default for Settings {
-    fn default() -> Self {
-        Self {
-            show_syllable_gutter: true,
-            show_vcs_gutter: true,
-            rhyme_highlighting: false,
-            rhyme_stop_at_blank_line: true,
-            show_rhyme_legend: true,
-            rhyme_hover_emphasis: true,
-            // Off by default: dictionary-only completion misses most
-            // songwriting vocabulary (slang, informal spellings), so it's
-            // opt-in rather than on by default.
-            word_completion: false,
-            auto_indent: true,
-            tab_width: 4,
-            git_autostage: true,
-            notes_cache_scope: NotesCacheScope::Workspace,
-            theme: Theme::Dark,
-            icon_theme: IconTheme::Color,
-            // JetBrains Mono, 13px — matches the JetBrains IDE look the
-            // rest of the app's styling is chasing. Falls back to whatever
-            // Pango's normal font matching picks if it isn't installed
-            // (this app doesn't bundle the font file itself — see the
-            // settings dialog's font picker, which only ever lists
-            // already-installed system fonts).
-            font_family: "JetBrains Mono".to_string(),
-            font_size: 13,
-        }
-    }
+    show_vcs_gutter: bool = true ;
+        kind SettingKind::Bool ; in EditorGeneral / "Gutter" ;
+        label "Show VCS change markers in the gutter" ; help "" ; live Editor ;
+        get |s| SettingValue::Bool(s.show_vcs_gutter) ;
+        set |s, v| if let SettingValue::Bool(b) = v { s.show_vcs_gutter = b } ;
+
+    rhyme_highlighting: bool = false ;
+        kind SettingKind::Bool ; in EditorRhyme / "" ;
+        label "Highlight rhyming syllables" ;
+        help "Colors the text of syllables that rhyme with another word elsewhere in the document." ;
+        live Editor ;
+        get |s| SettingValue::Bool(s.rhyme_highlighting) ;
+        set |s, v| if let SettingValue::Bool(b) = v { s.rhyme_highlighting = b } ;
+
+    rhyme_stop_at_blank_line: bool = true ;
+        kind SettingKind::Bool ; in EditorRhyme / "" ;
+        label "Don't match rhymes across a blank line" ; help "" ; live Editor ;
+        get |s| SettingValue::Bool(s.rhyme_stop_at_blank_line) ;
+        set |s, v| if let SettingValue::Bool(b) = v { s.rhyme_stop_at_blank_line = b } ;
+
+    show_rhyme_legend: bool = true ;
+        kind SettingKind::Bool ; in EditorRhyme / "" ;
+        label "Show the rhyme-group legend under the editor" ; help "" ; live Editor ;
+        get |s| SettingValue::Bool(s.show_rhyme_legend) ;
+        set |s, v| if let SettingValue::Bool(b) = v { s.show_rhyme_legend = b } ;
+
+    rhyme_hover_emphasis: bool = true ;
+        kind SettingKind::Bool ; in EditorRhyme / "" ;
+        label "Hover a word to emphasise its rhyme group" ; help "" ; live Editor ;
+        get |s| SettingValue::Bool(s.rhyme_hover_emphasis) ;
+        set |s, v| if let SettingValue::Bool(b) = v { s.rhyme_hover_emphasis = b } ;
+
+    word_completion: bool = false ;
+        kind SettingKind::Bool ; in EditorCompletion / "" ;
+        label "Enable dictionary word completion" ;
+        help "Suggests words from the bundled dictionary as you type. Tab or Enter accepts a suggestion." ;
+        live Editor ;
+        get |s| SettingValue::Bool(s.word_completion) ;
+        set |s, v| if let SettingValue::Bool(b) = v { s.word_completion = b } ;
+
+    auto_indent: bool = true ;
+        kind SettingKind::Bool ; in EditorGeneral / "Indentation" ;
+        label "Auto-indent new lines" ; help "" ; live Editor ;
+        get |s| SettingValue::Bool(s.auto_indent) ;
+        set |s, v| if let SettingValue::Bool(b) = v { s.auto_indent = b } ;
+
+    tab_width: u32 = 4 ;
+        kind SettingKind::Int { min: 1, max: 8, step: 1 } ; in EditorGeneral / "Indentation" ;
+        label "Tab width" ; help "" ; live Editor ;
+        get |s| SettingValue::Int(s.tab_width as i64) ;
+        set |s, v| if let SettingValue::Int(n) = v { s.tab_width = n as u32 } ;
+
+    git_autostage: bool = true ;
+        kind SettingKind::Bool ; in VersionControlGit / "" ;
+        label "Automatically stage changes when saving" ; help "" ; live Other ;
+        get |s| SettingValue::Bool(s.git_autostage) ;
+        set |s, v| if let SettingValue::Bool(b) = v { s.git_autostage = b } ;
+
+    notes_cache_scope: NotesCacheScope = NotesCacheScope::Workspace ;
+        kind SettingKind::Enum {
+            values: &["workspace", "user"],
+            labels: &["This workspace", "All workspaces"],
+        } ;
+        in ToolsNetwork / "" ;
+        label "Apple Notes cache" ;
+        help "Where the Apple Notes snapshot is stored. \"All workspaces\" keeps one shared copy under your user config dir instead of per-project .rhymr/." ;
+        live Other ;
+        get |s| SettingValue::Text(s.notes_cache_scope.as_str().to_string()) ;
+        set |s, v| if let SettingValue::Text(t) = v
+            && let Some(x) = NotesCacheScope::parse(&t)
+        {
+            s.notes_cache_scope = x
+        } ;
+
+    theme: Theme = Theme::Dark ;
+        kind SettingKind::Enum { values: &["dark", "light"], labels: &["Dark", "Light"] } ;
+        in Appearance / "" ;
+        label "Theme" ; help "" ; live EditorAndCss ;
+        get |s| SettingValue::Text(s.theme.as_str().to_string()) ;
+        set |s, v| if let SettingValue::Text(t) = v
+            && let Some(x) = Theme::parse(&t)
+        {
+            s.theme = x
+        } ;
+
+    icon_theme: IconTheme = IconTheme::Color ;
+        kind SettingKind::Enum {
+            values: &["color", "monochrome"],
+            labels: &["Color", "Monochrome"],
+        } ;
+        in Appearance / "" ;
+        label "Icons" ; help "" ; live Other ;
+        get |s| SettingValue::Text(s.icon_theme.as_str().to_string()) ;
+        set |s, v| if let SettingValue::Text(t) = v
+            && let Some(x) = IconTheme::parse(&t)
+        {
+            s.icon_theme = x
+        } ;
+
+    font_family: String = "JetBrains Mono".to_string() ;
+        kind SettingKind::Font ; in Appearance / "" ;
+        label "Editor font" ; help "" ; live Css ;
+        get |s| SettingValue::Text(s.font_family.clone()) ;
+        set |s, v| if let SettingValue::Text(t) = v
+            && !t.is_empty()
+        {
+            s.font_family = t
+        } ;
+
+    font_size: u32 = 13 ;
+        kind SettingKind::FontSize { min: 6, max: 96 } ; in Appearance / "" ;
+        label "Editor font size" ; help "" ; live Css ;
+        get |s| SettingValue::Int(s.font_size as i64) ;
+        set |s, v| if let SettingValue::Int(n) = v { s.font_size = n as u32 } ;
 }
 
 fn settings_file() -> Option<PathBuf> {
@@ -151,7 +223,55 @@ fn settings_file() -> Option<PathBuf> {
     Some(dir)
 }
 
+/// Fold a flat `key=value` document into `settings`: known keys through
+/// their spec (validated and clamped), unknown keys stashed verbatim so a
+/// file from a newer build round-trips unharmed. A line without `=`, or one
+/// whose value the spec can't use, is skipped — the field keeps its current
+/// (default) value, as the old lenient `load` did.
+fn parse_into(settings: &mut Settings, contents: &str) {
+    for line in contents.lines() {
+        let Some((key, raw)) = line.split_once('=') else {
+            continue;
+        };
+        let (key, raw) = (key.trim(), raw.trim());
+        match SPECS.iter().find(|spec| spec.key == key) {
+            Some(spec) => {
+                if let Some(value) = spec.kind.parse_clamped(raw) {
+                    (spec.set)(settings, value);
+                }
+            }
+            None => {
+                settings
+                    .unknown
+                    .insert(key.to_string(), raw.replace(['\n', '\r'], ""));
+            }
+        }
+    }
+}
+
+/// Render `settings` to the flat format: every spec in registry order, then
+/// any stashed unknown keys (sorted, from the `BTreeMap`).
+fn serialize(settings: &Settings) -> String {
+    let mut out = String::new();
+    for spec in SPECS {
+        out.push_str(spec.key);
+        out.push('=');
+        out.push_str(&(spec.get)(settings).render());
+        out.push('\n');
+    }
+    for (key, value) in &settings.unknown {
+        out.push_str(key);
+        out.push('=');
+        out.push_str(value);
+        out.push('\n');
+    }
+    out
+}
+
 impl Settings {
+    /// Load from `<config dir>/rhymr/settings.txt`, falling back to
+    /// [`Settings::default`] for a missing or unreadable file and for any
+    /// unparseable line.
     pub fn load() -> Self {
         let mut settings = Settings::default();
         let Some(path) = settings_file() else {
@@ -160,64 +280,100 @@ impl Settings {
         let Ok(contents) = fs::read_to_string(&path) else {
             return settings;
         };
-
-        for line in contents.lines() {
-            let Some((key, value)) = line.split_once('=') else {
-                continue;
-            };
-            match key {
-                "show_syllable_gutter" => settings.show_syllable_gutter = value == "true",
-                "show_vcs_gutter" => settings.show_vcs_gutter = value == "true",
-                "rhyme_highlighting" => settings.rhyme_highlighting = value == "true",
-                "rhyme_stop_at_blank_line" => settings.rhyme_stop_at_blank_line = value == "true",
-                "show_rhyme_legend" => settings.show_rhyme_legend = value == "true",
-                "rhyme_hover_emphasis" => settings.rhyme_hover_emphasis = value == "true",
-                "word_completion" => settings.word_completion = value == "true",
-                "auto_indent" => settings.auto_indent = value == "true",
-                "tab_width" => settings.tab_width = value.parse().unwrap_or(settings.tab_width),
-                "git_autostage" => settings.git_autostage = value == "true",
-                "notes_cache_scope" => {
-                    settings.notes_cache_scope =
-                        NotesCacheScope::parse(value).unwrap_or(settings.notes_cache_scope)
-                }
-                "theme" => settings.theme = Theme::parse(value).unwrap_or(settings.theme),
-                "icon_theme" => {
-                    settings.icon_theme = IconTheme::parse(value).unwrap_or(settings.icon_theme)
-                }
-                "font_family" if !value.is_empty() => settings.font_family = value.to_string(),
-                "font_size" => settings.font_size = value.parse().unwrap_or(settings.font_size),
-                _ => {}
-            }
-        }
-
+        parse_into(&mut settings, &contents);
         settings
     }
 
+    /// Write every setting back in registry order, plus any keys a newer
+    /// build left behind. A write failure is logged, not propagated —
+    /// settings are non-critical and the app stays usable without them.
     pub fn save(&self) {
         let Some(path) = settings_file() else {
             return;
         };
-        // Lines are a naive `key=value` format — strip newlines from the one
-        // free-text field so a pasted font name can't corrupt the file.
-        let font_family = self.font_family.replace(['\n', '\r'], "");
-        let contents = format!(
-            "show_syllable_gutter={}\nshow_vcs_gutter={}\nrhyme_highlighting={}\nrhyme_stop_at_blank_line={}\nshow_rhyme_legend={}\nrhyme_hover_emphasis={}\nword_completion={}\nauto_indent={}\ntab_width={}\ngit_autostage={}\nnotes_cache_scope={}\ntheme={}\nicon_theme={}\nfont_family={}\nfont_size={}\n",
-            self.show_syllable_gutter,
-            self.show_vcs_gutter,
-            self.rhyme_highlighting,
-            self.rhyme_stop_at_blank_line,
-            self.show_rhyme_legend,
-            self.rhyme_hover_emphasis,
-            self.word_completion,
-            self.auto_indent,
-            self.tab_width,
-            self.git_autostage,
-            self.notes_cache_scope.as_str(),
-            self.theme.as_str(),
-            self.icon_theme.as_str(),
-            font_family,
-            self.font_size,
+        if let Err(err) = fs::write(&path, serialize(self)) {
+            log::warn!("could not save settings to {}: {err}", path.display());
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn default_round_trips_through_the_flat_format() {
+        let original = Settings::default();
+        let mut reloaded = Settings::default();
+        parse_into(&mut reloaded, &serialize(&original));
+        assert_eq!(original, reloaded);
+    }
+
+    #[test]
+    fn unknown_keys_survive_a_load_and_save() {
+        let mut settings = Settings::default();
+        parse_into(
+            &mut settings,
+            "theme=light\nfuture_toggle=true\nvendor.note=hello world\n",
         );
-        let _ = fs::write(path, contents);
+        assert_eq!(settings.theme, Theme::Light);
+
+        let text = serialize(&settings);
+        assert!(text.contains("future_toggle=true"));
+        assert!(text.contains("vendor.note=hello world"));
+
+        // A second round trip is stable.
+        let mut again = Settings::default();
+        parse_into(&mut again, &text);
+        assert_eq!(settings, again);
+    }
+
+    #[test]
+    fn out_of_range_ints_are_clamped_on_load() {
+        let mut settings = Settings::default();
+        parse_into(&mut settings, "tab_width=999\nfont_size=2\n");
+        assert_eq!(settings.tab_width, 8);
+        assert_eq!(settings.font_size, 6);
+    }
+
+    #[test]
+    fn unknown_enum_token_keeps_the_default() {
+        let mut settings = Settings::default();
+        parse_into(&mut settings, "theme=chartreuse\nicon_theme=neon\n");
+        assert_eq!(settings.theme, Theme::Dark);
+        assert_eq!(settings.icon_theme, IconTheme::Color);
+    }
+
+    #[test]
+    fn a_legacy_settings_file_loads_as_expected() {
+        // The exact 15-line shape older builds wrote.
+        let legacy = "show_syllable_gutter=false\n\
+             show_vcs_gutter=true\n\
+             rhyme_highlighting=true\n\
+             rhyme_stop_at_blank_line=false\n\
+             show_rhyme_legend=false\n\
+             rhyme_hover_emphasis=true\n\
+             word_completion=true\n\
+             auto_indent=false\n\
+             tab_width=2\n\
+             git_autostage=false\n\
+             notes_cache_scope=user\n\
+             theme=light\n\
+             icon_theme=monochrome\n\
+             font_family=Iosevka\n\
+             font_size=15\n";
+        let mut settings = Settings::default();
+        parse_into(&mut settings, legacy);
+
+        assert!(!settings.show_syllable_gutter);
+        assert!(settings.rhyme_highlighting);
+        assert!(!settings.auto_indent);
+        assert_eq!(settings.tab_width, 2);
+        assert!(!settings.git_autostage);
+        assert_eq!(settings.notes_cache_scope, NotesCacheScope::User);
+        assert_eq!(settings.theme, Theme::Light);
+        assert_eq!(settings.icon_theme, IconTheme::Monochrome);
+        assert_eq!(settings.font_family, "Iosevka");
+        assert_eq!(settings.font_size, 15);
     }
 }
