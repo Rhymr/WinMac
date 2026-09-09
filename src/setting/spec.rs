@@ -5,12 +5,6 @@
 //! the settings dialog both derive from [`crate::setting::SPECS`], so a new
 //! setting is one macro entry, not five hand-kept copies.
 
-// `category` / `group` / `label` / `description` / `live` and the category
-// tree are consumed by the data-driven settings dialog in the following
-// commit; `load` / `save` only read `key` / `kind` / `get` / `set`. This
-// allow is lifted the commit after.
-#![allow(dead_code)]
-
 use super::Settings;
 
 /// A serialised scalar, carried between the flat file, the spec `get` / `set`
@@ -163,13 +157,14 @@ pub const CATEGORY_TREE: &[CategoryNode] = &[
         id: CategoryId::EditorRhyme,
         parent: Some(CategoryId::EditorGeneral),
         label: "Rhyme Highlighting",
-        breadcrumb_parent: "Editor",
+        // "Editor" already comes from the parent chain.
+        breadcrumb_parent: "",
     },
     CategoryNode {
         id: CategoryId::EditorCompletion,
         parent: Some(CategoryId::EditorGeneral),
         label: "Completions",
-        breadcrumb_parent: "Editor",
+        breadcrumb_parent: "",
     },
     CategoryNode {
         id: CategoryId::VersionControlGit,
