@@ -311,7 +311,7 @@ fn fetch_rhymes(word: &str) -> LookupResult {
             (any_ok, unique)
         };
 
-        match tokio::time::timeout(crate::config::RHYME_LOOKUP_TIMEOUT, lookup).await {
+        match tokio::time::timeout(crate::config::rhyme_lookup_timeout(), lookup).await {
             Ok((true, unique)) => {
                 log::debug!("datamuse returned {} rhymes for {word:?}", unique.len());
                 LookupResult::Words(unique.into_iter().collect())

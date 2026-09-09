@@ -331,6 +331,20 @@ spec::settings! {
             s.notes_cache_scope = x
         } ;
 
+    apple_notes_refresh_secs: u32 = 300 ;
+        kind SettingKind::Int { min: 30, max: 3600, step: 30 } ; in ToolsNetwork / "" ;
+        label "Apple Notes refresh interval (s)" ; help "" ; live Restart ;
+        get |s| SettingValue::Int(s.apple_notes_refresh_secs as i64) ;
+        set |s, v| if let SettingValue::Int(n) = v { s.apple_notes_refresh_secs = n as u32 } ;
+
+    rhyme_lookup_timeout_secs: u32 = 8 ;
+        kind SettingKind::Int { min: 1, max: 60, step: 1 } ; in ToolsNetwork / "" ;
+        label "Rhyme search timeout (s)" ;
+        help "How long to wait on the Datamuse rhyme lookup before falling back to the local dictionary." ;
+        live Other ;
+        get |s| SettingValue::Int(s.rhyme_lookup_timeout_secs as i64) ;
+        set |s, v| if let SettingValue::Int(n) = v { s.rhyme_lookup_timeout_secs = n as u32 } ;
+
     theme: Theme = Theme::Dark ;
         kind SettingKind::Enum { values: &["dark", "light"], labels: &["Dark", "Light"] } ;
         in Appearance / "" ;
