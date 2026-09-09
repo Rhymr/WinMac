@@ -169,7 +169,29 @@
     border-right: 1px solid var(--border-dark);
 }
 
-/* Git-ignored entries — muted goldenrod, JetBrains-style. */
-.file-ignored {
-    color: var(--text-ignored);
+/* Git-ignored entries — instead of tinting the text goldenrod, the label
+   keeps its default colour and sits on a muted goldenrod background, so the
+   name stays fully legible and the "ignored" state reads as a highlight.
+   The `.file-list label` compound outweighs the `background-color: inherit`
+   on `.file-list label` above; the margin/padding swap keeps the text
+   x-aligned with sibling rows — only the background reclaims the label's
+   4px left gap. */
+.file-list label.file-ignored {
+    background-color: var(--bg-ignored);
+    margin-left: 0;
+    padding-left: 4px;
+    padding-right: 4px;
+}
+
+/* Read-only source trees (Apple Notes, …): every row is read-only, so the
+   whole tree — each row, its inner box, its section header and its labels —
+   takes the goldenrod background rather than just the label. These selectors
+   match the specificity of the `.file-list …` / `.file-tree-header` rules
+   above and win on source order, so they must stay after them. */
+.source-list > row,
+.source-list .file-list-row,
+.source-list .file-tree-header,
+.source-list label,
+.source-list image {
+    background-color: var(--bg-ignored);
 }

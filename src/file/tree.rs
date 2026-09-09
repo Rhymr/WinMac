@@ -42,7 +42,8 @@ pub struct FileTree {
     // Empty whenever the workspace isn't a git repo.
     git_statuses: Rc<RefCell<HashMap<PathBuf, GitFileStatus>>>,
     // Absolute paths git ignores (one per ignored dir). A row whose path
-    // is, or is under, one of these is greyed goldenrod (`.file-ignored`).
+    // is, or is under, one of these sits on a goldenrod background
+    // (`.file-ignored`).
     ignored: Rc<RefCell<HashSet<PathBuf>>>,
     // Decoded once and shared as *paintable data*, not as widgets: a GTK
     // widget can only ever have one parent, so reusing the same Image
@@ -404,8 +405,9 @@ impl FileTree {
             label
         };
 
-        // Git-ignored entries (and anything under an ignored dir) go
-        // goldenrod, JetBrains-style — but not the workspace root itself.
+        // Git-ignored entries (and anything under an ignored dir) sit on a
+        // goldenrod background, JetBrains-style — but not the workspace
+        // root itself.
         if !is_root && self.is_ignored(path) {
             name_label.add_css_class("file-ignored");
         }
