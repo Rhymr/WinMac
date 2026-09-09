@@ -143,7 +143,7 @@ impl SourcePanel {
         {
             let spawn_load = spawn_load.clone();
             let n = self.registry.sources().len();
-            glib::timeout_add_local(crate::config::APPLE_NOTES_REFRESH, move || {
+            glib::timeout_add_local(crate::config::apple_notes_refresh(), move || {
                 for i in 0..n {
                     spawn_load(i);
                 }

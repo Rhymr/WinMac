@@ -350,7 +350,7 @@ pub struct RhymeSpan {
     pub score: f32,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Thresholds {
     /// Minimum score for a syllable pair to seed a rhyme ("anchor" in the
     /// paper's terms).

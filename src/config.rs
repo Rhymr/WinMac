@@ -40,9 +40,20 @@ pub fn session_file() -> Option<PathBuf> {
     Some(user_config_dir()?.join("session.json"))
 }
 
-/// How often the "Apple Notes" tree re-reads from the Notes app.
-pub const APPLE_NOTES_REFRESH: Duration = Duration::from_secs(300);
+/// How often the "Apple Notes" tree re-reads from the Notes app
+/// (Settings → Tools → Network & Sources; default 300s). Read once when
+/// the source panel arms its refresh timer.
+pub fn apple_notes_refresh() -> Duration {
+    Duration::from_secs(u64::from(
+        crate::setting::Settings::load().apple_notes_refresh_secs,
+    ))
+}
 
-/// Cap on a single Rhyme Search lookup (the Datamuse round-trips). Past
-/// this the lookup is abandoned and the panel shows an error state.
-pub const RHYME_LOOKUP_TIMEOUT: Duration = Duration::from_secs(8);
+/// Cap on a single Rhyme Search lookup (the Datamuse round-trips); past
+/// this the lookup is abandoned and the panel shows an error state
+/// (Settings → Tools → Network & Sources; default 8s). Read per lookup.
+pub fn rhyme_lookup_timeout() -> Duration {
+    Duration::from_secs(u64::from(
+        crate::setting::Settings::load().rhyme_lookup_timeout_secs,
+    ))
+}

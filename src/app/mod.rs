@@ -2,6 +2,7 @@ pub mod about;
 pub mod chrome;
 pub mod context_menu;
 pub mod icons;
+pub mod keymap;
 pub mod layout;
 pub mod menu;
 pub mod source_panel;

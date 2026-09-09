@@ -13,17 +13,16 @@ use libadwaita::{HeaderBar, ToolbarView, WindowTitle};
 use std::cell::Cell;
 use std::rc::Rc;
 
-/// Height (px) the bottom Rhyme Search panel opens to.
-const RHYME_PANEL_HEIGHT: i32 = 240;
-
 pub fn build_ui(app: &Application) -> (ApplicationWindow, Rc<WorkspaceController>) {
+    let startup = crate::setting::Settings::load();
+
     // CSS is loaded once, up front, in main.rs — the welcome window needs it
     // too and is shown before this function ever runs.
     let main_window = ApplicationWindow::builder()
         .application(app)
         .title("Rhymr")
-        .default_width(1280)
-        .default_height(720)
+        .default_width((startup.window_width as i32).max(640))
+        .default_height((startup.window_height as i32).max(480))
         .build();
 
     let (main_layout, workspace_controller) = create_main_layout();
@@ -88,6 +87,10 @@ pub fn build_ui(app: &Application) -> (ApplicationWindow, Rc<WorkspaceController
 }
 
 pub fn create_main_layout() -> (GtkBox, Rc<WorkspaceController>) {
+    // Startup-only sizing (Settings → Appearance & Behavior → Window &
+    // Startup). A per-workspace remembered size still wins over these.
+    let startup = crate::setting::Settings::load();
+
     let workspace_controller = Rc::new(WorkspaceController::new());
 
     let mut file_tree = FileTree::new();
@@ -143,7 +146,11 @@ pub fn create_main_layout() -> (GtkBox, Rc<WorkspaceController>) {
 
     // file tree column | editor, flush against each other (only the tree's
     // 1px right border separates them — no draggable "gap").
-    let content_pane = create_horizontal_split(&left_scroller, workspace.get_widget(), 300);
+    let content_pane = create_horizontal_split(
+        &left_scroller,
+        workspace.get_widget(),
+        (startup.left_panel_width as i32).clamp(120, 900),
+    );
     content_pane.set_hexpand(true);
 
     // Left tool-window stripe (vertical "Project" label) toggles the column.
@@ -168,7 +175,8 @@ pub fn create_main_layout() -> (GtkBox, Rc<WorkspaceController>) {
     outer_split.set_shrink_end_child(false);
     outer_split.set_vexpand(true);
 
-    let remembered = Rc::new(Cell::new(RHYME_PANEL_HEIGHT));
+    let default_rhyme_height = (startup.rhyme_panel_height as i32).max(80);
+    let remembered = Rc::new(Cell::new(default_rhyme_height));
     let bottom_stripe = {
         let outer_split = outer_split.clone();
         let rhyme_frame = rhyme_frame.clone();
@@ -207,7 +215,7 @@ pub fn create_main_layout() -> (GtkBox, Rc<WorkspaceController>) {
                 if let Some(w) = s.left_panel_width {
                     content_pane.set_position(w.clamp(120, 900));
                 }
-                remembered.set(s.rhyme_panel_height.unwrap_or(RHYME_PANEL_HEIGHT));
+                remembered.set(s.rhyme_panel_height.unwrap_or(default_rhyme_height));
             }
             sp.set_workspace_root(root);
         });
