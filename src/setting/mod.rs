@@ -105,6 +105,60 @@ spec::settings! {
         get |s| SettingValue::Bool(s.show_vcs_gutter) ;
         set |s, v| if let SettingValue::Bool(b) = v { s.show_vcs_gutter = b } ;
 
+    show_line_numbers: bool = true ;
+        kind SettingKind::Bool ; in EditorGeneral / "Gutter" ;
+        label "Show line numbers" ; help "" ; live Editor ;
+        get |s| SettingValue::Bool(s.show_line_numbers) ;
+        set |s, v| if let SettingValue::Bool(b) = v { s.show_line_numbers = b } ;
+
+    highlight_current_line: bool = true ;
+        kind SettingKind::Bool ; in EditorGeneral / "View" ;
+        label "Highlight the current line" ; help "" ; live Editor ;
+        get |s| SettingValue::Bool(s.highlight_current_line) ;
+        set |s, v| if let SettingValue::Bool(b) = v { s.highlight_current_line = b } ;
+
+    line_spacing_px: u32 = 1 ;
+        kind SettingKind::Int { min: 0, max: 8, step: 1 } ; in EditorGeneral / "View" ;
+        label "Extra space between lines (px)" ; help "" ; live Editor ;
+        get |s| SettingValue::Int(s.line_spacing_px as i64) ;
+        set |s, v| if let SettingValue::Int(n) = v { s.line_spacing_px = n as u32 } ;
+
+    wrap_lines: bool = true ;
+        kind SettingKind::Bool ; in EditorGeneral / "View" ;
+        label "Wrap long lines to the editor width" ; help "" ; live Editor ;
+        get |s| SettingValue::Bool(s.wrap_lines) ;
+        set |s, v| if let SettingValue::Bool(b) = v { s.wrap_lines = b } ;
+
+    show_whitespace: bool = false ;
+        kind SettingKind::Bool ; in EditorGeneral / "View" ;
+        label "Show spaces and tabs" ; help "" ; live Editor ;
+        get |s| SettingValue::Bool(s.show_whitespace) ;
+        set |s, v| if let SettingValue::Bool(b) = v { s.show_whitespace = b } ;
+
+    highlight_brackets: bool = false ;
+        kind SettingKind::Bool ; in EditorGeneral / "View" ;
+        label "Highlight matching brackets" ; help "" ; live Editor ;
+        get |s| SettingValue::Bool(s.highlight_brackets) ;
+        set |s, v| if let SettingValue::Bool(b) = v { s.highlight_brackets = b } ;
+
+    sticky_scroll: bool = true ;
+        kind SettingKind::Bool ; in EditorGeneral / "View" ;
+        label "Pin the current stanza's first line to the top" ; help "" ; live Editor ;
+        get |s| SettingValue::Bool(s.sticky_scroll) ;
+        set |s, v| if let SettingValue::Bool(b) = v { s.sticky_scroll = b } ;
+
+    show_right_margin: bool = false ;
+        kind SettingKind::Bool ; in EditorGeneral / "Right margin" ;
+        label "Show a right-margin guide" ; help "" ; live Editor ;
+        get |s| SettingValue::Bool(s.show_right_margin) ;
+        set |s, v| if let SettingValue::Bool(b) = v { s.show_right_margin = b } ;
+
+    right_margin_column: u32 = 80 ;
+        kind SettingKind::Int { min: 20, max: 200, step: 1 } ; in EditorGeneral / "Right margin" ;
+        label "Right-margin column" ; help "" ; live Editor ;
+        get |s| SettingValue::Int(s.right_margin_column as i64) ;
+        set |s, v| if let SettingValue::Int(n) = v { s.right_margin_column = n as u32 } ;
+
     rhyme_highlighting: bool = false ;
         kind SettingKind::Bool ; in EditorRhyme / "" ;
         label "Highlight rhyming syllables" ;
@@ -145,11 +199,23 @@ spec::settings! {
         get |s| SettingValue::Bool(s.auto_indent) ;
         set |s, v| if let SettingValue::Bool(b) = v { s.auto_indent = b } ;
 
+    insert_spaces: bool = false ;
+        kind SettingKind::Bool ; in EditorGeneral / "Indentation" ;
+        label "Insert spaces instead of tabs" ; help "" ; live Editor ;
+        get |s| SettingValue::Bool(s.insert_spaces) ;
+        set |s, v| if let SettingValue::Bool(b) = v { s.insert_spaces = b } ;
+
     tab_width: u32 = 4 ;
         kind SettingKind::Int { min: 1, max: 8, step: 1 } ; in EditorGeneral / "Indentation" ;
         label "Tab width" ; help "" ; live Editor ;
         get |s| SettingValue::Int(s.tab_width as i64) ;
         set |s, v| if let SettingValue::Int(n) = v { s.tab_width = n as u32 } ;
+
+    autosave_debounce_ms: u32 = 600 ;
+        kind SettingKind::Int { min: 100, max: 5000, step: 50 } ; in EditorGeneral / "Saving" ;
+        label "Autosave delay after the last keystroke (ms)" ; help "" ; live Editor ;
+        get |s| SettingValue::Int(s.autosave_debounce_ms as i64) ;
+        set |s, v| if let SettingValue::Int(n) = v { s.autosave_debounce_ms = n as u32 } ;
 
     git_autostage: bool = true ;
         kind SettingKind::Bool ; in VersionControlGit / "" ;

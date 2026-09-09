@@ -21,9 +21,6 @@ use std::hash::{Hash, Hasher};
 use std::path::PathBuf;
 use std::rc::Rc;
 
-/// How long to wait after the last keystroke before writing to disk.
-const AUTOSAVE_DEBOUNCE: std::time::Duration = std::time::Duration::from_millis(600);
-
 /// How long to wait after the last keystroke before recomputing the VCS
 /// gutter's per-line diff vs HEAD.
 const VCS_DEBOUNCE: std::time::Duration = std::time::Duration::from_millis(400);
@@ -84,6 +81,14 @@ pub struct TextEditor {
     // rebuild and the hover handler.
     rhyme_legend_on: Rc<Cell<bool>>,
     rhyme_hover_on: Rc<Cell<bool>>,
+    // Live copy of `autosave_debounce_ms`, read by the buffer-changed
+    // handler each time it (re)schedules the debounced write.
+    autosave_debounce_ms: Rc<Cell<u64>>,
+    // Live copy of `sticky_scroll`; the sticky-line updater hides the strip
+    // whenever it's false. `sticky_update` re-runs that updater from
+    // `apply_settings` so a toggle takes effect without a scroll.
+    sticky_on: Rc<Cell<bool>>,
+    sticky_update: Rc<dyn Fn()>,
 }
 
 impl Default for TextEditor {
@@ -101,17 +106,24 @@ impl TextEditor {
         let source_view = SourceView::builder()
             .buffer(&buffer)
             .monospace(true)
-            .show_line_numbers(true)
+            .show_line_numbers(settings.show_line_numbers)
             .show_line_marks(true)
             .tab_width(settings.tab_width)
             .auto_indent(settings.auto_indent)
             .indent_width(settings.tab_width as i32)
-            .highlight_current_line(true)
-            .pixels_above_lines(1)
-            .pixels_below_lines(1)
+            .insert_spaces_instead_of_tabs(settings.insert_spaces)
+            .highlight_current_line(settings.highlight_current_line)
+            .pixels_above_lines(settings.line_spacing_px as i32)
+            .pixels_below_lines(settings.line_spacing_px as i32)
+            .show_right_margin(settings.show_right_margin)
+            .right_margin_position(settings.right_margin_column)
             // Long bars wrap to the editor width rather than scrolling
             // sideways; the gutter still counts once per logical line.
-            .wrap_mode(gtk::WrapMode::Word)
+            .wrap_mode(if settings.wrap_lines {
+                gtk::WrapMode::Word
+            } else {
+                gtk::WrapMode::None
+            })
             .background_pattern(sourceview5::BackgroundPatternType::None)
             .smart_backspace(true)
             .smart_home_end(sourceview5::SmartHomeEndType::After)
@@ -130,6 +142,8 @@ impl TextEditor {
         // keystroke reschedules another one — only the latest write should
         // actually land.
         let save_generation = Rc::new(Cell::new(0u64));
+        let autosave_debounce_ms = Rc::new(Cell::new(u64::from(settings.autosave_debounce_ms)));
+        let sticky_on = Rc::new(Cell::new(settings.sticky_scroll));
         let modified = Rc::new(Cell::new(false));
         let vcs_renderer: Rc<RefCell<Option<vcs_gutter::VcsGutterRenderer>>> =
             Rc::new(RefCell::new(None));
@@ -138,6 +152,7 @@ impl TextEditor {
         let buffer_clone = buffer.clone();
         let path_ref = current_path.clone();
         let generation_ref = save_generation.clone();
+        let debounce_ref = autosave_debounce_ms.clone();
         let modified_ref = modified.clone();
         buffer_clone.connect_changed(move |buf| {
             let Some(path) = path_ref.borrow().clone() else {
@@ -153,7 +168,8 @@ impl TextEditor {
 
             let generation_for_timeout = generation_ref.clone();
             let modified_for_timeout = modified_ref.clone();
-            glib::timeout_add_local_once(AUTOSAVE_DEBOUNCE, move || {
+            let debounce = std::time::Duration::from_millis(debounce_ref.get());
+            glib::timeout_add_local_once(debounce, move || {
                 // A newer edit came in while this was waiting — let that one win.
                 if generation_for_timeout.get() != this_generation {
                     return;
@@ -195,8 +211,7 @@ impl TextEditor {
             });
         }
 
-        // Disable bracket matching
-        buffer.set_highlight_matching_brackets(false);
+        buffer.set_highlight_matching_brackets(settings.highlight_brackets);
 
         let scheme_manager = sourceview5::StyleSchemeManager::default();
         scheme_manager.append_search_path("assets/styles");
@@ -250,7 +265,14 @@ impl TextEditor {
         overlay.set_child(Some(&scroll));
         overlay.add_overlay(&sticky_row);
         overlay.set_vexpand(true);
-        setup_sticky_line(&scroll, &source_view, &buffer, &sticky, &sticky_row);
+        let sticky_update = setup_sticky_line(
+            &scroll,
+            &source_view,
+            &buffer,
+            &sticky,
+            &sticky_row,
+            sticky_on.clone(),
+        );
 
         // Active rhyme-group legend, docked under the text area.
         let rhyme_legend = GtkBox::builder()
@@ -288,6 +310,9 @@ impl TextEditor {
             rhyme_legend,
             rhyme_legend_on: Rc::new(Cell::new(settings.show_rhyme_legend)),
             rhyme_hover_on: Rc::new(Cell::new(settings.rhyme_hover_emphasis)),
+            autosave_debounce_ms,
+            sticky_on,
+            sticky_update,
         };
 
         editor.setup_context_menu();
@@ -426,14 +451,45 @@ impl TextEditor {
         self.source_view.add_controller(gesture);
     }
 
-    /// Toggle the syllable gutter, completion provider, and rhyme
-    /// highlighting to match `settings` (adding/removing each live rather
-    /// than requiring the tab to be reopened), and update tab
-    /// width/auto-indent, which are plain `SourceView` properties.
+    /// Push `settings` onto this already-open tab: plain `SourceView` /
+    /// buffer properties are set directly; the syllable gutter, VCS gutter,
+    /// completion provider and rhyme highlighting are added or removed live;
+    /// the sticky-line strip and autosave delay track their live copies.
     pub fn apply_settings(&self, settings: &Settings) {
-        self.source_view.set_tab_width(settings.tab_width);
-        self.source_view.set_indent_width(settings.tab_width as i32);
-        self.source_view.set_auto_indent(settings.auto_indent);
+        let view = &self.source_view;
+        view.set_tab_width(settings.tab_width);
+        view.set_indent_width(settings.tab_width as i32);
+        view.set_auto_indent(settings.auto_indent);
+        view.set_insert_spaces_instead_of_tabs(settings.insert_spaces);
+        view.set_show_line_numbers(settings.show_line_numbers);
+        view.set_highlight_current_line(settings.highlight_current_line);
+        view.set_pixels_above_lines(settings.line_spacing_px as i32);
+        view.set_pixels_below_lines(settings.line_spacing_px as i32);
+        view.set_show_right_margin(settings.show_right_margin);
+        view.set_right_margin_position(settings.right_margin_column);
+        view.set_wrap_mode(if settings.wrap_lines {
+            gtk::WrapMode::Word
+        } else {
+            gtk::WrapMode::None
+        });
+        self.buffer
+            .set_highlight_matching_brackets(settings.highlight_brackets);
+
+        let space_drawer = view.space_drawer();
+        space_drawer.set_enable_matrix(true);
+        space_drawer.set_types_for_locations(
+            sourceview5::SpaceLocationFlags::ALL,
+            if settings.show_whitespace {
+                sourceview5::SpaceTypeFlags::SPACE | sourceview5::SpaceTypeFlags::TAB
+            } else {
+                sourceview5::SpaceTypeFlags::NONE
+            },
+        );
+
+        self.autosave_debounce_ms
+            .set(u64::from(settings.autosave_debounce_ms));
+        self.sticky_on.set(settings.sticky_scroll);
+        (self.sticky_update)();
 
         // Font family/size are applied app-wide via the `--app-font-*` CSS
         // variables (see crate::css and base.scss's `* {}` rule) — only the
@@ -814,7 +870,8 @@ fn setup_sticky_line(
     buffer: &SourceBuffer,
     sticky: &Label,
     sticky_row: &GtkBox,
-) {
+    sticky_on: Rc<Cell<bool>>,
+) -> Rc<dyn Fn()> {
     sticky_row.set_can_target(false);
     let vadj = scroll.vadjustment();
     let gutter = ViewExt::gutter(view, gtk::TextWindowType::Left);
@@ -828,6 +885,11 @@ fn setup_sticky_line(
         let gutter = gutter.clone();
         Rc::new(move || {
             let hide = || sticky_row.set_visible(false);
+
+            if !sticky_on.get() {
+                hide();
+                return;
+            }
 
             let y_top = vadj.value() as i32;
             let (top_iter, _) = view.line_at_y(y_top);
@@ -909,7 +971,11 @@ fn setup_sticky_line(
         let update = update.clone();
         move |_| update()
     });
-    glib::idle_add_local_once(move || update());
+    glib::idle_add_local_once({
+        let update = update.clone();
+        move || update()
+    });
+    update
 }
 
 /// Walk up from a file's directory looking for the workspace's `.git` —
