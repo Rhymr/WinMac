@@ -16,6 +16,8 @@ use sourceview5::GutterRendererText;
 use sourceview5::prelude::{BufferExt, GutterRendererExt, GutterRendererTextExt, ViewExt};
 use sourceview5::{Buffer as SourceBuffer, Completion, Gutter, View as SourceView};
 use std::cell::{Cell, RefCell};
+use std::collections::HashMap;
+use std::hash::{Hash, Hasher};
 use std::path::PathBuf;
 use std::rc::Rc;
 
@@ -25,6 +27,22 @@ const AUTOSAVE_DEBOUNCE: std::time::Duration = std::time::Duration::from_millis(
 /// How long to wait after the last keystroke before recomputing the VCS
 /// gutter's per-line diff vs HEAD.
 const VCS_DEBOUNCE: std::time::Duration = std::time::Duration::from_millis(400);
+
+/// Per-line syllable-count cache for the gutter renderer: 0-based line
+/// number → (hash of the line's text, count). `count_syllables` runs ~20
+/// backtracking regex passes per word, and the gutter re-queries every
+/// visible line on every redraw (including each caret move), so without
+/// this a large file redraws sluggishly. Cleared wholesale on every edit
+/// (an edit can renumber every following line); the hash is a cheap
+/// correctness backstop. Fresh per `TextEditor`.
+type SyllableCache = Rc<RefCell<HashMap<i32, (u64, u32)>>>;
+
+/// FNV-free one-shot hash of a line's text for [`SyllableCache`] validation.
+fn hash_line(line: &str) -> u64 {
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    line.hash(&mut h);
+    h.finish()
+}
 
 pub struct TextEditor {
     frame: Frame,
@@ -38,12 +56,21 @@ pub struct TextEditor {
     modified: Rc<Cell<bool>>,
     gutter: Gutter,
     syllable_renderer: RefCell<Option<GutterRendererText>>,
+    // Memoizes per-line syllable counts so scrolling / caret moves in a
+    // large file don't re-run the regex heuristic for every visible line
+    // on every redraw. Cleared on every edit.
+    syllable_cache: SyllableCache,
     // The caret's current line, and whether the editor scheme is the dark
     // one — read by the syllable renderer to draw the active line's count
     // green + bold; kept current by a cursor-move handler and `apply_settings`.
     caret_line: Rc<Cell<i32>>,
     syllable_theme_dark: Rc<Cell<bool>>,
     vcs_renderer: Rc<RefCell<Option<vcs_gutter::VcsGutterRenderer>>>,
+    // Coalesces overlapping VCS-diff recomputes (edit debounce, `set_path`,
+    // `apply_settings`): a diff whose captured value is stale when its
+    // worker returns paints nothing. Shared so every trigger bumps the
+    // same counter.
+    vcs_generation: Rc<Cell<u64>>,
     completion: Completion,
     word_provider: RefCell<Option<WordCompletionProvider>>,
     // Rc so the pointer-motion handler (hover-to-emphasise a rhyme group)
@@ -106,6 +133,7 @@ impl TextEditor {
         let modified = Rc::new(Cell::new(false));
         let vcs_renderer: Rc<RefCell<Option<vcs_gutter::VcsGutterRenderer>>> =
             Rc::new(RefCell::new(None));
+        let vcs_generation = Rc::new(Cell::new(0u64));
 
         let buffer_clone = buffer.clone();
         let path_ref = current_path.clone();
@@ -152,24 +180,18 @@ impl TextEditor {
             let buffer_for_vcs = buffer.clone();
             let path_for_vcs = current_path.clone();
             let renderer_for_vcs = vcs_renderer.clone();
-            let vcs_generation = Rc::new(Cell::new(0u64));
+            let generation_for_vcs = vcs_generation.clone();
             buffer.connect_changed(move |_| {
                 if renderer_for_vcs.borrow().is_none() {
                     return;
                 }
-                let this_generation = vcs_generation.get() + 1;
-                vcs_generation.set(this_generation);
-
-                let buffer_for_vcs = buffer_for_vcs.clone();
-                let path_for_vcs = path_for_vcs.clone();
-                let renderer_for_vcs = renderer_for_vcs.clone();
-                let vcs_generation = vcs_generation.clone();
-                glib::timeout_add_local_once(VCS_DEBOUNCE, move || {
-                    if vcs_generation.get() != this_generation {
-                        return;
-                    }
-                    recompute_vcs(&buffer_for_vcs, &path_for_vcs, &renderer_for_vcs);
-                });
+                spawn_recompute_vcs(
+                    &buffer_for_vcs,
+                    &path_for_vcs,
+                    &renderer_for_vcs,
+                    &generation_for_vcs,
+                    VCS_DEBOUNCE,
+                );
             });
         }
 
@@ -255,9 +277,11 @@ impl TextEditor {
             modified,
             gutter,
             syllable_renderer: RefCell::new(None),
+            syllable_cache: Rc::new(RefCell::new(HashMap::new())),
             caret_line: Rc::new(Cell::new(0)),
             syllable_theme_dark: Rc::new(Cell::new(settings.theme == crate::setting::Theme::Dark)),
             vcs_renderer,
+            vcs_generation,
             completion,
             word_provider: RefCell::new(None),
             rhyme_highlight: Rc::new(RefCell::new(None)),
@@ -267,6 +291,16 @@ impl TextEditor {
         };
 
         editor.setup_context_menu();
+
+        // Any edit can renumber every following line, so drop the whole
+        // per-line syllable cache; the next gutter redraw refills only the
+        // visible lines.
+        {
+            let cache = editor.syllable_cache.clone();
+            editor
+                .buffer
+                .connect_changed(move |_| cache.borrow_mut().clear());
+        }
 
         // Keep the caret's line current for the syllable renderer's
         // green-bold active-line count, repainting the gutter when it moves.
@@ -421,6 +455,7 @@ impl TextEditor {
                     &self.buffer,
                     self.caret_line.clone(),
                     self.syllable_theme_dark.clone(),
+                    self.syllable_cache.clone(),
                 );
                 self.gutter.insert(&renderer, -20); // Position right after line numbers (-30)
                 *renderer_slot = Some(renderer);
@@ -458,6 +493,9 @@ impl TextEditor {
                 if let Some(renderer) = vcs_slot.take() {
                     self.gutter.remove(&renderer);
                 }
+                // Discard any diff still in flight so it can't repaint a
+                // gutter that's no longer shown.
+                self.vcs_generation.set(self.vcs_generation.get() + 1);
             }
             (true, true) => {
                 if let Some(renderer) = vcs_slot.as_ref() {
@@ -467,7 +505,13 @@ impl TextEditor {
             _ => {}
         }
         drop(vcs_slot);
-        recompute_vcs(&self.buffer, &self.current_path, &self.vcs_renderer);
+        spawn_recompute_vcs(
+            &self.buffer,
+            &self.current_path,
+            &self.vcs_renderer,
+            &self.vcs_generation,
+            std::time::Duration::ZERO,
+        );
 
         let mut provider_slot = self.word_provider.borrow_mut();
         match (provider_slot.is_some(), settings.word_completion) {
@@ -492,7 +536,12 @@ impl TextEditor {
         match (rhyme_slot.is_some(), settings.rhyme_highlighting) {
             (false, true) => {
                 log::debug!("rhyme highlight: attaching");
-                let handle = crate::rhyme::highlight::attach(&self.buffer, settings.theme);
+                let handle = crate::rhyme::highlight::attach(
+                    &self.source_view,
+                    &self.buffer,
+                    settings.theme,
+                    settings.rhyme_stop_at_blank_line,
+                );
                 let legend = self.rhyme_legend.clone();
                 let legend_on = self.rhyme_legend_on.clone();
                 handle.connect_groups_changed(move |groups| {
@@ -507,11 +556,12 @@ impl TextEditor {
                 }
             }
             // Already attached and staying on — push a live theme switch
-            // through so the rhyme colors (and legend swatches) follow
-            // light/dark.
+            // and stanza-break-rule change through so open tabs follow the
+            // settings without a reload.
             (true, true) => {
                 if let Some(handle) = rhyme_slot.as_ref() {
                     handle.set_theme(settings.theme);
+                    handle.set_stop_at_blank_line(settings.rhyme_stop_at_blank_line);
                 }
             }
             (false, false) => {}
@@ -544,7 +594,13 @@ impl TextEditor {
     /// tab's initial content never triggers a spurious save.
     pub fn set_path(&self, path: PathBuf) {
         self.current_path.replace(Some(path));
-        recompute_vcs(&self.buffer, &self.current_path, &self.vcs_renderer);
+        spawn_recompute_vcs(
+            &self.buffer,
+            &self.current_path,
+            &self.vcs_renderer,
+            &self.vcs_generation,
+            std::time::Duration::ZERO,
+        );
     }
 
     pub fn get_widget(&self) -> &Frame {
@@ -697,6 +753,7 @@ fn create_syllable_renderer(
     buffer: &SourceBuffer,
     caret_line: Rc<Cell<i32>>,
     theme_dark: Rc<Cell<bool>>,
+    cache: SyllableCache,
 ) -> GutterRendererText {
     let syllable_renderer = GutterRendererText::new();
     syllable_renderer.set_css_classes(&["syllable-count"]);
@@ -719,8 +776,20 @@ fn create_syllable_renderer(
             if line.trim().is_empty() {
                 renderer.set_text("");
             } else {
-                let syllables = crate::editor::stat::count_syllables(&line);
-                if line_num as i32 == caret_line.get() {
+                let line_num = line_num as i32;
+                let key = hash_line(&line);
+                let syllables = {
+                    let mut cache = cache.borrow_mut();
+                    match cache.get(&line_num) {
+                        Some(&(h, n)) if h == key => n,
+                        _ => {
+                            let n = crate::editor::stat::count_syllables(&line);
+                            cache.insert(line_num, (key, n));
+                            n
+                        }
+                    }
+                };
+                if line_num == caret_line.get() {
                     let color = syllable_green(theme_dark.get());
                     renderer.set_markup(&format!(
                         "<span foreground='{color}' weight='bold'>{syllables}</span>"
@@ -856,13 +925,19 @@ fn find_git_root(file_path: &std::path::Path) -> Option<PathBuf> {
     None
 }
 
-/// Recompute the VCS gutter's per-line diff from the buffer's current text
-/// and hand it to the renderer, if one is attached. Clears it when there's
-/// no path or no repo.
-fn recompute_vcs(
+/// Recompute the VCS gutter's per-line diff for `buffer`'s current text and
+/// hand it to the renderer, if one is attached — the `git2` diff runs on a
+/// worker thread (`debounce` after this call, coalesced through
+/// `generation`) so a large file never stalls the GTK main thread. Clears
+/// the gutter immediately when there's no path or no repo. A stale
+/// `generation` when the worker returns (a newer edit, or the gutter turned
+/// off) discards the result.
+fn spawn_recompute_vcs(
     buffer: &SourceBuffer,
     path: &Rc<RefCell<Option<PathBuf>>>,
     renderer: &Rc<RefCell<Option<vcs_gutter::VcsGutterRenderer>>>,
+    generation: &Rc<Cell<u64>>,
+    debounce: std::time::Duration,
 ) {
     let Some(renderer) = renderer.borrow().clone() else {
         return;
@@ -875,10 +950,36 @@ fn recompute_vcs(
         renderer.set_changes(std::collections::HashMap::new());
         return;
     };
+
+    let this_gen = generation.get() + 1;
+    generation.set(this_gen);
     let text = buffer
         .text(&buffer.start_iter(), &buffer.end_iter(), false)
         .to_string();
-    renderer.set_changes(crate::git::ops::line_changes(&root, &path, &text));
+    let generation = generation.clone();
+
+    glib::spawn_future_local(async move {
+        if !debounce.is_zero() {
+            glib::timeout_future(debounce).await;
+        }
+        if generation.get() != this_gen {
+            return;
+        }
+        let changes =
+            match gio::spawn_blocking(move || crate::git::ops::line_changes(&root, &path, &text))
+                .await
+            {
+                Ok(changes) => changes,
+                Err(_) => {
+                    log::warn!("vcs gutter: worker thread panicked; skipping this diff");
+                    return;
+                }
+            };
+        if generation.get() != this_gen {
+            return;
+        }
+        renderer.set_changes(changes);
+    });
 }
 
 /// The (added, modified, deleted) colour triple for the VCS gutter bars,
