@@ -1,3 +1,4 @@
+use crate::app::keymap::Keymap;
 use crate::workspace::controller::WorkspaceController;
 use gio::Menu;
 use gtk::gio;
@@ -5,23 +6,6 @@ use gtk::prelude::*;
 use libadwaita::Application;
 use std::path::PathBuf;
 use std::rc::Rc;
-
-// GTK's own "<Primary>" accelerator modifier is documented to map to Cmd on
-// macOS and Ctrl elsewhere, but that mapping depends on the platform's GDK
-// backend correctly reporting it — build the modifier explicitly instead so
-// shortcuts (and their on-screen labels) are unambiguous: ⌘ on macOS, Ctrl
-// on Windows/Linux.
-#[cfg(target_os = "macos")]
-const PRIMARY_MOD: &str = "<Meta>";
-#[cfg(not(target_os = "macos"))]
-const PRIMARY_MOD: &str = "<Control>";
-
-/// Build an accelerator string with the platform's primary modifier plus
-/// any extra modifiers (e.g. "<Shift>", "<Alt>") and the key, e.g.
-/// `accel("<Shift>", "n")` => "<Meta><Shift>n" on macOS, "<Control><Shift>n" elsewhere.
-fn accel(extra_mods: &str, key: &str) -> String {
-    format!("{PRIMARY_MOD}{extra_mods}{key}")
-}
 
 /// Builds the File/Git/Help menu model and wires up every action it
 /// invokes. Returns the model so callers can also feed it to an in-window
@@ -43,6 +27,12 @@ pub fn setup_menu(app: &Application, workspace_controller: Rc<WorkspaceControlle
 
     // Set menu bar in app
     app.set_menubar(Some(&menu_bar));
+
+    // Bind every action's accelerator from the (possibly user-overridden)
+    // keymap — see `crate::app::keymap` and the settings dialog's Keymap
+    // page. Replaces the per-action `set_accels_for_action` calls that used
+    // to live in `git()` / `file()`.
+    Keymap::load().apply(app);
 
     menu_bar
 }
@@ -99,10 +89,6 @@ fn git(app: &Application, workspace_controller: Rc<WorkspaceController>) -> Menu
         }
     });
     app.add_action(&fetch_action);
-
-    app.set_accels_for_action("app.git-commit", &[&accel("", "k")]);
-    app.set_accels_for_action("app.git-push", &[&accel("<Shift>", "k")]);
-    app.set_accels_for_action("app.git-pull", &[&accel("", "t")]);
 
     git_menu
 }
@@ -343,17 +329,6 @@ pub fn file(app: &Application, workspace_controller: Rc<WorkspaceController>) ->
         }
     });
     app.add_action(&close_action);
-
-    // Add keyboard accelerators — ⌘ on macOS, Ctrl on Windows/Linux
-    app.set_accels_for_action("app.new", &[&accel("", "n")]);
-    app.set_accels_for_action("app.new-folder", &[&accel("<Shift>", "n")]);
-    app.set_accels_for_action("app.open", &[&accel("", "o")]);
-    app.set_accels_for_action("app.save", &[&accel("<Alt>", "s")]);
-    app.set_accels_for_action("app.save-as", &[&accel("<Shift>", "s")]);
-    app.set_accels_for_action("app.save-all", &[&accel("", "s")]);
-    app.set_accels_for_action("app.reload-all", &[&accel("<Alt>", "y")]);
-    app.set_accels_for_action("app.close-tab", &[&accel("", "w")]);
-    app.set_accels_for_action("app.preferences", &[&accel("", "comma")]);
 
     file_menu
 }

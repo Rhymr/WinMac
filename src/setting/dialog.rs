@@ -1,6 +1,7 @@
 use super::spec::{CATEGORY_TREE, CategoryId, LiveApply, SettingKind, SettingValue};
 use super::{SPECS, Settings};
 use crate::app::context_menu::ContextMenu;
+use crate::app::keymap::{self, Keymap};
 use crate::workspace::controller::WorkspaceController;
 use gtk::prelude::*;
 use gtk::{
@@ -138,6 +139,7 @@ fn stack_name(id: CategoryId) -> &'static str {
         CategoryId::EditorRhyme => "rhyme",
         CategoryId::EditorCompletion => "completion",
         CategoryId::EditorFileTree => "filetree",
+        CategoryId::Keymap => "keymap",
         CategoryId::VersionControlGit => "git",
         CategoryId::ToolsNetwork => "sources",
     }
@@ -637,6 +639,189 @@ fn build_color_scheme_page(
         .build()
 }
 
+/// A small modal that captures the next key chord and writes it onto
+/// `action` in `keymap` (unbinding whatever else held that chord), then
+/// calls `on_done`. Esc cancels.
+fn capture_shortcut(
+    parent: Option<&Window>,
+    action: &'static str,
+    keymap: &Rc<RefCell<Keymap>>,
+    on_done: Rc<dyn Fn()>,
+) {
+    let win = Window::builder()
+        .modal(true)
+        .default_width(320)
+        .title("Press shortcut")
+        .css_classes(["settings-window"])
+        .build();
+    if let Some(p) = parent {
+        win.set_transient_for(Some(p));
+    }
+    let body = GtkBox::builder()
+        .orientation(Orientation::Vertical)
+        .spacing(6)
+        .margin_top(20)
+        .margin_bottom(20)
+        .margin_start(24)
+        .margin_end(24)
+        .build();
+    body.append(
+        &Label::builder()
+            .label("Press the new shortcut")
+            .halign(Align::Start)
+            .build(),
+    );
+    let hint = Label::builder()
+        .label("Esc to cancel")
+        .halign(Align::Start)
+        .css_classes(["dim-label", "caption"])
+        .build();
+    body.append(&hint);
+    win.set_child(Some(&body));
+
+    let key = gtk::EventControllerKey::new();
+    key.connect_key_pressed({
+        let win = win.clone();
+        let keymap = keymap.clone();
+        let hint = hint.clone();
+        move |_, keyval, _, state| {
+            if keyval == gdk::Key::Escape {
+                win.close();
+                return gtk::glib::Propagation::Stop;
+            }
+            if keymap::is_modifier(keyval) {
+                return gtk::glib::Propagation::Proceed;
+            }
+            let Some(accel) = keymap::accel_from(keyval, state) else {
+                hint.set_text("Add ⌘ / Ctrl / Alt — Esc to cancel");
+                return gtk::glib::Propagation::Stop;
+            };
+            {
+                let mut km = keymap.borrow_mut();
+                if let Some(other) = km.action_for_accel(&accel, action) {
+                    km.set(other, Some(keymap::UNBOUND));
+                }
+                km.set(action, Some(&accel));
+            }
+            on_done();
+            win.close();
+            gtk::glib::Propagation::Stop
+        }
+    });
+    win.add_controller(key);
+    win.present();
+}
+
+/// The Keymap page: every `keymap::ACTIONS` entry grouped by area, each row
+/// showing its current binding with Change / Reset. Edits accumulate in
+/// `keymap`; `touched` gates the dialog's Apply, `refresh` (returned via
+/// `reset_slot`) re-labels every row.
+fn build_keymap_page(
+    keymap: &Rc<RefCell<Keymap>>,
+    touched: &Rc<Cell<bool>>,
+    mark_dirty: &DirtyHook,
+    reset_slot: &DirtyHook,
+) -> ScrolledWindow {
+    let page = settings_page();
+    page.append(&description_label(
+        "Rebind an action's shortcut with Change. A chord already in use is taken from its old action.",
+    ));
+
+    let mut group: Option<&str> = None;
+    let mut grid = form_grid();
+    let mut row = 0;
+    let mut binding_labels: Vec<(Label, &'static str)> = Vec::new();
+
+    for spec in keymap::ACTIONS {
+        if group != Some(spec.group) {
+            group = Some(spec.group);
+            page.append(&section_header(spec.group));
+            grid = form_grid();
+            page.append(&grid);
+            row = 0;
+        }
+
+        let accel_label = Label::builder()
+            .label(keymap::pretty(&keymap.borrow().accel(spec.action)))
+            .halign(Align::Start)
+            .width_request(120)
+            .css_classes(["settings-field-label"])
+            .build();
+        let change = Button::builder()
+            .label("Change")
+            .css_classes(["flat"])
+            .build();
+        let reset = Button::builder()
+            .label("Reset")
+            .css_classes(["flat"])
+            .build();
+
+        let controls = GtkBox::new(Orientation::Horizontal, 6);
+        controls.append(&accel_label);
+        controls.append(&change);
+        controls.append(&reset);
+        grid_field(&grid, row, spec.label, &controls);
+
+        binding_labels.push((accel_label.clone(), spec.action));
+        row += 1;
+
+        let action = spec.action;
+        change.connect_clicked({
+            let keymap = keymap.clone();
+            let touched = touched.clone();
+            let mark_dirty = mark_dirty.clone();
+            let reset_slot = reset_slot.clone();
+            move |btn| {
+                let parent = btn.root().and_downcast::<Window>();
+                let touched = touched.clone();
+                let mark_dirty = mark_dirty.clone();
+                let reset_slot = reset_slot.clone();
+                capture_shortcut(
+                    parent.as_ref(),
+                    action,
+                    &keymap,
+                    Rc::new(move || {
+                        touched.set(true);
+                        (reset_slot.borrow())(); // re-labels every row
+                        (mark_dirty.borrow())();
+                    }),
+                );
+            }
+        });
+        reset.connect_clicked({
+            let keymap = keymap.clone();
+            let touched = touched.clone();
+            let mark_dirty = mark_dirty.clone();
+            let reset_slot = reset_slot.clone();
+            move |_| {
+                keymap.borrow_mut().set(action, None);
+                touched.set(true);
+                (reset_slot.borrow())();
+                (mark_dirty.borrow())();
+            }
+        });
+    }
+
+    // `reset_slot` re-labels every row from the current keymap — also the
+    // per-page / global "Reset to defaults" hook, which first clears the
+    // whole keymap.
+    *reset_slot.borrow_mut() = Box::new({
+        let keymap = keymap.clone();
+        move || {
+            let km = keymap.borrow();
+            for (label, action) in &binding_labels {
+                label.set_text(&keymap::pretty(&km.accel(action)));
+            }
+        }
+    });
+
+    ScrolledWindow::builder()
+        .hscrollbar_policy(gtk::PolicyType::Never)
+        .vexpand(true)
+        .child(&page)
+        .build()
+}
+
 /// `controller` is `None` when opened from the welcome screen (no
 /// workspace loaded yet, so there's nothing to live-apply to) and `Some`
 /// when opened from an already-open workspace's File menu.
@@ -716,19 +901,30 @@ pub fn show_settings_dialog(app: &Application, controller: Option<Rc<WorkspaceCo
         Rc::new(RefCell::new(settings.palette_overrides.clone()));
 
     // Per-page "Reset this page" clicks route through this slot; the full
-    // colour-picker reset lives in `reset_colors`. Both filled in below.
+    // colour-picker reset lives in `reset_colors`, and re-labelling the
+    // Keymap rows in `reset_keymap`. All filled in below.
     let reset_page: ToggleHook = Rc::new(RefCell::new(Box::new(|_| {})));
     let reset_colors: DirtyHook = Rc::new(RefCell::new(Box::new(|| {})));
+    let reset_keymap: DirtyHook = Rc::new(RefCell::new(Box::new(|| {})));
+
+    // Editable copy of the keymap; `keymap_touched` gates Apply since the
+    // keymap lives outside `Settings` and the dirty-check.
+    let keymap_edits: Rc<RefCell<Keymap>> = Rc::new(RefCell::new(Keymap::load()));
+    let keymap_touched = Rc::new(Cell::new(false));
 
     let mut widgets = SettingWidgets::default();
     for n in CATEGORY_TREE {
-        if n.id == CategoryId::ColorScheme {
-            let page = build_color_scheme_page(&settings, &overrides, &mark_dirty, &reset_colors);
-            stack.add_named(&page, Some(stack_name(n.id)));
-        } else {
-            let page = build_page(n.id, &settings, &mut widgets, &mark_dirty, &reset_page);
-            stack.add_named(&page, Some(stack_name(n.id)));
-        }
+        let page: gtk::Widget = match n.id {
+            CategoryId::ColorScheme => {
+                build_color_scheme_page(&settings, &overrides, &mark_dirty, &reset_colors).upcast()
+            }
+            CategoryId::Keymap => {
+                build_keymap_page(&keymap_edits, &keymap_touched, &mark_dirty, &reset_keymap)
+                    .upcast()
+            }
+            _ => build_page(n.id, &settings, &mut widgets, &mark_dirty, &reset_page).upcast(),
+        };
+        stack.add_named(&page, Some(stack_name(n.id)));
     }
     let widgets = Rc::new(widgets);
 
@@ -881,8 +1077,9 @@ pub fn show_settings_dialog(app: &Application, controller: Option<Rc<WorkspaceCo
         let apply_btn = apply_btn.clone();
         let read_current = read_current.clone();
         let baseline = baseline.clone();
+        let keymap_touched = keymap_touched.clone();
         move || {
-            apply_btn.set_sensitive(read_current() != *baseline.borrow());
+            apply_btn.set_sensitive(keymap_touched.get() || read_current() != *baseline.borrow());
         }
     });
 
@@ -925,14 +1122,28 @@ pub fn show_settings_dialog(app: &Application, controller: Option<Rc<WorkspaceCo
             }
         })
     };
+    // Clear the whole keymap back to defaults, then re-label its rows.
+    let reset_keymap_to_defaults = {
+        let keymap_edits = keymap_edits.clone();
+        let keymap_touched = keymap_touched.clone();
+        let reset_keymap = reset_keymap.clone();
+        Rc::new(move || {
+            *keymap_edits.borrow_mut() = Keymap::default();
+            keymap_touched.set(true);
+            (reset_keymap.borrow())();
+        })
+    };
+
     *reset_page.borrow_mut() = Box::new({
         let reset_specs = reset_specs.clone();
         let reset_colors = reset_colors.clone();
+        let reset_keymap_to_defaults = reset_keymap_to_defaults.clone();
         let update = update_apply_sensitivity.clone();
         move |cat| {
-            reset_specs(Some(cat));
-            if cat == CategoryId::ColorScheme {
-                (reset_colors.borrow())();
+            match cat {
+                CategoryId::ColorScheme => (reset_colors.borrow())(),
+                CategoryId::Keymap => reset_keymap_to_defaults(),
+                _ => reset_specs(Some(cat)),
             }
             update();
         }
@@ -940,10 +1151,12 @@ pub fn show_settings_dialog(app: &Application, controller: Option<Rc<WorkspaceCo
     reset_all_btn.connect_clicked({
         let reset_specs = reset_specs.clone();
         let reset_colors = reset_colors.clone();
+        let reset_keymap_to_defaults = reset_keymap_to_defaults.clone();
         let update = update_apply_sensitivity.clone();
         move |_| {
             reset_specs(None);
             (reset_colors.borrow())();
+            reset_keymap_to_defaults();
             update();
         }
     });
@@ -952,6 +1165,9 @@ pub fn show_settings_dialog(app: &Application, controller: Option<Rc<WorkspaceCo
         let read_current = read_current.clone();
         let baseline = baseline.clone();
         let update_apply_sensitivity = update_apply_sensitivity.clone();
+        let keymap_edits = keymap_edits.clone();
+        let keymap_touched = keymap_touched.clone();
+        let app = app.clone();
         move || {
             let current = read_current();
             current.save();
@@ -964,6 +1180,12 @@ pub fn show_settings_dialog(app: &Application, controller: Option<Rc<WorkspaceCo
             if let Some(controller) = &controller {
                 controller.apply_settings(&current);
             }
+            {
+                let keymap = keymap_edits.borrow();
+                keymap.save();
+                keymap.apply(&app);
+            }
+            keymap_touched.set(false);
             baseline.replace(current);
             update_apply_sensitivity();
         }

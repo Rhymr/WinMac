@@ -142,6 +142,7 @@ pub enum CategoryId {
     EditorRhyme,
     EditorCompletion,
     EditorFileTree,
+    Keymap,
     VersionControlGit,
     ToolsNetwork,
 }
@@ -200,6 +201,12 @@ pub const CATEGORY_TREE: &[CategoryNode] = &[
         id: CategoryId::EditorFileTree,
         parent: Some(CategoryId::EditorGeneral),
         label: "File Tree",
+        breadcrumb_parent: "",
+    },
+    CategoryNode {
+        id: CategoryId::Keymap,
+        parent: None,
+        label: "Keymap",
         breadcrumb_parent: "",
     },
     CategoryNode {
