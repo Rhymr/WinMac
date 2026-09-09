@@ -584,10 +584,13 @@ impl TextEditor {
             std::time::Duration::ZERO,
         );
 
+        let completion_min = settings.completion_min_prefix as usize;
+        let completion_max = settings.completion_max_suggestions as usize;
         let mut provider_slot = self.word_provider.borrow_mut();
         match (provider_slot.is_some(), settings.word_completion) {
             (false, true) => {
                 let provider = WordCompletionProvider::new();
+                provider.set_limits(completion_min, completion_max);
                 self.completion.add_provider(&provider);
                 *provider_slot = Some(provider);
             }
@@ -596,7 +599,12 @@ impl TextEditor {
                     self.completion.remove_provider(&provider);
                 }
             }
-            _ => {}
+            (true, true) => {
+                if let Some(provider) = provider_slot.as_ref() {
+                    provider.set_limits(completion_min, completion_max);
+                }
+            }
+            (false, false) => {}
         }
         drop(provider_slot);
 

@@ -29,10 +29,12 @@ fn prefix_matches<'a>(words: &'a [&'a str], prefix: &str) -> &'a [&'a str] {
 /// `populate` (opens a completion session) and `refilter` (GtkSourceView's
 /// completion engine calls this instead of `populate` again on every
 /// keystroke after the first, to narrow the same session's list).
-fn populate_store(store: &gio::ListStore, word: &str) {
+/// `min_prefix` is how many characters must be typed before suggesting;
+/// `max` caps the list.
+fn populate_store(store: &gio::ListStore, word: &str, min_prefix: usize, max: usize) {
     store.remove_all();
-    if word.len() >= 2 {
-        for w in prefix_matches(dictionary(), word).iter().take(100) {
+    if word.chars().count() >= min_prefix.max(1) {
+        for w in prefix_matches(dictionary(), word).iter().take(max) {
             // Skip the trivial case where the typed word is already a
             // complete dictionary entry with no completion to offer.
             if *w != word {
@@ -44,7 +46,7 @@ fn populate_store(store: &gio::ListStore, word: &str) {
 
 mod imp {
     use super::*;
-    use std::cell::RefCell;
+    use std::cell::{Cell, RefCell};
 
     #[derive(Default)]
     pub struct WordProposal {
@@ -61,8 +63,19 @@ mod imp {
     impl ObjectImpl for WordProposal {}
     impl sourceview5::subclass::prelude::CompletionProposalImpl for WordProposal {}
 
-    #[derive(Default)]
-    pub struct WordCompletionProvider;
+    pub struct WordCompletionProvider {
+        pub min_prefix: Cell<usize>,
+        pub max_suggestions: Cell<usize>,
+    }
+
+    impl Default for WordCompletionProvider {
+        fn default() -> Self {
+            Self {
+                min_prefix: Cell::new(2),
+                max_suggestions: Cell::new(100),
+            }
+        }
+    }
 
     #[glib::object_subclass]
     impl ObjectSubclass for WordCompletionProvider {
@@ -89,7 +102,12 @@ mod imp {
         fn populate(&self, context: &CompletionContext) -> Result<gio::ListModel, glib::Error> {
             let word = context.word().to_string().to_lowercase();
             let store = gio::ListStore::new::<super::WordProposal>();
-            super::populate_store(&store, &word);
+            super::populate_store(
+                &store,
+                &word,
+                self.min_prefix.get(),
+                self.max_suggestions.get(),
+            );
             Ok(store.upcast())
         }
 
@@ -98,7 +116,12 @@ mod imp {
                 return;
             };
             let word = context.word().to_string().to_lowercase();
-            super::populate_store(store, &word);
+            super::populate_store(
+                store,
+                &word,
+                self.min_prefix.get(),
+                self.max_suggestions.get(),
+            );
         }
 
         fn populate_future(
@@ -184,6 +207,13 @@ glib::wrapper! {
 impl WordCompletionProvider {
     pub fn new() -> Self {
         glib::Object::new()
+    }
+
+    /// Set how many characters must be typed before suggesting and the
+    /// maximum number of proposals (Settings → Editor → Completions).
+    pub fn set_limits(&self, min_prefix: usize, max_suggestions: usize) {
+        self.imp().min_prefix.set(min_prefix.max(1));
+        self.imp().max_suggestions.set(max_suggestions.max(1));
     }
 }
 

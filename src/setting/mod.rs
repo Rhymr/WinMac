@@ -239,6 +239,18 @@ spec::settings! {
         get |s| SettingValue::Bool(s.word_completion) ;
         set |s, v| if let SettingValue::Bool(b) = v { s.word_completion = b } ;
 
+    completion_min_prefix: u32 = 2 ;
+        kind SettingKind::Int { min: 1, max: 6, step: 1 } ; in EditorCompletion / "" ;
+        label "Characters typed before suggesting" ; help "" ; live Editor ;
+        get |s| SettingValue::Int(s.completion_min_prefix as i64) ;
+        set |s, v| if let SettingValue::Int(n) = v { s.completion_min_prefix = n as u32 } ;
+
+    completion_max_suggestions: u32 = 100 ;
+        kind SettingKind::Int { min: 10, max: 500, step: 10 } ; in EditorCompletion / "" ;
+        label "Maximum suggestions shown" ; help "" ; live Editor ;
+        get |s| SettingValue::Int(s.completion_max_suggestions as i64) ;
+        set |s, v| if let SettingValue::Int(n) = v { s.completion_max_suggestions = n as u32 } ;
+
     auto_indent: bool = true ;
         kind SettingKind::Bool ; in EditorGeneral / "Indentation" ;
         label "Auto-indent new lines" ; help "" ; live Editor ;
