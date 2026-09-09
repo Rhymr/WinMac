@@ -227,15 +227,20 @@ clearly-labeled step, not silently mixed into a feature change.
 ## Branching & releases
 
 - **`release`** — stable, protected. Only merges land here; direct pushes are
-  blocked. There is no automated release: Rhymr is open source and free to
-  build from source. Distributable macOS + Windows binaries are built and
-  published manually (sold on the project website); the source and this repo
-  stay MIT-licensed and buildable by anyone. The binaries carry no license
-  keys, activation, or copy protection — a bought build and a from-source
-  build are the same program (see *Piracy-tolerant by design* above).
+  blocked. Every merge into `release` auto-tags the version (`v<core>`, e.g.
+  `v0.76.0`) and publishes a **source-only** GitHub Release
+  (`.github/workflows/release.yml`) — GitHub's own source archives, nothing
+  binary. Distributable macOS + Windows binaries are still built and published
+  **manually** (sold on the project website); the source and this repo stay
+  MIT-licensed and buildable by anyone. The binaries carry no license keys,
+  activation, or copy protection — a bought build and a from-source build are
+  the same program (see *Piracy-tolerant by design* above).
 - **`beta`** — the working branch. Feature work branches off `beta` and
   merges back into it; `beta` merges into `release` for a cut.
-- CI (`.github/workflows/ci.yml`) gates PRs into `beta` / `release`.
+- CI (`.github/workflows/ci.yml`) gates PRs into `beta` / `release`. A
+  separate `.github/workflows/push_pr.yml` also runs commitlint. Both check
+  out full history (`fetch-depth: 0`) so commitlint's `--from <base> --to
+  <head>` range resolves.
 
 ## Versioning
 

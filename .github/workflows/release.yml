@@ -1,0 +1,55 @@
+name: Release
+
+# On every merge into `release`, tag the version and publish a
+# source-only GitHub Release. Distributable macOS / Windows binaries are
+# still built and sold separately on the project website — nothing binary
+# is attached here.
+
+on:
+  push:
+    branches: [release]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  tag-and-release:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # Build/version.sh walks the whole history
+
+      - name: Compute version
+        id: v
+        run: |
+          echo "core=$(bash Build/version.sh)" >> "$GITHUB_OUTPUT"
+          echo "full=$(bash Build/version.sh --full)" >> "$GITHUB_OUTPUT"
+
+      - name: Tag and publish source release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          FULL: ${{ steps.v.outputs.full }}
+        run: |
+          set -euo pipefail
+          tag="v${{ steps.v.outputs.core }}"
+          if git rev-parse -q --verify "refs/tags/$tag" >/dev/null; then
+            echo "tag $tag already exists — nothing to cut"
+            exit 0
+          fi
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag -a "$tag" -m "Rhymr $tag"
+          git push origin "$tag"
+          printf '%s\n\n%s\n' \
+            "Source release \`$FULL\`." \
+            "Build from source with \`cargo build\`. Ready-to-run macOS and Windows binaries are sold on the project website — a bought build and a from-source build are the same program." \
+            > notes.md
+          gh release create "$tag" \
+            --target "${{ github.sha }}" \
+            --title "Rhymr $tag" \
+            --notes-file notes.md
