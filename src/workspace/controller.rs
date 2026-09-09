@@ -214,10 +214,15 @@ impl WorkspaceController {
         }
     }
 
-    /// Live-apply `settings` to every open tab, if a workspace is loaded.
+    /// Live-apply `settings` to every open tab and the project tree, if a
+    /// workspace is loaded.
     pub fn apply_settings(&self, settings: &crate::setting::Settings) {
         if let Some(workspace) = self.get_workspace() {
             workspace.apply_settings_to_open_tabs(settings);
+            // The project tree re-reads its display options in refresh().
+            if let Some(file_tree) = &workspace.file_tree {
+                file_tree.refresh();
+            }
         }
         // Re-notify the root listener so the external-sources panel picks
         // up a changed Apple Notes cache scope (workspace vs user).

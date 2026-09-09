@@ -134,6 +134,7 @@ fn stack_name(id: CategoryId) -> &'static str {
         CategoryId::EditorGeneral => "editor",
         CategoryId::EditorRhyme => "rhyme",
         CategoryId::EditorCompletion => "completion",
+        CategoryId::EditorFileTree => "filetree",
         CategoryId::VersionControlGit => "git",
         CategoryId::ToolsNetwork => "sources",
     }

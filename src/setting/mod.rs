@@ -251,6 +251,38 @@ spec::settings! {
         get |s| SettingValue::Int(s.completion_max_suggestions as i64) ;
         set |s, v| if let SettingValue::Int(n) = v { s.completion_max_suggestions = n as u32 } ;
 
+    tree_show_dotfiles: bool = false ;
+        kind SettingKind::Bool ; in EditorFileTree / "" ;
+        label "Show hidden files (dotfiles)" ; help "" ; live Other ;
+        get |s| SettingValue::Bool(s.tree_show_dotfiles) ;
+        set |s, v| if let SettingValue::Bool(b) = v { s.tree_show_dotfiles = b } ;
+
+    tree_folders_first: bool = true ;
+        kind SettingKind::Bool ; in EditorFileTree / "" ;
+        label "List folders before files" ; help "" ; live Other ;
+        get |s| SettingValue::Bool(s.tree_folders_first) ;
+        set |s, v| if let SettingValue::Bool(b) = v { s.tree_folders_first = b } ;
+
+    tree_sort_case_sensitive: bool = false ;
+        kind SettingKind::Bool ; in EditorFileTree / "" ;
+        label "Case-sensitive name sorting" ; help "" ; live Other ;
+        get |s| SettingValue::Bool(s.tree_sort_case_sensitive) ;
+        set |s, v| if let SettingValue::Bool(b) = v { s.tree_sort_case_sensitive = b } ;
+
+    tree_indent_px: u32 = 16 ;
+        kind SettingKind::Int { min: 8, max: 32, step: 1 } ; in EditorFileTree / "" ;
+        label "Indent per level (px)" ; help "" ; live Other ;
+        get |s| SettingValue::Int(s.tree_indent_px as i64) ;
+        set |s, v| if let SettingValue::Int(n) = v { s.tree_indent_px = n as u32 } ;
+
+    tree_extra_ignored: String = String::new() ;
+        kind SettingKind::Text ; in EditorFileTree / "" ;
+        label "Also hide (comma-separated)" ;
+        help "Names hidden in the project tree in addition to target and node_modules — e.g. \"dist, .cache\"." ;
+        live Other ;
+        get |s| SettingValue::Text(s.tree_extra_ignored.clone()) ;
+        set |s, v| if let SettingValue::Text(t) = v { s.tree_extra_ignored = t } ;
+
     auto_indent: bool = true ;
         kind SettingKind::Bool ; in EditorGeneral / "Indentation" ;
         label "Auto-indent new lines" ; help "" ; live Editor ;
