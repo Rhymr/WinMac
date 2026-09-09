@@ -131,6 +131,7 @@ fn depth(id: CategoryId) -> i32 {
 fn stack_name(id: CategoryId) -> &'static str {
     match id {
         CategoryId::Appearance => "appearance",
+        CategoryId::AppearanceWindow => "window",
         CategoryId::EditorGeneral => "editor",
         CategoryId::EditorRhyme => "rhyme",
         CategoryId::EditorCompletion => "completion",

@@ -136,6 +136,7 @@ pub struct SettingSpec {
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub enum CategoryId {
     Appearance,
+    AppearanceWindow,
     EditorGeneral,
     EditorRhyme,
     EditorCompletion,
@@ -162,6 +163,12 @@ pub const CATEGORY_TREE: &[CategoryNode] = &[
         parent: None,
         label: "Appearance",
         breadcrumb_parent: "Appearance & Behavior",
+    },
+    CategoryNode {
+        id: CategoryId::AppearanceWindow,
+        parent: Some(CategoryId::Appearance),
+        label: "Window & Startup",
+        breadcrumb_parent: "",
     },
     CategoryNode {
         id: CategoryId::EditorGeneral,

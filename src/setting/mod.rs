@@ -439,6 +439,52 @@ spec::settings! {
         label "Enable UI animations" ; help "" ; live Css ;
         get |s| SettingValue::Bool(s.animations_enabled) ;
         set |s, v| if let SettingValue::Bool(b) = v { s.animations_enabled = b } ;
+
+    reopen_last_project: bool = false ;
+        kind SettingKind::Bool ; in AppearanceWindow / "Startup" ;
+        label "Reopen the last project on launch" ;
+        help "Skips the welcome window and opens the most recently used project." ;
+        live Restart ;
+        get |s| SettingValue::Bool(s.reopen_last_project) ;
+        set |s, v| if let SettingValue::Bool(b) = v { s.reopen_last_project = b } ;
+
+    show_splash: bool = true ;
+        kind SettingKind::Bool ; in AppearanceWindow / "Startup" ;
+        label "Show the splash screen" ; help "" ; live Restart ;
+        get |s| SettingValue::Bool(s.show_splash) ;
+        set |s, v| if let SettingValue::Bool(b) = v { s.show_splash = b } ;
+
+    splash_duration_ms: u32 = 1600 ;
+        kind SettingKind::Int { min: 300, max: 5000, step: 100 } ; in AppearanceWindow / "Startup" ;
+        label "Splash duration (ms)" ; help "" ; live Restart ;
+        get |s| SettingValue::Int(s.splash_duration_ms as i64) ;
+        set |s, v| if let SettingValue::Int(n) = v { s.splash_duration_ms = n as u32 } ;
+
+    window_width: u32 = 1280 ;
+        kind SettingKind::Int { min: 640, max: 6000, step: 10 } ; in AppearanceWindow / "Default sizes" ;
+        label "Main window width (px)" ; help "" ; live Restart ;
+        get |s| SettingValue::Int(s.window_width as i64) ;
+        set |s, v| if let SettingValue::Int(n) = v { s.window_width = n as u32 } ;
+
+    window_height: u32 = 720 ;
+        kind SettingKind::Int { min: 480, max: 4000, step: 10 } ; in AppearanceWindow / "Default sizes" ;
+        label "Main window height (px)" ; help "" ; live Restart ;
+        get |s| SettingValue::Int(s.window_height as i64) ;
+        set |s, v| if let SettingValue::Int(n) = v { s.window_height = n as u32 } ;
+
+    left_panel_width: u32 = 300 ;
+        kind SettingKind::Int { min: 120, max: 900, step: 10 } ; in AppearanceWindow / "Default sizes" ;
+        label "Project panel width (px)" ;
+        help "Starting width for a project with no remembered layout." ;
+        live Restart ;
+        get |s| SettingValue::Int(s.left_panel_width as i64) ;
+        set |s, v| if let SettingValue::Int(n) = v { s.left_panel_width = n as u32 } ;
+
+    rhyme_panel_height: u32 = 240 ;
+        kind SettingKind::Int { min: 80, max: 900, step: 10 } ; in AppearanceWindow / "Default sizes" ;
+        label "Rhyme Search panel height (px)" ; help "" ; live Restart ;
+        get |s| SettingValue::Int(s.rhyme_panel_height as i64) ;
+        set |s, v| if let SettingValue::Int(n) = v { s.rhyme_panel_height = n as u32 } ;
 }
 
 fn settings_file() -> Option<PathBuf> {

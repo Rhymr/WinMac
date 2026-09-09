@@ -104,19 +104,43 @@ fn main() -> glib::ExitCode {
         css::sync_style_manager(&settings);
     };
 
-    // No path given: splash, then the workspace picker.
+    // No path given: (optionally) splash, then the workspace picker — or,
+    // when "reopen last project" is set, straight into the last workspace.
     app.connect_activate(move |app| {
         apply_theme();
+        let startup = Settings::load();
 
-        let splash = rhymr_rs::app::splash::show(app);
-        let app_for_welcome = app.clone();
-        glib::timeout_add_local_once(std::time::Duration::from_millis(1600), move || {
-            let app_for_workspace = app_for_welcome.clone();
-            rhymr_rs::app::welcome::show_welcome_dialog(&app_for_welcome, move |workspace_path| {
-                open_workspace(&app_for_workspace, workspace_path);
-            });
-            splash.close();
-        });
+        if startup.reopen_last_project
+            && let Some(recent) = rhymr_rs::workspace::recent::load_recent_workspaces()
+                .into_iter()
+                .next()
+        {
+            open_workspace(app, recent);
+            return;
+        }
+
+        let show_welcome = {
+            let app = app.clone();
+            move || {
+                let app_for_workspace = app.clone();
+                rhymr_rs::app::welcome::show_welcome_dialog(&app, move |workspace_path| {
+                    open_workspace(&app_for_workspace, workspace_path);
+                });
+            }
+        };
+
+        if startup.show_splash {
+            let splash = rhymr_rs::app::splash::show(app);
+            glib::timeout_add_local_once(
+                std::time::Duration::from_millis(u64::from(startup.splash_duration_ms)),
+                move || {
+                    show_welcome();
+                    splash.close();
+                },
+            );
+        } else {
+            show_welcome();
+        }
     });
 
     // A folder passed on the command line / via "Open With": go straight to
