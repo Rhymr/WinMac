@@ -1,8 +1,6 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-const MAX_RECENT: usize = 10;
-
 fn recent_workspaces_file() -> Option<PathBuf> {
     let mut dir = dirs::config_dir()?;
     dir.push("rhymr");
@@ -39,7 +37,11 @@ pub fn record_recent_workspace(workspace_root: &Path) {
     let mut recents = load_recent_workspaces();
     recents.retain(|p| p != workspace_root);
     recents.insert(0, workspace_root.to_path_buf());
-    recents.truncate(MAX_RECENT);
+    recents.truncate(
+        crate::setting::Settings::load()
+            .recent_projects_limit
+            .max(1) as usize,
+    );
 
     let contents = recents
         .iter()

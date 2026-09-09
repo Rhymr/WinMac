@@ -32,6 +32,8 @@ fn rhyme_tuning(settings: &Settings) -> crate::rhyme::highlight::RhymeTuning {
         line_window: settings.rhyme_line_window as usize,
         merge_threshold: settings.rhyme_merge_threshold as f32,
         hue_count: settings.rhyme_hue_count as usize,
+        paint_margin: settings.rhyme_paint_margin_lines as usize,
+        scroll_debounce_ms: u64::from(settings.rhyme_scroll_debounce_ms),
         thresholds: crate::rhyme::score::Thresholds {
             anchor: settings.rhyme_anchor as f32,
             extend: settings.rhyme_extend as f32,

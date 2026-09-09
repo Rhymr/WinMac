@@ -145,6 +145,7 @@ pub enum CategoryId {
     Keymap,
     VersionControlGit,
     ToolsNetwork,
+    Advanced,
 }
 
 /// One category-tree entry: its id, its parent (`None` = top level), its
@@ -219,6 +220,12 @@ pub const CATEGORY_TREE: &[CategoryNode] = &[
         id: CategoryId::ToolsNetwork,
         parent: None,
         label: "Sources",
+        breadcrumb_parent: "",
+    },
+    CategoryNode {
+        id: CategoryId::Advanced,
+        parent: None,
+        label: "Advanced Settings",
         breadcrumb_parent: "",
     },
 ];

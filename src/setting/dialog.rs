@@ -142,6 +142,7 @@ fn stack_name(id: CategoryId) -> &'static str {
         CategoryId::Keymap => "keymap",
         CategoryId::VersionControlGit => "git",
         CategoryId::ToolsNetwork => "sources",
+        CategoryId::Advanced => "advanced",
     }
 }
 
@@ -405,6 +406,12 @@ fn build_page(
         move |_| (reset_page.borrow())(cat)
     });
     page.append(&reset_btn);
+
+    if cat == CategoryId::Advanced {
+        page.append(&description_label(
+            "For power users — the defaults suit most workflows.",
+        ));
+    }
 
     let mut grid = form_grid();
     let mut group: Option<&str> = None;

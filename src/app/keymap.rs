@@ -284,48 +284,6 @@ impl Keymap {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn set_stores_only_real_overrides() {
-        let mut km = Keymap::default();
-        km.set("save", Some("<Primary><Alt>s")); // == default -> not stored
-        assert_eq!(km, Keymap::default());
-
-        km.set("save", Some("<Primary>e"));
-        assert_eq!(km.accel("save"), "<Primary>e");
-
-        km.set("save", None); // clear -> back to default
-        assert_eq!(km.accel("save"), "<Primary><Alt>s");
-
-        km.set("save", Some(UNBOUND));
-        assert_eq!(km.accel("save"), UNBOUND);
-    }
-
-    #[test]
-    fn conflict_lookup_skips_the_action_itself() {
-        let km = Keymap::default();
-        // git-push default is <Primary><Shift>k
-        assert_eq!(
-            km.action_for_accel("<Primary><Shift>k", "new"),
-            Some("git-push")
-        );
-        assert_eq!(km.action_for_accel("<Primary><Shift>k", "git-push"), None);
-    }
-
-    #[test]
-    fn pretty_is_readable() {
-        assert_eq!(pretty(""), "\u{2013}");
-        assert_eq!(pretty(UNBOUND), "Unbound");
-        #[cfg(not(target_os = "macos"))]
-        assert_eq!(pretty("<Primary><Shift>k"), "Ctrl+Shift+K");
-        #[cfg(target_os = "macos")]
-        assert_eq!(pretty("<Primary>comma"), "\u{2318},");
-    }
-}
-
 /// True for a key that's only ever a modifier — a chord capture ignores
 /// these and waits for the real key.
 pub fn is_modifier(key: gtk::gdk::Key) -> bool {
@@ -386,4 +344,46 @@ pub fn accel_from(key: gtk::gdk::Key, state: gtk::gdk::ModifierType) -> Option<S
     }
     out.push_str(name);
     Some(out)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn set_stores_only_real_overrides() {
+        let mut km = Keymap::default();
+        km.set("save", Some("<Primary><Alt>s")); // == default -> not stored
+        assert_eq!(km, Keymap::default());
+
+        km.set("save", Some("<Primary>e"));
+        assert_eq!(km.accel("save"), "<Primary>e");
+
+        km.set("save", None); // clear -> back to default
+        assert_eq!(km.accel("save"), "<Primary><Alt>s");
+
+        km.set("save", Some(UNBOUND));
+        assert_eq!(km.accel("save"), UNBOUND);
+    }
+
+    #[test]
+    fn conflict_lookup_skips_the_action_itself() {
+        let km = Keymap::default();
+        // git-push default is <Primary><Shift>k
+        assert_eq!(
+            km.action_for_accel("<Primary><Shift>k", "new"),
+            Some("git-push")
+        );
+        assert_eq!(km.action_for_accel("<Primary><Shift>k", "git-push"), None);
+    }
+
+    #[test]
+    fn pretty_is_readable() {
+        assert_eq!(pretty(""), "\u{2013}");
+        assert_eq!(pretty(UNBOUND), "Unbound");
+        #[cfg(not(target_os = "macos"))]
+        assert_eq!(pretty("<Primary><Shift>k"), "Ctrl+Shift+K");
+        #[cfg(target_os = "macos")]
+        assert_eq!(pretty("<Primary>comma"), "\u{2318},");
+    }
 }

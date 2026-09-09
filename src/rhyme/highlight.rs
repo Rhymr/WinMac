@@ -83,6 +83,10 @@ pub struct RhymeTuning {
     /// Distinct hues cycled across groups before the palette wraps; clamped
     /// to `1..=24` (the palette length).
     pub hue_count: usize,
+    /// Extra lines painted above/below the viewport (`PAINT_MARGIN_LINES`).
+    pub paint_margin: usize,
+    /// Debounce before repainting after a scroll (`RHYME_SCROLL_DEBOUNCE`).
+    pub scroll_debounce_ms: u64,
 }
 
 impl Default for RhymeTuning {
@@ -92,6 +96,8 @@ impl Default for RhymeTuning {
             merge_threshold: MERGE_THRESHOLD,
             thresholds: Thresholds::default(),
             hue_count: RHYME_PALETTE_DARK.len(),
+            paint_margin: PAINT_MARGIN_LINES as usize,
+            scroll_debounce_ms: RHYME_SCROLL_DEBOUNCE.as_millis() as u64,
         }
     }
 }
@@ -837,8 +843,9 @@ fn paint_viewport(state: &RecomputeState) {
     let buffer = &state.buffer;
     let last_line = buffer.line_count().saturating_sub(1);
     let (mut first, mut last) = viewport_line_range(&state.view, buffer);
-    first = (first - PAINT_MARGIN_LINES).max(0);
-    last = (last + PAINT_MARGIN_LINES).min(last_line);
+    let margin = state.tuning.get().paint_margin as i32;
+    first = (first - margin).max(0);
+    last = (last + margin).min(last_line);
 
     let start_off = buffer.iter_at_line(first).map(|i| i.offset()).unwrap_or(0);
     let end_off = buffer
@@ -877,8 +884,9 @@ fn schedule_viewport_repaint(state: &RecomputeState) {
     if state.repaint_pending.replace(true) {
         return;
     }
+    let debounce = std::time::Duration::from_millis(state.tuning.get().scroll_debounce_ms);
     let state = state.clone();
-    glib::timeout_add_local_once(RHYME_SCROLL_DEBOUNCE, move || {
+    glib::timeout_add_local_once(debounce, move || {
         state.repaint_pending.set(false);
         paint_viewport(&state);
     });

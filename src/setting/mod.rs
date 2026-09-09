@@ -485,6 +485,32 @@ spec::settings! {
         label "Rhyme Search panel height (px)" ; help "" ; live Restart ;
         get |s| SettingValue::Int(s.rhyme_panel_height as i64) ;
         set |s, v| if let SettingValue::Int(n) = v { s.rhyme_panel_height = n as u32 } ;
+
+    recent_projects_limit: u32 = 10 ;
+        kind SettingKind::Int { min: 3, max: 50, step: 1 } ; in Advanced / "" ;
+        label "Recent projects to remember" ; help "" ; live Restart ;
+        get |s| SettingValue::Int(s.recent_projects_limit as i64) ;
+        set |s, v| if let SettingValue::Int(n) = v { s.recent_projects_limit = n as u32 } ;
+
+    tab_title_max_chars: u32 = 18 ;
+        kind SettingKind::Int { min: 8, max: 60, step: 1 } ; in Advanced / "" ;
+        label "Tab title length before it's truncated" ; help "" ; live Restart ;
+        get |s| SettingValue::Int(s.tab_title_max_chars as i64) ;
+        set |s, v| if let SettingValue::Int(n) = v { s.tab_title_max_chars = n as u32 } ;
+
+    rhyme_paint_margin_lines: u32 = 64 ;
+        kind SettingKind::Int { min: 0, max: 400, step: 8 } ; in Advanced / "" ;
+        label "Rhyme paint margin (lines)" ;
+        help "How far past the visible range rhyme colours are painted ahead of scrolling." ;
+        live Editor ;
+        get |s| SettingValue::Int(s.rhyme_paint_margin_lines as i64) ;
+        set |s, v| if let SettingValue::Int(n) = v { s.rhyme_paint_margin_lines = n as u32 } ;
+
+    rhyme_scroll_debounce_ms: u32 = 120 ;
+        kind SettingKind::Int { min: 0, max: 1000, step: 10 } ; in Advanced / "" ;
+        label "Rhyme repaint delay after scrolling (ms)" ; help "" ; live Editor ;
+        get |s| SettingValue::Int(s.rhyme_scroll_debounce_ms as i64) ;
+        set |s, v| if let SettingValue::Int(n) = v { s.rhyme_scroll_debounce_ms = n as u32 } ;
 }
 
 fn settings_file() -> Option<PathBuf> {

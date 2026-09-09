@@ -614,18 +614,17 @@ fn add_new_tab(
     (page_num, text_editor)
 }
 
-/// Longest a tab name is shown before it's cut with an ellipsis.
-const MAX_TAB_CHARS: usize = 18;
-
-/// Cap a tab name at [`MAX_TAB_CHARS`], breaking on the last word boundary
-/// within the limit where there is one so a title doesn't cut mid-word.
+/// Cap a tab name at `Settings::tab_title_max_chars`, breaking on the last
+/// word boundary within the limit where there is one so a title doesn't cut
+/// mid-word.
 fn truncate_tab_name(name: &str) -> String {
-    if name.chars().count() <= MAX_TAB_CHARS {
+    let max = (crate::setting::Settings::load().tab_title_max_chars.max(4) as usize).min(120);
+    if name.chars().count() <= max {
         return name.to_string();
     }
-    let head: String = name.chars().take(MAX_TAB_CHARS).collect();
+    let head: String = name.chars().take(max).collect();
     let cut = match head.rfind(' ') {
-        Some(sp) if sp >= MAX_TAB_CHARS / 2 => &head[..sp],
+        Some(sp) if sp >= max / 2 => &head[..sp],
         _ => head.trim_end(),
     };
     format!("{}\u{2026}", cut.trim_end())
