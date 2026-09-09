@@ -281,6 +281,40 @@ spec::settings! {
         get |s| SettingValue::Bool(s.git_autostage) ;
         set |s, v| if let SettingValue::Bool(b) = v { s.git_autostage = b } ;
 
+    git_remote_name: String = "origin".to_string() ;
+        kind SettingKind::Text ; in VersionControlGit / "Remote" ;
+        label "Remote name" ; help "" ; live Other ;
+        get |s| SettingValue::Text(s.git_remote_name.clone()) ;
+        set |s, v| if let SettingValue::Text(t) = v
+            && !t.is_empty()
+        {
+            s.git_remote_name = t
+        } ;
+
+    git_default_commit_message: String = "Update".to_string() ;
+        kind SettingKind::Text ; in VersionControlGit / "Commits" ;
+        label "Default commit message" ;
+        help "Used when the commit dialog's message box is left empty." ;
+        live Other ;
+        get |s| SettingValue::Text(s.git_default_commit_message.clone()) ;
+        set |s, v| if let SettingValue::Text(t) = v
+            && !t.is_empty()
+        {
+            s.git_default_commit_message = t
+        } ;
+
+    git_signature_fallback: String = "Pneuma <pneuma@local>".to_string() ;
+        kind SettingKind::Text ; in VersionControlGit / "Commits" ;
+        label "Fallback author" ;
+        help "\"Name <email>\" used to sign a commit when git has no user.name / user.email configured." ;
+        live Other ;
+        get |s| SettingValue::Text(s.git_signature_fallback.clone()) ;
+        set |s, v| if let SettingValue::Text(t) = v
+            && !t.is_empty()
+        {
+            s.git_signature_fallback = t
+        } ;
+
     notes_cache_scope: NotesCacheScope = NotesCacheScope::Workspace ;
         kind SettingKind::Enum {
             values: &["workspace", "user"],

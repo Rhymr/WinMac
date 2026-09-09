@@ -2,6 +2,20 @@ use git2::Repository;
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
+/// Split a `"Name <email>"` author string into its parts, falling back to a
+/// safe default if it isn't in that shape. Used only when git has no
+/// `user.name` / `user.email` configured (see `Settings::git_signature_fallback`).
+fn parse_author(raw: &str) -> (String, String) {
+    if let Some((name, rest)) = raw.split_once('<') {
+        let name = name.trim();
+        let email = rest.trim_end_matches('>').trim();
+        if !name.is_empty() && !email.is_empty() {
+            return (name.to_string(), email.to_string());
+        }
+    }
+    ("Rhymr".to_string(), "rhymr@local".to_string())
+}
+
 /// A file's status relative to HEAD, simplified to the categories the file
 /// tree colors differently. Checked in this priority order (a renamed file
 /// that also changed content still reads as "Renamed", matching `git
@@ -129,9 +143,14 @@ impl GitController {
         let tree_id = index.write_tree().map_err(|e| e.to_string())?;
         let tree = repo.find_tree(tree_id).map_err(|e| e.to_string())?;
 
-        let signature = repo
-            .signature()
-            .unwrap_or_else(|_| git2::Signature::now("Pneuma", "pneuma@local").unwrap());
+        let signature = match repo.signature() {
+            Ok(sig) => sig,
+            Err(_) => {
+                let (name, email) =
+                    parse_author(&crate::setting::Settings::load().git_signature_fallback);
+                git2::Signature::now(&name, &email).map_err(|e| e.to_string())?
+            }
+        };
 
         let parent_commit = match repo.head() {
             Ok(head) => Some(head.peel_to_commit().map_err(|e| e.to_string())?),

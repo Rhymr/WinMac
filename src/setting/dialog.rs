@@ -4,9 +4,9 @@ use crate::app::context_menu::ContextMenu;
 use crate::workspace::controller::WorkspaceController;
 use gtk::prelude::*;
 use gtk::{
-    Align, Box as GtkBox, Button, CheckButton, EventSequenceState, FontDialog, FontDialogButton,
-    GestureClick, Grid, Label, ListBox, ListBoxRow, Orientation, SearchEntry, Separator,
-    SpinButton, Stack, Window, pango,
+    Align, Box as GtkBox, Button, CheckButton, Entry, EventSequenceState, FontDialog,
+    FontDialogButton, GestureClick, Grid, Label, ListBox, ListBoxRow, Orientation, SearchEntry,
+    Separator, SpinButton, Stack, Window, pango,
 };
 use libadwaita::Application;
 use std::cell::{Cell, RefCell};
@@ -260,6 +260,7 @@ fn build_category_rows(
 enum BoundWidget {
     Check(CheckButton),
     Spin(SpinButton),
+    Entry(Entry),
     Enum {
         selected: Rc<Cell<usize>>,
         values: &'static [&'static str],
@@ -297,6 +298,7 @@ impl SettingWidgets {
                 SettingKind::Float { .. } => SettingValue::Float(sb.value()),
                 _ => SettingValue::Int(sb.value().round() as i64),
             }),
+            BoundWidget::Entry(e) => Some(SettingValue::Text(e.text().to_string())),
             BoundWidget::Enum { selected, values } => {
                 let idx = selected.get().min(values.len().saturating_sub(1));
                 Some(SettingValue::Text(values[idx].to_string()))
@@ -402,7 +404,12 @@ fn build_page(
                 widgets.0.insert(spec.key, BoundWidget::Font(font_button));
             }
             SettingKind::Text => {
-                // No free-text settings yet (added in a later stage).
+                let entry = Entry::builder().hexpand(true).build();
+                if let SettingValue::Text(t) = (spec.get)(settings) {
+                    entry.set_text(&t);
+                }
+                grid_field(&grid, row, &format!("{}:", spec.label), &entry);
+                widgets.0.insert(spec.key, BoundWidget::Entry(entry));
             }
             SettingKind::FontSize { .. } => {}
         }
@@ -654,6 +661,9 @@ pub fn show_settings_dialog(app: &Application, controller: Option<Rc<WorkspaceCo
             }
             BoundWidget::Font(fb) => {
                 fb.connect_font_desc_notify(move |_| f());
+            }
+            BoundWidget::Entry(e) => {
+                e.connect_changed(move |_| f());
             }
             // Value dropdowns route through `mark_dirty` (set below).
             BoundWidget::Enum { .. } => {}
