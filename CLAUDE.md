@@ -237,10 +237,10 @@ clearly-labeled step, not silently mixed into a feature change.
   the same program (see *Piracy-tolerant by design* above).
 - **`beta`** — the working branch. Feature work branches off `beta` and
   merges back into it; `beta` merges into `release` for a cut.
-- CI (`.github/workflows/ci.yml`) gates PRs into `beta` / `release`. A
-  separate `.github/workflows/push_pr.yml` also runs commitlint. Both check
-  out full history (`fetch-depth: 0`) so commitlint's `--from <base> --to
-  <head>` range resolves.
+- CI: `.github/workflows/ci.yml` runs `fmt` / `clippy` / `build` on
+  `macos-14`; `.github/workflows/push_pr.yml` runs commitlint (checks out
+  `fetch-depth: 0` so its `--from <base> --to <head>` range resolves).
+  Both gate PRs into `beta` / `release`.
 
 ## Versioning
 

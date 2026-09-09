@@ -15,10 +15,6 @@ jobs:
     runs-on: macos-14
     steps:
       - uses: actions/checkout@v4
-        with:
-          # Full history so the commitlint step below can resolve the PR's
-          # base commit for its `--from … --to …` range.
-          fetch-depth: 0
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
@@ -31,8 +27,6 @@ jobs:
       - run: cargo fmt --all --check
       - run: cargo clippy --all-targets -- -D warnings
       - run: cargo build --locked
-      - name: commitlint (PRs)
-        if: github.event_name == 'pull_request'
-        run: |
-          npm ci --no-audit --no-fund
-          npx --no-install commitlint --from "${{ github.event.pull_request.base.sha }}" --to "${{ github.sha }}"
+      # Commit-message linting lives in push_pr.yml (a dedicated job that
+      # installs commitlint itself — there's no committed package-lock.json,
+      # so `npm ci` can't run here).
