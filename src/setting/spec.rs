@@ -137,6 +137,7 @@ pub struct SettingSpec {
 pub enum CategoryId {
     Appearance,
     AppearanceWindow,
+    ColorScheme,
     EditorGeneral,
     EditorRhyme,
     EditorCompletion,
@@ -168,6 +169,12 @@ pub const CATEGORY_TREE: &[CategoryNode] = &[
         id: CategoryId::AppearanceWindow,
         parent: Some(CategoryId::Appearance),
         label: "Window & Startup",
+        breadcrumb_parent: "",
+    },
+    CategoryNode {
+        id: CategoryId::ColorScheme,
+        parent: Some(CategoryId::Appearance),
+        label: "Color Scheme",
         breadcrumb_parent: "",
     },
     CategoryNode {
@@ -237,8 +244,13 @@ macro_rules! settings {
         #[derive(Clone, PartialEq, Debug)]
         pub struct Settings {
             $( pub $key : $ty, )*
-            /// `key=value` lines whose key isn't in `SPECS` — kept verbatim
-            /// so a file written by a newer build round-trips unharmed.
+            /// Editor color-scheme overrides, `palette.<name>` in the file,
+            /// consulted by `crate::css::theme_css`. `<name>` is a
+            /// `crate::css::PALETTE` entry; the value is a `#rrggbb` hex.
+            pub palette_overrides: std::collections::BTreeMap<String, String>,
+            /// `key=value` lines whose key isn't in `SPECS` (and not a
+            /// `palette.` override) — kept verbatim so a file written by a
+            /// newer build round-trips unharmed.
             unknown: std::collections::BTreeMap<String, String>,
         }
 
@@ -246,6 +258,7 @@ macro_rules! settings {
             fn default() -> Self {
                 Self {
                     $( $key : $default, )*
+                    palette_overrides: std::collections::BTreeMap::new(),
                     unknown: std::collections::BTreeMap::new(),
                 }
             }

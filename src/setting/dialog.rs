@@ -4,13 +4,14 @@ use crate::app::context_menu::ContextMenu;
 use crate::workspace::controller::WorkspaceController;
 use gtk::prelude::*;
 use gtk::{
-    Align, Box as GtkBox, Button, CheckButton, Entry, EventSequenceState, FontDialog,
-    FontDialogButton, GestureClick, Grid, Label, ListBox, ListBoxRow, Orientation, SearchEntry,
-    Separator, SpinButton, Stack, Window, pango,
+    Align, Box as GtkBox, Button, CheckButton, ColorDialog, ColorDialogButton, Entry,
+    EventSequenceState, FontDialog, FontDialogButton, GestureClick, Grid, Label, ListBox,
+    ListBoxRow, Orientation, ScrolledWindow, SearchEntry, Separator, SpinButton, Stack, Window,
+    gdk, pango,
 };
 use libadwaita::Application;
 use std::cell::{Cell, RefCell};
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::rc::Rc;
 
 /// Per-depth indent for a child row in the category tree.
@@ -132,6 +133,7 @@ fn stack_name(id: CategoryId) -> &'static str {
     match id {
         CategoryId::Appearance => "appearance",
         CategoryId::AppearanceWindow => "window",
+        CategoryId::ColorScheme => "colorscheme",
         CategoryId::EditorGeneral => "editor",
         CategoryId::EditorRhyme => "rhyme",
         CategoryId::EditorCompletion => "completion",
@@ -427,6 +429,126 @@ fn build_page(
     page
 }
 
+/// `#rrggbb` for a `gdk::RGBA` (alpha dropped).
+fn hex_from_rgba(c: &gdk::RGBA) -> String {
+    let to = |x: f32| (x.clamp(0.0, 1.0) * 255.0).round() as u8;
+    format!(
+        "#{:02x}{:02x}{:02x}",
+        to(c.red()),
+        to(c.green()),
+        to(c.blue())
+    )
+}
+
+/// The Color Scheme page: a scrollable list of every `css::PALETTE` entry
+/// with a colour picker and a per-row Reset, plus a "Reset all" button.
+/// Edits accumulate in `overrides` (the `palette.<name>` map); a value
+/// equal to the current theme's default is dropped, so Reset really clears
+/// the override rather than pinning the default.
+fn build_color_scheme_page(
+    settings: &Settings,
+    overrides: &Rc<RefCell<BTreeMap<String, String>>>,
+    mark_dirty: &DirtyHook,
+) -> ScrolledWindow {
+    let page = settings_page();
+    let theme = settings.theme;
+
+    let reset_all = Button::builder()
+        .label("Reset all colours to theme default")
+        .halign(Align::Start)
+        .build();
+    page.append(&reset_all);
+    page.append(&description_label(
+        "Overrides apply on top of the current theme and are saved as palette.<name> lines.",
+    ));
+
+    let grid = form_grid();
+    grid.set_margin_top(8);
+    page.append(&grid);
+
+    // (picker, default hex) per palette entry — reused by the reset wiring.
+    let mut pickers: Vec<(ColorDialogButton, &'static str, String)> = Vec::new();
+
+    for (i, (name, _, _)) in crate::css::PALETTE.iter().enumerate() {
+        let row = i as i32;
+        let default_hex = crate::css::palette_default(name, theme)
+            .unwrap_or("#000000")
+            .to_string();
+        let current_hex = overrides
+            .borrow()
+            .get(*name)
+            .cloned()
+            .unwrap_or_else(|| default_hex.clone());
+
+        let picker = ColorDialogButton::builder()
+            .dialog(&ColorDialog::builder().with_alpha(false).build())
+            .valign(Align::Center)
+            .build();
+        if let Ok(rgba) = gdk::RGBA::parse(&current_hex) {
+            picker.set_rgba(&rgba);
+        }
+        let reset = Button::builder()
+            .label("Reset")
+            .css_classes(["flat"])
+            .build();
+
+        grid_field(&grid, row, name, &picker);
+        grid.attach(&reset, 2, row, 1, 1);
+
+        // Picker edits -> the overrides map (default value clears it).
+        picker.connect_rgba_notify({
+            let overrides = overrides.clone();
+            let mark_dirty = mark_dirty.clone();
+            let name = *name;
+            let default_hex = default_hex.clone();
+            move |p| {
+                let hex = hex_from_rgba(&p.rgba());
+                {
+                    let mut map = overrides.borrow_mut();
+                    if hex.eq_ignore_ascii_case(&default_hex) {
+                        map.remove(name);
+                    } else {
+                        map.insert(name.to_string(), hex);
+                    }
+                }
+                (mark_dirty.borrow())();
+            }
+        });
+
+        reset.connect_clicked({
+            let picker = picker.clone();
+            let default_hex = default_hex.clone();
+            move |_| {
+                if let Ok(rgba) = gdk::RGBA::parse(&default_hex) {
+                    picker.set_rgba(&rgba); // fires rgba_notify -> map cleared
+                }
+            }
+        });
+
+        pickers.push((picker, name, default_hex));
+    }
+
+    reset_all.connect_clicked({
+        let overrides = overrides.clone();
+        let mark_dirty = mark_dirty.clone();
+        move |_| {
+            overrides.borrow_mut().clear();
+            for (picker, _, default_hex) in &pickers {
+                if let Ok(rgba) = gdk::RGBA::parse(default_hex) {
+                    picker.set_rgba(&rgba);
+                }
+            }
+            (mark_dirty.borrow())();
+        }
+    });
+
+    ScrolledWindow::builder()
+        .hscrollbar_policy(gtk::PolicyType::Never)
+        .vexpand(true)
+        .child(&page)
+        .build()
+}
+
 /// `controller` is `None` when opened from the welcome screen (no
 /// workspace loaded yet, so there's nothing to live-apply to) and `Some`
 /// when opened from an already-open workspace's File menu.
@@ -500,10 +622,20 @@ pub fn show_settings_dialog(app: &Application, controller: Option<Rc<WorkspaceCo
     // through this slot, filled in once that closure is defined.
     let mark_dirty: DirtyHook = Rc::new(RefCell::new(Box::new(|| {})));
 
+    // Editor color-scheme overrides, edited on the Color Scheme page and
+    // merged back into `Settings` by `read_current`.
+    let overrides: Rc<RefCell<BTreeMap<String, String>>> =
+        Rc::new(RefCell::new(settings.palette_overrides.clone()));
+
     let mut widgets = SettingWidgets::default();
     for n in CATEGORY_TREE {
-        let page = build_page(n.id, &settings, &mut widgets, &mark_dirty);
-        stack.add_named(&page, Some(stack_name(n.id)));
+        if n.id == CategoryId::ColorScheme {
+            let page = build_color_scheme_page(&settings, &overrides, &mark_dirty);
+            stack.add_named(&page, Some(stack_name(n.id)));
+        } else {
+            let page = build_page(n.id, &settings, &mut widgets, &mark_dirty);
+            stack.add_named(&page, Some(stack_name(n.id)));
+        }
     }
     let widgets = Rc::new(widgets);
 
@@ -631,6 +763,7 @@ pub fn show_settings_dialog(app: &Application, controller: Option<Rc<WorkspaceCo
     let read_current: Rc<dyn Fn() -> Settings> = Rc::new({
         let widgets = widgets.clone();
         let baseline = baseline.clone();
+        let overrides = overrides.clone();
         move || {
             let mut current = baseline.borrow().clone();
             for spec in SPECS {
@@ -638,6 +771,7 @@ pub fn show_settings_dialog(app: &Application, controller: Option<Rc<WorkspaceCo
                     (spec.set)(&mut current, value);
                 }
             }
+            current.palette_overrides = overrides.borrow().clone();
             current
         }
     });

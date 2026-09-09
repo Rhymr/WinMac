@@ -506,6 +506,14 @@ fn parse_into(settings: &mut Settings, contents: &str) {
             continue;
         };
         let (key, raw) = (key.trim(), raw.trim());
+        if let Some(name) = key.strip_prefix("palette.") {
+            if is_hex_color(raw) && !name.is_empty() {
+                settings
+                    .palette_overrides
+                    .insert(name.to_string(), raw.to_lowercase());
+            }
+            continue;
+        }
         match SPECS.iter().find(|spec| spec.key == key) {
             Some(spec) => {
                 if let Some(value) = spec.kind.parse_clamped(raw) {
@@ -521,14 +529,30 @@ fn parse_into(settings: &mut Settings, contents: &str) {
     }
 }
 
+/// `#rgb` or `#rrggbb`.
+fn is_hex_color(s: &str) -> bool {
+    let Some(hex) = s.strip_prefix('#') else {
+        return false;
+    };
+    matches!(hex.len(), 3 | 6) && hex.bytes().all(|b| b.is_ascii_hexdigit())
+}
+
 /// Render `settings` to the flat format: every spec in registry order, then
-/// any stashed unknown keys (sorted, from the `BTreeMap`).
+/// the color-scheme overrides, then any stashed unknown keys (all sorted,
+/// from their `BTreeMap`s).
 fn serialize(settings: &Settings) -> String {
     let mut out = String::new();
     for spec in SPECS {
         out.push_str(spec.key);
         out.push('=');
         out.push_str(&(spec.get)(settings).render());
+        out.push('\n');
+    }
+    for (name, hex) in &settings.palette_overrides {
+        out.push_str("palette.");
+        out.push_str(name);
+        out.push('=');
+        out.push_str(hex);
         out.push('\n');
     }
     for (key, value) in &settings.unknown {
@@ -621,6 +645,24 @@ mod tests {
 
         let mut again = Settings::default();
         parse_into(&mut again, &serialize(&settings));
+        assert_eq!(settings, again);
+    }
+
+    #[test]
+    fn palette_overrides_round_trip_and_reject_non_hex() {
+        let mut settings = Settings::default();
+        parse_into(
+            &mut settings,
+            "palette.bg-dark=#123456\npalette.text-bright=not-a-color\npalette.=#ffffff\n",
+        );
+        assert_eq!(settings.palette_overrides.get("bg-dark").unwrap(), "#123456");
+        assert!(!settings.palette_overrides.contains_key("text-bright"));
+        assert!(settings.palette_overrides.len() == 1);
+
+        let text = serialize(&settings);
+        assert!(text.contains("palette.bg-dark=#123456"));
+        let mut again = Settings::default();
+        parse_into(&mut again, &text);
         assert_eq!(settings, again);
     }
 
