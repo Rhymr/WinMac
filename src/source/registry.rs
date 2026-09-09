@@ -2,7 +2,6 @@
 //! this; adding a backend means adding it here and nowhere else.
 
 use super::TextSource;
-use super::apple_notes::AppleNotesSource;
 use std::sync::Arc;
 
 /// Ordered set of the app's registered [`TextSource`]s.
@@ -11,12 +10,18 @@ pub struct SourceRegistry {
 }
 
 impl SourceRegistry {
-    /// The registry the app ships with. Apple Notes only for now — it
-    /// reports `Unavailable` off macOS, so nothing renders there.
+    /// The registry the app ships with. Apple Notes is the only backend
+    /// today, and it only exists on macOS — so off macOS it isn't even
+    /// constructed and `sources()` comes back empty (the panel then hides
+    /// itself). A future non-macOS backend would be pushed unconditionally
+    /// here; Apple Notes stays `cfg`-gated.
     pub fn with_defaults() -> Self {
-        Self {
-            sources: vec![Arc::new(AppleNotesSource::new())],
-        }
+        let sources: Vec<Arc<dyn TextSource>> = vec![
+            #[cfg(target_os = "macos")]
+            Arc::new(super::apple_notes::AppleNotesSource::new()),
+        ];
+
+        Self { sources }
     }
 
     /// Every registered source, in display order.

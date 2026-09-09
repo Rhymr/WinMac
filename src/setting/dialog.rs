@@ -263,13 +263,23 @@ pub fn show_settings_dialog(app: &Application, controller: Option<Rc<WorkspaceCo
         .label("Don't match rhymes across a blank line")
         .active(settings.rhyme_stop_at_blank_line)
         .build();
+    let rhyme_legend_toggle = CheckButton::builder()
+        .label("Show the rhyme-group legend under the editor")
+        .active(settings.show_rhyme_legend)
+        .build();
+    let rhyme_hover_toggle = CheckButton::builder()
+        .label("Hover a word to emphasise its rhyme group")
+        .active(settings.rhyme_hover_emphasis)
+        .build();
     let rhyme_page = settings_page();
     let rhyme_grid = form_grid();
     grid_check(&rhyme_grid, 0, &rhyme_toggle);
     grid_check(&rhyme_grid, 1, &rhyme_stop_at_blank_line_toggle);
+    grid_check(&rhyme_grid, 2, &rhyme_legend_toggle);
+    grid_check(&rhyme_grid, 3, &rhyme_hover_toggle);
     rhyme_page.append(&rhyme_grid);
     rhyme_page.append(&description_label(
-        "Colors the background of syllables that rhyme with another word elsewhere in the document.",
+        "Colors the text of syllables that rhyme with another word elsewhere in the document.",
     ));
     stack.add_named(&rhyme_page, Some("rhyme"));
 
@@ -401,6 +411,8 @@ pub fn show_settings_dialog(app: &Application, controller: Option<Rc<WorkspaceCo
         let tab_width_spin = tab_width_spin.clone();
         let rhyme_toggle = rhyme_toggle.clone();
         let rhyme_stop_at_blank_line_toggle = rhyme_stop_at_blank_line_toggle.clone();
+        let rhyme_legend_toggle = rhyme_legend_toggle.clone();
+        let rhyme_hover_toggle = rhyme_hover_toggle.clone();
         let completion_toggle = completion_toggle.clone();
         let git_toggle = git_toggle.clone();
         let theme_selected = theme_selected.clone();
@@ -425,6 +437,8 @@ pub fn show_settings_dialog(app: &Application, controller: Option<Rc<WorkspaceCo
                 show_vcs_gutter: vcs_gutter_toggle.is_active(),
                 rhyme_highlighting: rhyme_toggle.is_active(),
                 rhyme_stop_at_blank_line: rhyme_stop_at_blank_line_toggle.is_active(),
+                show_rhyme_legend: rhyme_legend_toggle.is_active(),
+                rhyme_hover_emphasis: rhyme_hover_toggle.is_active(),
                 word_completion: completion_toggle.is_active(),
                 auto_indent: auto_indent_toggle.is_active(),
                 tab_width: tab_width_spin.value() as u32,
@@ -471,6 +485,8 @@ pub fn show_settings_dialog(app: &Application, controller: Option<Rc<WorkspaceCo
         &auto_indent_toggle,
         &rhyme_toggle,
         &rhyme_stop_at_blank_line_toggle,
+        &rhyme_legend_toggle,
+        &rhyme_hover_toggle,
         &completion_toggle,
         &git_toggle,
     ] {

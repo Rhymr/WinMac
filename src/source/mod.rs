@@ -6,6 +6,14 @@
 //!
 //! Rhymr never writes back to a source. Interactions are: browse, open a
 //! document in a read-only editor buffer, copy its text/title, refresh.
+//!
+//! TODO(#2): a "sources manager" — Settings → Sources gains a list of
+//! every registered [`TextSource`] with an Install / Remove toggle, and a
+//! persisted set of installed source ids. `SourcePanel` then shows only
+//! installed sources (Apple Notes on macOS is implicitly installed, see
+//! [`TextSource::requires_install`]). Until that lands, the panel shows
+//! every registered source and the in-tree "Install" action just triggers
+//! a load.
 
 pub mod apple_notes;
 pub mod model;
@@ -30,6 +38,16 @@ pub trait TextSource: Send + Sync {
 
     /// Whether the source can be loaded right now.
     fn status(&self) -> SourceStatus;
+
+    /// Whether this source needs an explicit user "Install" (a permission
+    /// grant, a sign-in, a backend download) before Rhymr should load it in
+    /// the background. The sources manager (Settings → Sources, issue #2)
+    /// will persist the installed set and gate loads on it; a source that
+    /// returns `false` is always available and never needs installing.
+    /// Default: `true`.
+    fn requires_install(&self) -> bool {
+        true
+    }
 
     /// Point the source at the current workspace so any per-workspace cache
     /// (kept under `<workspace>/.rhymr/`) lands in the right place. Default:

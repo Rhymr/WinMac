@@ -33,6 +33,13 @@ pub fn apple_notes_cache(workspace_root: Option<&Path>, scope: NotesCacheScope) 
     }
 }
 
+/// `<config dir>/rhymr/session.json` — per-workspace UI state (folded
+/// folders, panel sizes) remembered across launches. `None` when the OS
+/// reports no config dir.
+pub fn session_file() -> Option<PathBuf> {
+    Some(user_config_dir()?.join("session.json"))
+}
+
 /// How often the "Apple Notes" tree re-reads from the Notes app.
 pub const APPLE_NOTES_REFRESH: Duration = Duration::from_secs(300);
 

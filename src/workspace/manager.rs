@@ -7,6 +7,7 @@ pub struct WorkspaceManager {
 
 impl WorkspaceManager {
     pub fn init_workspace(path: &Path, init_git: bool) -> Result<Self, String> {
+        log::info!("initialising workspace at {path:?} (git={init_git})");
         // 1. Ensure root workspace folder exists
         fs::create_dir_all(path).map_err(|e| e.to_string())?;
 
@@ -22,7 +23,10 @@ impl WorkspaceManager {
 
         // 4. Initialize Git repo if enabled
         if init_git {
-            git2::Repository::init(path).map_err(|e| e.to_string())?;
+            git2::Repository::init(path).map_err(|e| {
+                log::error!("workspace init: git repo init failed: {e}");
+                e.to_string()
+            })?;
         }
 
         Ok(Self {

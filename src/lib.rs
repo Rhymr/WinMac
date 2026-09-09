@@ -1,6 +1,7 @@
 // Root
 pub mod config;
 pub mod css;
+pub mod logging;
 pub mod version;
 // Folders
 pub mod app;

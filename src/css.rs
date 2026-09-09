@@ -48,9 +48,11 @@ const PALETTE: &[(&str, &str, &str)] = &[
     ("text-modified", "#d19a66", "#a85f1d"),
     ("text-new", "#6fbf73", "#1f8a3d"),
     ("text-renamed", "#61afef", "#1568c9"),
-    // Git-ignored entries and read-only external-source trees — the muted
-    // goldenrod JetBrains uses for ignored / excluded nodes.
-    ("text-ignored", "#9e8b63", "#8a7a4a"),
+    // Git-ignored entries and read-only external-source trees — instead of
+    // tinting the label text, the row sits on this muted goldenrod so the
+    // name keeps its default colour and the "ignored / read-only" state
+    // reads as a highlight.
+    ("bg-ignored", "#544628", "#ede0b3"),
     // VCS gutter change bars (JetBrains convention: green add / blue modify).
     ("vcs-added", "#59a869", "#4a8f3c"),
     ("vcs-modified", "#4a88c7", "#3573b8"),
@@ -107,7 +109,7 @@ pub fn compile_sass() -> Result<(), Box<dyn std::error::Error>> {
         let scss_path = css_file.replace("{1}", "scss");
         let css_path = css_file.replace("{1}", "css");
 
-        println!("Compiling {scss_path}");
+        log::debug!("compiling {scss_path}");
         let css_output = grass::from_path(&scss_path, &Options::default())?;
         fs::write(css_path, css_output)?;
     }
@@ -181,7 +183,7 @@ fn build_css(settings: &Settings) -> String {
                 combined_css.push_str(css);
                 combined_css.push('\n');
             }
-            Err(err) => eprintln!("Failed to compile {scss_path}: {err}"),
+            Err(err) => log::error!("failed to compile {scss_path}: {err}"),
         }
     }
 

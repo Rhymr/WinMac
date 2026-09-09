@@ -42,7 +42,8 @@ pub struct FileTree {
     // Empty whenever the workspace isn't a git repo.
     git_statuses: Rc<RefCell<HashMap<PathBuf, GitFileStatus>>>,
     // Absolute paths git ignores (one per ignored dir). A row whose path
-    // is, or is under, one of these is greyed goldenrod (`.file-ignored`).
+    // is, or is under, one of these sits on a goldenrod background
+    // (`.file-ignored`).
     ignored: Rc<RefCell<HashSet<PathBuf>>>,
     // Decoded once and shared as *paintable data*, not as widgets: a GTK
     // widget can only ever have one parent, so reusing the same Image
@@ -160,12 +161,37 @@ impl FileTree {
             });
     }
 
-    /// Point the tree at a workspace folder and populate it from disk.
+    /// Point the tree at a workspace folder and populate it from disk,
+    /// restoring which folders were folded last time this project was open.
     pub fn set_root_path(&self, path: PathBuf) {
+        let session = crate::workspace::session::load(&path);
+        {
+            let mut collapsed = self.collapsed.borrow_mut();
+            collapsed.clear();
+            for rel in &session.collapsed_dirs {
+                collapsed.insert(path.join(rel));
+            }
+        }
         self.root_path.replace(Some(path));
-        self.collapsed.borrow_mut().clear();
         self.clipboard.replace(None);
         self.refresh();
+    }
+
+    /// Write the current set of folded folders (root-relative) back to the
+    /// per-workspace session file. Cheap; called after every fold change.
+    pub(crate) fn persist_tree_state(&self) {
+        let Some(root) = self.root_path.borrow().clone() else {
+            return;
+        };
+        let mut rels: Vec<String> = self
+            .collapsed
+            .borrow()
+            .iter()
+            .filter_map(|p| p.strip_prefix(&root).ok())
+            .map(|p| p.to_string_lossy().into_owned())
+            .collect();
+        rels.sort();
+        crate::workspace::session::update(&root, |s| s.collapsed_dirs = rels);
     }
 
     /// Re-walk the workspace folder and rebuild the displayed rows.
@@ -379,8 +405,9 @@ impl FileTree {
             label
         };
 
-        // Git-ignored entries (and anything under an ignored dir) go
-        // goldenrod, JetBrains-style — but not the workspace root itself.
+        // Git-ignored entries (and anything under an ignored dir) sit on a
+        // goldenrod background, JetBrains-style — but not the workspace
+        // root itself.
         if !is_root && self.is_ignored(path) {
             name_label.add_css_class("file-ignored");
         }
@@ -407,6 +434,7 @@ impl FileTree {
                 }
                 drop(collapsed);
                 file_tree_ref.refresh();
+                file_tree_ref.persist_tree_state();
             });
             hbox.add_controller(toggle_click);
         } else {

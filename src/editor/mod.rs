@@ -9,13 +9,15 @@ use completion::WordCompletionProvider;
 use gtk::gdk;
 use gtk::prelude::*;
 use gtk::{
-    Align, Box as GtkBox, EventSequenceState, Frame, GestureClick, Label, Orientation, Overlay,
-    PropagationPhase, ScrolledWindow,
+    Align, Box as GtkBox, DrawingArea, EventSequenceState, Frame, GestureClick, Label, Orientation,
+    Overlay, PropagationPhase, ScrolledWindow,
 };
 use sourceview5::GutterRendererText;
 use sourceview5::prelude::{BufferExt, GutterRendererExt, GutterRendererTextExt, ViewExt};
 use sourceview5::{Buffer as SourceBuffer, Completion, Gutter, View as SourceView};
 use std::cell::{Cell, RefCell};
+use std::collections::HashMap;
+use std::hash::{Hash, Hasher};
 use std::path::PathBuf;
 use std::rc::Rc;
 
@@ -25,6 +27,22 @@ const AUTOSAVE_DEBOUNCE: std::time::Duration = std::time::Duration::from_millis(
 /// How long to wait after the last keystroke before recomputing the VCS
 /// gutter's per-line diff vs HEAD.
 const VCS_DEBOUNCE: std::time::Duration = std::time::Duration::from_millis(400);
+
+/// Per-line syllable-count cache for the gutter renderer: 0-based line
+/// number → (hash of the line's text, count). `count_syllables` runs ~20
+/// backtracking regex passes per word, and the gutter re-queries every
+/// visible line on every redraw (including each caret move), so without
+/// this a large file redraws sluggishly. Cleared wholesale on every edit
+/// (an edit can renumber every following line); the hash is a cheap
+/// correctness backstop. Fresh per `TextEditor`.
+type SyllableCache = Rc<RefCell<HashMap<i32, (u64, u32)>>>;
+
+/// FNV-free one-shot hash of a line's text for [`SyllableCache`] validation.
+fn hash_line(line: &str) -> u64 {
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    line.hash(&mut h);
+    h.finish()
+}
 
 pub struct TextEditor {
     frame: Frame,
@@ -38,15 +56,34 @@ pub struct TextEditor {
     modified: Rc<Cell<bool>>,
     gutter: Gutter,
     syllable_renderer: RefCell<Option<GutterRendererText>>,
+    // Memoizes per-line syllable counts so scrolling / caret moves in a
+    // large file don't re-run the regex heuristic for every visible line
+    // on every redraw. Cleared on every edit.
+    syllable_cache: SyllableCache,
     // The caret's current line, and whether the editor scheme is the dark
     // one — read by the syllable renderer to draw the active line's count
     // green + bold; kept current by a cursor-move handler and `apply_settings`.
     caret_line: Rc<Cell<i32>>,
     syllable_theme_dark: Rc<Cell<bool>>,
     vcs_renderer: Rc<RefCell<Option<vcs_gutter::VcsGutterRenderer>>>,
+    // Coalesces overlapping VCS-diff recomputes (edit debounce, `set_path`,
+    // `apply_settings`): a diff whose captured value is stale when its
+    // worker returns paints nothing. Shared so every trigger bumps the
+    // same counter.
+    vcs_generation: Rc<Cell<u64>>,
     completion: Completion,
     word_provider: RefCell<Option<WordCompletionProvider>>,
-    rhyme_highlight: RefCell<Option<RhymeHighlight>>,
+    // Rc so the pointer-motion handler (hover-to-emphasise a rhyme group)
+    // can hold its own clone alongside `apply_settings`.
+    rhyme_highlight: Rc<RefCell<Option<RhymeHighlight>>>,
+    // Strip under the editor listing the active rhyme groups (swatch +
+    // representative word); hidden when highlighting is off, the legend
+    // setting is off, or there are no groups.
+    rhyme_legend: GtkBox,
+    // Live copies of the two rhyme-view settings, read by the legend
+    // rebuild and the hover handler.
+    rhyme_legend_on: Rc<Cell<bool>>,
+    rhyme_hover_on: Rc<Cell<bool>>,
 }
 
 impl Default for TextEditor {
@@ -96,6 +133,7 @@ impl TextEditor {
         let modified = Rc::new(Cell::new(false));
         let vcs_renderer: Rc<RefCell<Option<vcs_gutter::VcsGutterRenderer>>> =
             Rc::new(RefCell::new(None));
+        let vcs_generation = Rc::new(Cell::new(0u64));
 
         let buffer_clone = buffer.clone();
         let path_ref = current_path.clone();
@@ -121,9 +159,10 @@ impl TextEditor {
                     return;
                 }
                 if let Err(e) = std::fs::write(&path, text) {
-                    eprintln!("Auto-save failed for {path:?}: {e}");
+                    log::error!("auto-save failed for {path:?}: {e}");
                     return;
                 }
+                log::debug!("auto-saved {path:?}");
                 modified_for_timeout.set(false);
                 if crate::setting::Settings::load().git_autostage
                     && let Some(root) = find_git_root(&path)
@@ -141,24 +180,18 @@ impl TextEditor {
             let buffer_for_vcs = buffer.clone();
             let path_for_vcs = current_path.clone();
             let renderer_for_vcs = vcs_renderer.clone();
-            let vcs_generation = Rc::new(Cell::new(0u64));
+            let generation_for_vcs = vcs_generation.clone();
             buffer.connect_changed(move |_| {
                 if renderer_for_vcs.borrow().is_none() {
                     return;
                 }
-                let this_generation = vcs_generation.get() + 1;
-                vcs_generation.set(this_generation);
-
-                let buffer_for_vcs = buffer_for_vcs.clone();
-                let path_for_vcs = path_for_vcs.clone();
-                let renderer_for_vcs = renderer_for_vcs.clone();
-                let vcs_generation = vcs_generation.clone();
-                glib::timeout_add_local_once(VCS_DEBOUNCE, move || {
-                    if vcs_generation.get() != this_generation {
-                        return;
-                    }
-                    recompute_vcs(&buffer_for_vcs, &path_for_vcs, &renderer_for_vcs);
-                });
+                spawn_recompute_vcs(
+                    &buffer_for_vcs,
+                    &path_for_vcs,
+                    &renderer_for_vcs,
+                    &generation_for_vcs,
+                    VCS_DEBOUNCE,
+                );
             });
         }
 
@@ -216,10 +249,23 @@ impl TextEditor {
         let overlay = Overlay::new();
         overlay.set_child(Some(&scroll));
         overlay.add_overlay(&sticky_row);
+        overlay.set_vexpand(true);
         setup_sticky_line(&scroll, &source_view, &buffer, &sticky, &sticky_row);
 
+        // Active rhyme-group legend, docked under the text area.
+        let rhyme_legend = GtkBox::builder()
+            .orientation(Orientation::Horizontal)
+            .css_classes(["rhyme-legend"])
+            .spacing(12)
+            .build();
+        rhyme_legend.set_visible(false);
+
+        let editor_box = GtkBox::new(Orientation::Vertical, 0);
+        editor_box.append(&overlay);
+        editor_box.append(&rhyme_legend);
+
         let frame = Frame::builder()
-            .child(&overlay)
+            .child(&editor_box)
             .css_classes(vec!["rhyme-editor-frame"])
             .build();
 
@@ -231,15 +277,30 @@ impl TextEditor {
             modified,
             gutter,
             syllable_renderer: RefCell::new(None),
+            syllable_cache: Rc::new(RefCell::new(HashMap::new())),
             caret_line: Rc::new(Cell::new(0)),
             syllable_theme_dark: Rc::new(Cell::new(settings.theme == crate::setting::Theme::Dark)),
             vcs_renderer,
+            vcs_generation,
             completion,
             word_provider: RefCell::new(None),
-            rhyme_highlight: RefCell::new(None),
+            rhyme_highlight: Rc::new(RefCell::new(None)),
+            rhyme_legend,
+            rhyme_legend_on: Rc::new(Cell::new(settings.show_rhyme_legend)),
+            rhyme_hover_on: Rc::new(Cell::new(settings.rhyme_hover_emphasis)),
         };
 
         editor.setup_context_menu();
+
+        // Any edit can renumber every following line, so drop the whole
+        // per-line syllable cache; the next gutter redraw refills only the
+        // visible lines.
+        {
+            let cache = editor.syllable_cache.clone();
+            editor
+                .buffer
+                .connect_changed(move |_| cache.borrow_mut().clear());
+        }
 
         // Keep the caret's line current for the syllable renderer's
         // green-bold active-line count, repainting the gutter when it moves.
@@ -252,6 +313,38 @@ impl TextEditor {
                     gutter.queue_draw();
                 }
             });
+        }
+
+        // Hover a rhyming word to emphasise its group (dim the others).
+        // O(1) per motion event — only touches tags when the group under
+        // the pointer changes; never recomputes.
+        {
+            let rhyme = editor.rhyme_highlight.clone();
+            let hover_on = editor.rhyme_hover_on.clone();
+            let view = editor.source_view.clone();
+            let motion = gtk::EventControllerMotion::new();
+            motion.connect_motion(move |_, x, y| {
+                if !hover_on.get() {
+                    return;
+                }
+                let slot = rhyme.borrow();
+                let Some(handle) = slot.as_ref() else {
+                    return;
+                };
+                let (bx, by) =
+                    view.window_to_buffer_coords(gtk::TextWindowType::Widget, x as i32, y as i32);
+                let group = view
+                    .iter_at_location(bx, by)
+                    .and_then(|iter| handle.group_at_offset(iter.offset() as usize));
+                handle.emphasise_group(group);
+            });
+            let rhyme_leave = editor.rhyme_highlight.clone();
+            motion.connect_leave(move |_| {
+                if let Some(handle) = rhyme_leave.borrow().as_ref() {
+                    handle.emphasise_group(None);
+                }
+            });
+            editor.source_view.add_controller(motion);
         }
 
         // Set initial empty state
@@ -362,6 +455,7 @@ impl TextEditor {
                     &self.buffer,
                     self.caret_line.clone(),
                     self.syllable_theme_dark.clone(),
+                    self.syllable_cache.clone(),
                 );
                 self.gutter.insert(&renderer, -20); // Position right after line numbers (-30)
                 *renderer_slot = Some(renderer);
@@ -399,6 +493,9 @@ impl TextEditor {
                 if let Some(renderer) = vcs_slot.take() {
                     self.gutter.remove(&renderer);
                 }
+                // Discard any diff still in flight so it can't repaint a
+                // gutter that's no longer shown.
+                self.vcs_generation.set(self.vcs_generation.get() + 1);
             }
             (true, true) => {
                 if let Some(renderer) = vcs_slot.as_ref() {
@@ -408,7 +505,13 @@ impl TextEditor {
             _ => {}
         }
         drop(vcs_slot);
-        recompute_vcs(&self.buffer, &self.current_path, &self.vcs_renderer);
+        spawn_recompute_vcs(
+            &self.buffer,
+            &self.current_path,
+            &self.vcs_renderer,
+            &self.vcs_generation,
+            std::time::Duration::ZERO,
+        );
 
         let mut provider_slot = self.word_provider.borrow_mut();
         match (provider_slot.is_some(), settings.word_completion) {
@@ -426,17 +529,52 @@ impl TextEditor {
         }
         drop(provider_slot);
 
+        self.rhyme_legend_on.set(settings.show_rhyme_legend);
+        self.rhyme_hover_on.set(settings.rhyme_hover_emphasis);
+
         let mut rhyme_slot = self.rhyme_highlight.borrow_mut();
         match (rhyme_slot.is_some(), settings.rhyme_highlighting) {
             (false, true) => {
-                *rhyme_slot = Some(crate::rhyme::highlight::attach(&self.buffer));
+                log::debug!("rhyme highlight: attaching");
+                let handle = crate::rhyme::highlight::attach(
+                    &self.source_view,
+                    &self.buffer,
+                    settings.theme,
+                    settings.rhyme_stop_at_blank_line,
+                );
+                let legend = self.rhyme_legend.clone();
+                let legend_on = self.rhyme_legend_on.clone();
+                handle.connect_groups_changed(move |groups| {
+                    rebuild_legend(&legend, groups, legend_on.get())
+                });
+                *rhyme_slot = Some(handle);
             }
             (true, false) => {
                 if let Some(handle) = rhyme_slot.take() {
-                    handle.detach();
+                    log::debug!("rhyme highlight: detaching");
+                    handle.detach(); // fires groups_changed(&[]) -> legend hides
                 }
             }
-            _ => {}
+            // Already attached and staying on — push a live theme switch
+            // and stanza-break-rule change through so open tabs follow the
+            // settings without a reload.
+            (true, true) => {
+                if let Some(handle) = rhyme_slot.as_ref() {
+                    handle.set_theme(settings.theme);
+                    handle.set_stop_at_blank_line(settings.rhyme_stop_at_blank_line);
+                }
+            }
+            (false, false) => {}
+        }
+
+        // Live-apply the two view toggles: hide the legend if it's off (or
+        // repaint at current visibility), and clear any hover emphasis if
+        // hover was just turned off.
+        rebuild_legend_visibility(&self.rhyme_legend, settings.show_rhyme_legend);
+        if !settings.rhyme_hover_emphasis
+            && let Some(handle) = rhyme_slot.as_ref()
+        {
+            handle.emphasise_group(None);
         }
     }
 
@@ -456,7 +594,13 @@ impl TextEditor {
     /// tab's initial content never triggers a spurious save.
     pub fn set_path(&self, path: PathBuf) {
         self.current_path.replace(Some(path));
-        recompute_vcs(&self.buffer, &self.current_path, &self.vcs_renderer);
+        spawn_recompute_vcs(
+            &self.buffer,
+            &self.current_path,
+            &self.vcs_renderer,
+            &self.vcs_generation,
+            std::time::Duration::ZERO,
+        );
     }
 
     pub fn get_widget(&self) -> &Frame {
@@ -525,6 +669,53 @@ impl TextEditor {
     }
 }
 
+/// Repaint the rhyme-group legend strip: a colored swatch + representative
+/// word per active group, left to right in color-assignment order. Hidden
+/// when `enabled` is off, there are no groups, or highlighting is off.
+fn rebuild_legend(row: &GtkBox, groups: &[crate::rhyme::highlight::RhymeGroup], enabled: bool) {
+    while let Some(child) = row.first_child() {
+        row.remove(&child);
+    }
+    for group in groups {
+        let item = GtkBox::new(Orientation::Horizontal, 5);
+        item.set_css_classes(&["rhyme-legend-item"]);
+
+        let swatch = DrawingArea::new();
+        swatch.set_content_width(10);
+        swatch.set_content_height(10);
+        swatch.set_valign(Align::Center);
+        swatch.add_css_class("rhyme-legend-swatch");
+        let rgba = group
+            .color
+            .parse::<gdk::RGBA>()
+            .unwrap_or_else(|_| gdk::RGBA::new(0.5, 0.5, 0.5, 1.0));
+        swatch.set_draw_func(move |_, cr, w, h| {
+            cr.set_source_rgba(
+                rgba.red() as f64,
+                rgba.green() as f64,
+                rgba.blue() as f64,
+                rgba.alpha() as f64,
+            );
+            cr.rectangle(0.0, 0.0, w as f64, h as f64);
+            let _ = cr.fill();
+        });
+        item.append(&swatch);
+
+        let label = Label::new(Some(&group.label));
+        label.set_css_classes(&["rhyme-legend-label"]);
+        item.append(&label);
+
+        row.append(&item);
+    }
+    row.set_visible(enabled && !groups.is_empty());
+}
+
+/// Re-apply just the legend's visibility to `enabled` (used when the
+/// setting toggles while the group list hasn't changed).
+fn rebuild_legend_visibility(row: &GtkBox, enabled: bool) {
+    row.set_visible(enabled && row.first_child().is_some());
+}
+
 /// The GtkSourceView style scheme id (see assets/styles/*.xml) matching
 /// `theme` — kept in one place so `new()` and `apply_settings()` can't
 /// drift onto different scheme names for the same theme.
@@ -562,11 +753,15 @@ fn create_syllable_renderer(
     buffer: &SourceBuffer,
     caret_line: Rc<Cell<i32>>,
     theme_dark: Rc<Cell<bool>>,
+    cache: SyllableCache,
 ) -> GutterRendererText {
     let syllable_renderer = GutterRendererText::new();
     syllable_renderer.set_css_classes(&["syllable-count"]);
     syllable_renderer.set_xalign(0.5);
-    syllable_renderer.set_yalign(0.5);
+    // Top-align (like the line numbers) so on a soft-wrapped line the count
+    // sits beside the line's first visual row, not floating in the middle
+    // of the wrapped block.
+    syllable_renderer.set_yalign(0.0);
 
     let buffer_clone = buffer.clone();
     syllable_renderer.connect_query_data(move |renderer, _line_obj, line_num| {
@@ -581,8 +776,20 @@ fn create_syllable_renderer(
             if line.trim().is_empty() {
                 renderer.set_text("");
             } else {
-                let syllables = crate::editor::stat::count_syllables(&line);
-                if line_num as i32 == caret_line.get() {
+                let line_num = line_num as i32;
+                let key = hash_line(&line);
+                let syllables = {
+                    let mut cache = cache.borrow_mut();
+                    match cache.get(&line_num) {
+                        Some(&(h, n)) if h == key => n,
+                        _ => {
+                            let n = crate::editor::stat::count_syllables(&line);
+                            cache.insert(line_num, (key, n));
+                            n
+                        }
+                    }
+                };
+                if line_num == caret_line.get() {
                     let color = syllable_green(theme_dark.get());
                     renderer.set_markup(&format!(
                         "<span foreground='{color}' weight='bold'>{syllables}</span>"
@@ -718,13 +925,19 @@ fn find_git_root(file_path: &std::path::Path) -> Option<PathBuf> {
     None
 }
 
-/// Recompute the VCS gutter's per-line diff from the buffer's current text
-/// and hand it to the renderer, if one is attached. Clears it when there's
-/// no path or no repo.
-fn recompute_vcs(
+/// Recompute the VCS gutter's per-line diff for `buffer`'s current text and
+/// hand it to the renderer, if one is attached — the `git2` diff runs on a
+/// worker thread (`debounce` after this call, coalesced through
+/// `generation`) so a large file never stalls the GTK main thread. Clears
+/// the gutter immediately when there's no path or no repo. A stale
+/// `generation` when the worker returns (a newer edit, or the gutter turned
+/// off) discards the result.
+fn spawn_recompute_vcs(
     buffer: &SourceBuffer,
     path: &Rc<RefCell<Option<PathBuf>>>,
     renderer: &Rc<RefCell<Option<vcs_gutter::VcsGutterRenderer>>>,
+    generation: &Rc<Cell<u64>>,
+    debounce: std::time::Duration,
 ) {
     let Some(renderer) = renderer.borrow().clone() else {
         return;
@@ -737,10 +950,36 @@ fn recompute_vcs(
         renderer.set_changes(std::collections::HashMap::new());
         return;
     };
+
+    let this_gen = generation.get() + 1;
+    generation.set(this_gen);
     let text = buffer
         .text(&buffer.start_iter(), &buffer.end_iter(), false)
         .to_string();
-    renderer.set_changes(crate::git::ops::line_changes(&root, &path, &text));
+    let generation = generation.clone();
+
+    glib::spawn_future_local(async move {
+        if !debounce.is_zero() {
+            glib::timeout_future(debounce).await;
+        }
+        if generation.get() != this_gen {
+            return;
+        }
+        let changes =
+            match gio::spawn_blocking(move || crate::git::ops::line_changes(&root, &path, &text))
+                .await
+            {
+                Ok(changes) => changes,
+                Err(_) => {
+                    log::warn!("vcs gutter: worker thread panicked; skipping this diff");
+                    return;
+                }
+            };
+        if generation.get() != this_gen {
+            return;
+        }
+        renderer.set_changes(changes);
+    });
 }
 
 /// The (added, modified, deleted) colour triple for the VCS gutter bars,

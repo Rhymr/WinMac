@@ -97,6 +97,10 @@ pub struct Settings {
     /// intentionally reach across a stanza break; off lets the highlighter
     /// also catch schemes that do.
     pub rhyme_stop_at_blank_line: bool,
+    /// Show the active-rhyme-group legend strip under the editor.
+    pub show_rhyme_legend: bool,
+    /// Let hovering a rhyming word emphasise its group (dim the others).
+    pub rhyme_hover_emphasis: bool,
     pub word_completion: bool,
     pub auto_indent: bool,
     pub tab_width: u32,
@@ -115,6 +119,8 @@ impl Default for Settings {
             show_vcs_gutter: true,
             rhyme_highlighting: false,
             rhyme_stop_at_blank_line: true,
+            show_rhyme_legend: true,
+            rhyme_hover_emphasis: true,
             // Off by default: dictionary-only completion misses most
             // songwriting vocabulary (slang, informal spellings), so it's
             // opt-in rather than on by default.
@@ -164,6 +170,8 @@ impl Settings {
                 "show_vcs_gutter" => settings.show_vcs_gutter = value == "true",
                 "rhyme_highlighting" => settings.rhyme_highlighting = value == "true",
                 "rhyme_stop_at_blank_line" => settings.rhyme_stop_at_blank_line = value == "true",
+                "show_rhyme_legend" => settings.show_rhyme_legend = value == "true",
+                "rhyme_hover_emphasis" => settings.rhyme_hover_emphasis = value == "true",
                 "word_completion" => settings.word_completion = value == "true",
                 "auto_indent" => settings.auto_indent = value == "true",
                 "tab_width" => settings.tab_width = value.parse().unwrap_or(settings.tab_width),
@@ -193,11 +201,13 @@ impl Settings {
         // free-text field so a pasted font name can't corrupt the file.
         let font_family = self.font_family.replace(['\n', '\r'], "");
         let contents = format!(
-            "show_syllable_gutter={}\nshow_vcs_gutter={}\nrhyme_highlighting={}\nrhyme_stop_at_blank_line={}\nword_completion={}\nauto_indent={}\ntab_width={}\ngit_autostage={}\nnotes_cache_scope={}\ntheme={}\nicon_theme={}\nfont_family={}\nfont_size={}\n",
+            "show_syllable_gutter={}\nshow_vcs_gutter={}\nrhyme_highlighting={}\nrhyme_stop_at_blank_line={}\nshow_rhyme_legend={}\nrhyme_hover_emphasis={}\nword_completion={}\nauto_indent={}\ntab_width={}\ngit_autostage={}\nnotes_cache_scope={}\ntheme={}\nicon_theme={}\nfont_family={}\nfont_size={}\n",
             self.show_syllable_gutter,
             self.show_vcs_gutter,
             self.rhyme_highlighting,
             self.rhyme_stop_at_blank_line,
+            self.show_rhyme_legend,
+            self.rhyme_hover_emphasis,
             self.word_completion,
             self.auto_indent,
             self.tab_width,

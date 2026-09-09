@@ -4,7 +4,7 @@ use gio::prelude::FileExt;
 use gtk::prelude::*;
 use gtk::{
     Align, ApplicationWindow, Box, Button, CheckButton, Entry, FileDialog, Grid, Image, Label,
-    ListBox, ListBoxRow, Orientation, SearchEntry, Window,
+    ListBox, ListBoxRow, Orientation, SearchEntry, Window, pango,
 };
 use libadwaita::Application;
 use std::path::PathBuf;
@@ -209,14 +209,19 @@ where
 
             let details_vbox = Box::new(Orientation::Vertical, 2);
             details_vbox.set_hexpand(true);
+            // Ellipsize both: an un-clipped label reports its full text
+            // width as its minimum and drags the whole row (and the list,
+            // and the pane) wider than the window.
             let name_label = Label::builder()
                 .label(&name)
                 .halign(Align::Start)
+                .ellipsize(pango::EllipsizeMode::End)
                 .css_classes(vec!["bold"])
                 .build();
             let path_label = Label::builder()
                 .label(&path_str)
                 .halign(Align::Start)
+                .ellipsize(pango::EllipsizeMode::Start)
                 .css_classes(vec!["dim-label", "caption"])
                 .build();
 
@@ -333,7 +338,10 @@ fn show_project_menu<F>(
 ) where
     F: Fn(PathBuf) + 'static,
 {
-    let menu = crate::app::context_menu::ContextMenu::new(anchor);
+    // Parent to the list, not the row's own button — a popover parented
+    // inside a `.recent-projects-list > row` inherits that row's
+    // hover/selection recolor rules and repaints its own items with them.
+    let menu = crate::app::context_menu::ContextMenu::new(projects_list);
 
     let window_for_open = window.clone();
     let path_for_open = workspace_path.clone();
