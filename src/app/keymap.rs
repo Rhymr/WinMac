@@ -122,6 +122,24 @@ pub const ACTIONS: &[ActionSpec] = &[
         group: "Version Control",
         default_accel: "<Alt>9",
     },
+    ActionSpec {
+        action: "toggle-project",
+        label: "Project Tool Window",
+        group: "Window",
+        default_accel: "<Alt>1",
+    },
+    ActionSpec {
+        action: "toggle-rhyme-search",
+        label: "Rhyme Search Tool Window",
+        group: "Window",
+        default_accel: "none",
+    },
+    ActionSpec {
+        action: "restore-default-layout",
+        label: "Restore Default Layout",
+        group: "Window",
+        default_accel: "none",
+    },
 ];
 
 /// Swap the `<Primary>` placeholder for the platform mod key.

@@ -17,12 +17,14 @@ pub fn setup_menu(app: &Application, workspace_controller: Rc<WorkspaceControlle
     let file = file(app, workspace_controller.clone());
     // edit(app, workspace_controller);
     let git = git(app, workspace_controller.clone());
+    let window = window(app, workspace_controller.clone());
     let help = help(app);
 
     // Create the menu bar and add menus
     let menu_bar = Menu::new();
     menu_bar.append_submenu(Some("File"), &file);
     menu_bar.append_submenu(Some("Git"), &git);
+    menu_bar.append_submenu(Some("Window"), &window);
     menu_bar.append_submenu(Some("Help"), &help);
 
     // Set menu bar in app
@@ -96,10 +98,45 @@ fn git(app: &Application, workspace_controller: Rc<WorkspaceController>) -> Menu
 
     let controller = workspace_controller.clone();
     let git_log_action = gio::SimpleAction::new("git-log", None);
-    git_log_action.connect_activate(move |_, _| controller.toggle_git_log());
+    git_log_action.connect_activate(move |_, _| controller.toggle_tool("git-log"));
     app.add_action(&git_log_action);
 
     git_menu
+}
+
+/// The Window menu — tool-window toggles + "Restore Default Layout".
+fn window(app: &Application, workspace_controller: Rc<WorkspaceController>) -> Menu {
+    let window_menu = Menu::new();
+
+    let tools = Menu::new();
+    tools.append(Some("Project"), Some("app.toggle-project"));
+    tools.append(Some("Rhyme Search"), Some("app.toggle-rhyme-search"));
+    tools.append(Some("Git Log"), Some("app.git-log"));
+    window_menu.insert_section(0, None, &tools);
+
+    let layout = Menu::new();
+    layout.append(
+        Some("Restore Default Layout"),
+        Some("app.restore-default-layout"),
+    );
+    window_menu.insert_section(1, None, &layout);
+
+    for (name, id) in [
+        ("toggle-project", "project"),
+        ("toggle-rhyme-search", "rhyme-search"),
+    ] {
+        let controller = workspace_controller.clone();
+        let action = gio::SimpleAction::new(name, None);
+        action.connect_activate(move |_, _| controller.toggle_tool(id));
+        app.add_action(&action);
+    }
+
+    let controller = workspace_controller.clone();
+    let reset = gio::SimpleAction::new("restore-default-layout", None);
+    reset.connect_activate(move |_, _| controller.restore_default_layout());
+    app.add_action(&reset);
+
+    window_menu
 }
 
 fn help(app: &Application) -> Menu {

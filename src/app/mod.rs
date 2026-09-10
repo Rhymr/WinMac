@@ -1,12 +1,14 @@
 pub mod about;
 pub mod chrome;
 pub mod context_menu;
+pub mod dock;
 pub mod icons;
 pub mod keymap;
 pub mod layout;
 pub mod menu;
 pub mod source_panel;
 pub mod splash;
+pub mod tool_window;
 pub mod vertical_label;
 pub mod welcome;
 

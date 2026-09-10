@@ -4,11 +4,12 @@ use gtk::{CssProvider, gdk};
 use std::cell::RefCell;
 use std::fs;
 
-const CSS_FILES: [&str; 15] = [
+const CSS_FILES: [&str; 16] = [
     "assets/{1}/base.{1}",
     "assets/{1}/chrome.{1}",
     "assets/{1}/context_menu.{1}",
     "assets/{1}/dialog.{1}",
+    "assets/{1}/dock.{1}",
     "assets/{1}/editor.{1}",
     "assets/{1}/empty_state.{1}",
     "assets/{1}/file_tree.{1}",

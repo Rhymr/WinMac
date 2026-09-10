@@ -16,8 +16,10 @@ type NavListener = RefCell<Option<Box<dyn Fn(Vec<String>)>>>;
 type GitListener = RefCell<Option<Box<dyn Fn(GitAvailability)>>>;
 type RootListener = RefCell<Option<Box<dyn Fn(Option<PathBuf>)>>>;
 type SelectionListener = RefCell<Option<Box<dyn Fn(Option<String>)>>>;
-/// Fired to toggle the Git Log tool window open/closed.
-type GitLogToggleListener = RefCell<Option<Box<dyn Fn()>>>;
+/// Fired to toggle a tool window open/closed, by id.
+type ToolToggleListener = RefCell<Option<Box<dyn Fn(&str)>>>;
+/// Fired for "Restore Default Layout".
+type RestoreLayoutListener = RefCell<Option<Box<dyn Fn()>>>;
 /// Fired after any in-app git write (commit / pull / fetch) so views that
 /// show repo state — the Git Log panel especially — can re-read.
 type GitChangedListener = RefCell<Option<Box<dyn Fn()>>>;
@@ -44,7 +46,8 @@ pub struct WorkspaceController {
     git_listener: GitListener,
     root_listener: RootListener,
     selection_listener: SelectionListener,
-    git_log_toggle_listener: GitLogToggleListener,
+    tool_toggle_listener: ToolToggleListener,
+    restore_layout_listener: RestoreLayoutListener,
     git_changed_listener: GitChangedListener,
 }
 
@@ -66,7 +69,8 @@ impl WorkspaceController {
             git_listener: RefCell::new(None),
             root_listener: RefCell::new(None),
             selection_listener: RefCell::new(None),
-            git_log_toggle_listener: RefCell::new(None),
+            tool_toggle_listener: RefCell::new(None),
+            restore_layout_listener: RefCell::new(None),
             git_changed_listener: RefCell::new(None),
         }
     }
@@ -173,16 +177,28 @@ impl WorkspaceController {
         }
     }
 
-    /// Subscribe to Git Log open/close toggles (the `app.git-log` action and
-    /// the bottom-stripe button both route through here).
-    pub fn set_git_log_toggle_listener(&self, listener: impl Fn() + 'static) {
-        self.git_log_toggle_listener
+    /// Subscribe to tool-window toggle requests by id (`"project"` /
+    /// `"rhyme-search"` / `"git-log"`), routed here from the `app.*` actions.
+    pub fn set_tool_toggle_listener(&self, listener: impl Fn(&str) + 'static) {
+        self.tool_toggle_listener.replace(Some(Box::new(listener)));
+    }
+
+    /// Toggle the named tool window open/closed.
+    pub fn toggle_tool(&self, id: &str) {
+        if let Some(listener) = self.tool_toggle_listener.borrow().as_ref() {
+            listener(id);
+        }
+    }
+
+    /// Subscribe to "Restore Default Layout".
+    pub fn set_restore_layout_listener(&self, listener: impl Fn() + 'static) {
+        self.restore_layout_listener
             .replace(Some(Box::new(listener)));
     }
 
-    /// Toggle the Git Log tool window open/closed.
-    pub fn toggle_git_log(&self) {
-        if let Some(listener) = self.git_log_toggle_listener.borrow().as_ref() {
+    /// Reset the tool-window layout to defaults.
+    pub fn restore_default_layout(&self) {
+        if let Some(listener) = self.restore_layout_listener.borrow().as_ref() {
             listener();
         }
     }
