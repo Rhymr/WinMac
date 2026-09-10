@@ -6,11 +6,12 @@ use std::process::Command;
 // Kept in sync with `CSS_FILES` in src/css.rs — build.rs precompiles these
 // to assets/css/*.css (unused by the app itself, which recompiles from
 // source at runtime, but kept so the compiled output isn't stale).
-const CSS_FILES: [&str; 15] = [
+const CSS_FILES: [&str; 16] = [
     "assets/{1}/base.{1}",
     "assets/{1}/chrome.{1}",
     "assets/{1}/context_menu.{1}",
     "assets/{1}/dialog.{1}",
+    "assets/{1}/dock.{1}",
     "assets/{1}/editor.{1}",
     "assets/{1}/empty_state.{1}",
     "assets/{1}/file_tree.{1}",

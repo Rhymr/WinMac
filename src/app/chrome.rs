@@ -1,16 +1,13 @@
-//! Classic JetBrains-style window chrome: a compact top toolbar (active-file
+//! Classic JetBrains-style window chrome: a compact top toolbar — active-file
 //! breadcrumb on the left; file actions + a colour-coded Git group + a
-//! settings gear on the right), a left tool-window stripe with a vertical
-//! "Project" label, and a bottom stripe for the Rhyme Search panel.
+//! settings gear on the right. The tool-window stripes live in
+//! [`crate::app::dock`].
 
 use crate::app::context_menu::ContextMenu;
 use crate::app::icons::img;
-use crate::app::vertical_label::VerticalLabel;
 use crate::workspace::controller::WorkspaceController;
 use gtk::prelude::*;
-use gtk::{
-    Align, Box as GtkBox, Button, Label, MenuButton, Orientation, Separator, ToggleButton, pango,
-};
+use gtk::{Align, Box as GtkBox, Button, Label, MenuButton, Orientation, Separator, pango};
 use std::rc::Rc;
 
 /// Fire an app action from a closure that has no widget handle. Accepts
@@ -190,73 +187,4 @@ pub fn main_toolbar(controller: &Rc<WorkspaceController>) -> GtkBox {
     bar.append(&settings_button());
 
     bar
-}
-
-/// The left tool-window stripe — a narrow column of vertical-text toggles.
-pub fn left_stripe<F: Fn(bool) + 'static>(project_visible: bool, on_toggle: F) -> GtkBox {
-    let stripe = GtkBox::builder()
-        .orientation(Orientation::Vertical)
-        .css_classes(["tool-stripe"])
-        .spacing(1)
-        .valign(Align::Fill)
-        .build();
-
-    // Label on top (reads bottom-to-top), the icon beneath it — same
-    // icon↔text gap as the bottom "Rhyme Search" stripe.
-    let content = GtkBox::new(Orientation::Vertical, 4);
-    content.set_halign(Align::Center);
-    content.append(&VerticalLabel::new("Project"));
-    content.append(&img("folder", 12));
-
-    let btn = ToggleButton::builder()
-        .css_classes(["tool-stripe-button"])
-        .active(project_visible)
-        .tooltip_text("Project")
-        .halign(Align::Center)
-        .valign(Align::Start)
-        .build();
-    btn.set_child(Some(&content));
-    btn.connect_toggled(move |b| on_toggle(b.is_active()));
-
-    stripe.append(&btn);
-    stripe
-}
-
-/// One button on the bottom tool-window stripe.
-pub struct BottomTool {
-    /// Bundled icon stem (see [`crate::app::icons`]).
-    pub icon: &'static str,
-    /// Visible label / tooltip.
-    pub label: &'static str,
-}
-
-/// The bottom stripe — one horizontal toggle per bottom-docked tool window.
-/// Returns the stripe plus each `ToggleButton` in `tools` order, so the
-/// caller can wire show/hide and one-at-a-time (radio) behaviour itself.
-pub fn bottom_stripe(tools: &[BottomTool]) -> (GtkBox, Vec<ToggleButton>) {
-    let stripe = GtkBox::builder()
-        .orientation(Orientation::Horizontal)
-        .css_classes(["bottom-stripe"])
-        .spacing(1)
-        .build();
-
-    let buttons: Vec<ToggleButton> = tools
-        .iter()
-        .map(|tool| {
-            let content = GtkBox::new(Orientation::Horizontal, 4);
-            content.append(&img(tool.icon, 16));
-            content.append(&Label::new(Some(tool.label)));
-
-            let btn = ToggleButton::builder()
-                .css_classes(["bottom-stripe-button"])
-                .tooltip_text(tool.label)
-                .valign(Align::Center)
-                .build();
-            btn.set_child(Some(&content));
-            stripe.append(&btn);
-            btn
-        })
-        .collect();
-
-    (stripe, buttons)
 }

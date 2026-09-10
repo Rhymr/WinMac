@@ -1,0 +1,37 @@
+/* Tool-window dock (src/app/dock.rs) — the collapsible panel on each edge
+   and its JetBrains-style header strip. Stripe buttons themselves reuse
+   .tool-stripe / .bottom-stripe from chrome.scss. Boxy, no rounded
+   corners. */
+
+.dock-panel {
+    background: var(--bg-darkest);
+    border-top: 1px solid var(--border-dark);
+    border-right: 1px solid var(--border-dark);
+}
+
+.tool-window-header {
+    background-color: var(--bg-dark);
+    border-bottom: 1px solid var(--border-dark);
+    padding: 2px 4px 2px 8px;
+    min-height: 24px;
+}
+
+.tool-window-title {
+    color: var(--text-not-so-dim);
+    font-weight: bold;
+    font-size: 11px;
+    background-color: transparent;
+}
+
+.tool-window-hide {
+    min-width: 20px;
+    min-height: 20px;
+    padding: 0 4px;
+    color: var(--text-muted);
+    background-color: transparent;
+}
+
+.tool-window-hide:hover {
+    color: var(--text-bright);
+    background-color: var(--button-hover);
+}

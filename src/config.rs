@@ -40,6 +40,14 @@ pub fn session_file() -> Option<PathBuf> {
     Some(user_config_dir()?.join("session.json"))
 }
 
+/// `<config dir>/rhymr/dock-layout.json` — the global tool-window layout
+/// (per window: dock edge, size, open/closed) remembered across launches.
+/// Global rather than per-workspace, matching JetBrains. `None` when the OS
+/// reports no config dir.
+pub fn dock_layout_file() -> Option<PathBuf> {
+    Some(user_config_dir()?.join("dock-layout.json"))
+}
+
 /// How often the "Apple Notes" tree re-reads from the Notes app
 /// (Settings → Tools → Network & Sources; default 300s). Read once when
 /// the source panel arms its refresh timer.

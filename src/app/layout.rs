@@ -5,17 +5,12 @@ use crate::workspace::controller::WorkspaceController;
 #[cfg(target_os = "windows")]
 use gtk::MenuButton;
 use gtk::prelude::*;
-use gtk::{Box as GtkBox, Label, Orientation, Paned, glib};
+use gtk::{Box as GtkBox, Label, Orientation};
 use libadwaita::prelude::*;
 use libadwaita::{Application, ApplicationWindow};
 #[cfg(any(target_os = "windows", target_os = "macos"))]
 use libadwaita::{HeaderBar, ToolbarView, WindowTitle};
-use std::cell::Cell;
 use std::rc::Rc;
-
-/// Shows the named bottom tool window (`"rhyme"` / `"git-log"`), or closes
-/// the bottom dock when passed `None`.
-type ShowBottom = Rc<dyn Fn(Option<&str>)>;
 
 pub fn build_ui(app: &Application) -> (ApplicationWindow, Rc<WorkspaceController>) {
     let startup = crate::setting::Settings::load();
@@ -110,25 +105,10 @@ pub fn create_main_layout() -> (GtkBox, Rc<WorkspaceController>) {
     let rhyme_frame = rhyme_search.get_widget().clone();
     rhyme_search.set_expanded(true);
 
-    // Git Log — the second bottom-docked tool window. Shares the bottom dock
-    // with Rhyme Search (one visible at a time), toggled from the bottom
-    // stripe / the `app.git-log` action.
+    // Git Log — a bottom-docked tool window alongside Rhyme Search.
     let git_log = crate::git::log_panel::GitLogPanel::new();
     let git_log_frame = git_log.get_widget().clone();
     git_log.set_expanded(true);
-
-    // Selecting one word in the editor seeds the Rhyme Search box — but
-    // only while the panel is open (no lookup runs; the user hits Enter).
-    {
-        let rhyme_search = rhyme_search.clone();
-        workspace_controller.set_selection_listener(move |word| {
-            if !rhyme_search.is_collapsed()
-                && let Some(w) = word
-            {
-                rhyme_search.set_query(&w);
-            }
-        });
-    }
 
     // Read-only "Apple Notes" (and future external sources) tree, stacked
     // under the project tree in the left column. Workspace-independent:
@@ -155,136 +135,64 @@ pub fn create_main_layout() -> (GtkBox, Rc<WorkspaceController>) {
         .child(&left_column)
         .build();
 
-    // file tree column | editor, flush against each other (only the tree's
-    // 1px right border separates them — no draggable "gap").
-    let content_pane = create_horizontal_split(
-        &left_scroller,
-        workspace.get_widget(),
-        (startup.left_panel_width as i32).clamp(120, 900),
-    );
-    content_pane.set_hexpand(true);
+    rhyme_frame.set_visible(true);
+    git_log_frame.set_visible(true);
 
-    // Left tool-window stripe (vertical "Project" label) toggles the column.
-    let ft_for_stripe = left_scroller.clone();
-    let left_stripe =
-        crate::app::chrome::left_stripe(true, move |show| ft_for_stripe.set_visible(show));
+    // The dock manager owns the Paned tree + per-edge stripes/headers. The
+    // editor notebook is the centre; Project / Rhyme Search / Git Log are
+    // registered as tool windows.
+    let dock = crate::app::dock::DockArea::new(workspace.get_widget());
+    let left_default = (startup.left_panel_width as i32).clamp(120, 900);
+    let bottom_default = (startup.rhyme_panel_height as i32).max(120);
+    dock.register(crate::app::tool_window::ToolWindow {
+        id: "project",
+        title: "Project",
+        icon: "folder",
+        default_anchor: crate::app::tool_window::Anchor::Left,
+        default_size: left_default,
+        default_open: true,
+        content: left_scroller.clone().upcast(),
+    });
+    dock.register(crate::app::tool_window::ToolWindow {
+        id: "rhyme-search",
+        title: "Rhyme Search",
+        icon: "search",
+        default_anchor: crate::app::tool_window::Anchor::Bottom,
+        default_size: bottom_default,
+        default_open: false,
+        content: rhyme_frame.clone().upcast(),
+    });
+    dock.register(crate::app::tool_window::ToolWindow {
+        id: "git-log",
+        title: "Git Log",
+        icon: "git-commit",
+        default_anchor: crate::app::tool_window::Anchor::Bottom,
+        default_size: bottom_default,
+        default_open: false,
+        content: git_log_frame.clone().upcast(),
+    });
 
-    let work_row = GtkBox::new(Orientation::Horizontal, 0);
-    work_row.set_vexpand(true);
-    work_row.append(&left_stripe);
-    work_row.append(&content_pane);
-
-    // Rhyme Search and Git Log share one bottom dock — a plain vertical box
-    // holding both frames, one shown at a time — docked at `outer_split`'s
-    // end. Hidden until a bottom-stripe button is pressed.
-    rhyme_frame.set_visible(false);
-    git_log_frame.set_visible(false);
-    let bottom_dock = GtkBox::new(Orientation::Vertical, 0);
-    bottom_dock.append(&rhyme_frame);
-    bottom_dock.append(&git_log_frame);
-
-    let outer_split = Paned::new(Orientation::Vertical);
-    outer_split.set_start_child(Some(&work_row));
-    outer_split.set_end_child(Some(&bottom_dock));
-    outer_split.set_resize_start_child(true);
-    outer_split.set_resize_end_child(false);
-    outer_split.set_shrink_start_child(false);
-    outer_split.set_shrink_end_child(false);
-    outer_split.set_vexpand(true);
-
-    let default_rhyme_height = (startup.rhyme_panel_height as i32).max(80);
-    let remembered = Rc::new(Cell::new(default_rhyme_height));
-
-    // Show the named bottom panel (`"rhyme"` / `"git-log"`), or `None` to
-    // close the dock, resizing the split and persisting the choice.
-    let show_bottom: ShowBottom = {
-        let outer_split = outer_split.clone();
-        let rhyme_frame = rhyme_frame.clone();
-        let git_log_frame = git_log_frame.clone();
+    // Route the `app.*` tool-window actions through the dock.
+    {
+        let dock = dock.clone();
+        workspace_controller.set_tool_toggle_listener(move |id| dock.toggle(id));
+    }
+    // Selecting one word in the editor seeds the Rhyme Search box — but only
+    // while that panel is open (no lookup runs; the user hits Enter).
+    {
         let rhyme_search = rhyme_search.clone();
-        let git_log = git_log.clone();
-        let remembered = remembered.clone();
-        let controller = workspace_controller.clone();
-        Rc::new(move |which: Option<&str>| {
-            let total = outer_split.height();
-            let opening = which.is_some();
-
-            rhyme_frame.set_visible(which == Some("rhyme"));
-            git_log_frame.set_visible(which == Some("git-log"));
-            rhyme_search.set_expanded(which == Some("rhyme"));
-            git_log.set_expanded(which == Some("git-log"));
-
-            if opening {
-                let total = total.max(400);
-                outer_split.set_position((total - remembered.get()).max(120));
-            } else if total > 120 {
-                remembered.set((total - outer_split.position()).clamp(120, total - 60));
+        let dock = dock.clone();
+        workspace_controller.set_selection_listener(move |word| {
+            if dock.is_open("rhyme-search")
+                && let Some(w) = word
+            {
+                rhyme_search.set_query(&w);
             }
-            if let Some(root) = controller.get_root_path() {
-                crate::workspace::session::update(&root, |s| {
-                    s.rhyme_panel_height = Some(remembered.get());
-                    s.bottom_panel = which.map(str::to_string);
-                });
-            }
-        })
-    };
-
-    let (bottom_stripe, bottom_buttons) = crate::app::chrome::bottom_stripe(&[
-        crate::app::chrome::BottomTool {
-            icon: "search",
-            label: "Rhyme Search",
-        },
-        crate::app::chrome::BottomTool {
-            icon: "git-commit",
-            label: "Git",
-        },
-    ]);
-    let rhyme_btn = bottom_buttons[0].clone();
-    let git_btn = bottom_buttons[1].clone();
-
-    // The two stripe buttons are a radio pair: activating one deactivates the
-    // other. `updating` breaks the re-entrant `toggled` that `set_active`
-    // would otherwise cause.
-    let updating = Rc::new(Cell::new(false));
-    {
-        let (other, show, updating) = (git_btn.clone(), show_bottom.clone(), updating.clone());
-        rhyme_btn.connect_toggled(move |b| {
-            if updating.get() {
-                return;
-            }
-            updating.set(true);
-            if b.is_active() {
-                other.set_active(false);
-                show(Some("rhyme"));
-            } else if !other.is_active() {
-                show(None);
-            }
-            updating.set(false);
         });
     }
     {
-        let (other, show, updating) = (rhyme_btn.clone(), show_bottom.clone(), updating.clone());
-        git_btn.connect_toggled(move |b| {
-            if updating.get() {
-                return;
-            }
-            updating.set(true);
-            if b.is_active() {
-                other.set_active(false);
-                show(Some("git-log"));
-            } else if !other.is_active() {
-                show(None);
-            }
-            updating.set(false);
-        });
-    }
-
-    // `app.git-log` action / a future dock affordance route through here.
-    {
-        let git_btn = git_btn.clone();
-        workspace_controller.set_git_log_toggle_listener(move || {
-            git_btn.set_active(!git_btn.is_active());
-        });
+        let dock = dock.clone();
+        workspace_controller.set_restore_layout_listener(move || dock.restore_default_layout());
     }
     // Reload the Git Log after an in-app commit / pull / fetch.
     {
@@ -292,63 +200,21 @@ pub fn create_main_layout() -> (GtkBox, Rc<WorkspaceController>) {
         workspace_controller.set_git_changed_listener(move || git_log.refresh());
     }
 
-    // Restore the left-panel width, remembered bottom-panel height and which
-    // bottom panel was open, once the workspace root is known; keep the
-    // source panel and Git Log pointed at it.
+    // Keep the source panel and Git Log pointed at the workspace root.
     {
         let sp = source_panel.clone();
-        let content_pane = content_pane.clone();
-        let remembered = remembered.clone();
         let git_log = git_log.clone();
-        let rhyme_btn = rhyme_btn.clone();
-        let git_btn = git_btn.clone();
         workspace_controller.set_root_listener(move |root| {
-            if let Some(r) = root.as_deref() {
-                let s = crate::workspace::session::load(r);
-                if let Some(w) = s.left_panel_width {
-                    content_pane.set_position(w.clamp(120, 900));
-                }
-                remembered.set(s.rhyme_panel_height.unwrap_or(default_rhyme_height));
-                git_log.set_repo(root.clone());
-                match s.bottom_panel.as_deref() {
-                    Some("rhyme") => rhyme_btn.set_active(true),
-                    Some("git-log") => git_btn.set_active(true),
-                    _ => {}
-                }
-            } else {
-                git_log.set_repo(None);
-            }
+            git_log.set_repo(root.clone());
             sp.set_workspace_root(root);
         });
     }
 
-    // Persist the left-panel width on drag, debounced so a drag isn't a
-    // burst of file writes.
-    {
-        let controller = workspace_controller.clone();
-        let generation = Rc::new(Cell::new(0u64));
-        content_pane.connect_position_notify(move |pane| {
-            let width = pane.position();
-            let this = generation.get() + 1;
-            generation.set(this);
-            let (generation, controller) = (generation.clone(), controller.clone());
-            glib::timeout_add_local_once(std::time::Duration::from_millis(400), move || {
-                if generation.get() != this {
-                    return;
-                }
-                if let Some(root) = controller.get_root_path() {
-                    crate::workspace::session::update(&root, |s| {
-                        s.left_panel_width = Some(width);
-                    });
-                }
-            });
-        });
-    }
+    dock.restore();
 
     let main_box = GtkBox::new(Orientation::Vertical, 0);
     main_box.append(&crate::app::chrome::main_toolbar(&workspace_controller));
-    main_box.append(&outer_split);
-    main_box.append(&bottom_stripe);
+    main_box.append(dock.widget());
     main_box.append(&create_status_bar(&workspace_controller));
 
     (main_box, workspace_controller)
@@ -404,21 +270,4 @@ fn create_status_bar(workspace_controller: &Rc<WorkspaceController>) -> GtkBox {
     workspace_controller.refresh_branch();
 
     status_bar
-}
-pub fn create_horizontal_split(
-    left: &impl IsA<gtk::Widget>,
-    right: &impl IsA<gtk::Widget>,
-    position: i32,
-) -> Paned {
-    let horizontal_pane = Paned::new(Orientation::Horizontal);
-    horizontal_pane.set_start_child(Some(left));
-    horizontal_pane.set_end_child(Some(right));
-    horizontal_pane.set_position(position);
-
-    horizontal_pane.set_resize_start_child(true);
-    horizontal_pane.set_resize_end_child(true);
-    horizontal_pane.set_shrink_start_child(false);
-    horizontal_pane.set_shrink_end_child(false);
-
-    horizontal_pane
 }
