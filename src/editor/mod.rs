@@ -865,9 +865,12 @@ fn create_syllable_renderer(
     let syllable_renderer = GutterRendererText::new();
     syllable_renderer.set_css_classes(&["syllable-count"]);
     syllable_renderer.set_xalign(0.5);
-    // Top-align (like the line numbers) so on a soft-wrapped line the count
-    // sits beside the line's first visual row, not floating in the middle
-    // of the wrapped block.
+    // Align to the *first* visual row of a soft-wrapped line, the way the
+    // built-in line-number renderer does. Without this the renderer defaults
+    // to `Cell` mode, which spans every wrapped row, and the count drifts
+    // down into the middle of the wrapped block instead of sitting beside
+    // the line number. `yalign = 0` then pins it to that first row's top.
+    syllable_renderer.set_alignment_mode(sourceview5::GutterRendererAlignmentMode::First);
     syllable_renderer.set_yalign(0.0);
 
     let buffer_clone = buffer.clone();
