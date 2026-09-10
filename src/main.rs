@@ -70,11 +70,9 @@ fn main() -> glib::ExitCode {
 
     log::debug!("current dir = {:?}", std::env::current_dir());
 
-    // Compile scss files into css files
-    if let Err(e) = css::compile_sass() {
-        log::error!("compile_sass failed: {e}");
-        panic!("{e}");
-    }
+    // The stylesheet is compiled from `assets/scss/` in memory by
+    // `css::init` (below, per theme); there's nothing to precompile here.
+    // `assets/css/` is a build-script artifact, not read at runtime.
 
     glib::set_application_name("Rhymr");
 
@@ -88,7 +86,7 @@ fn main() -> glib::ExitCode {
     // name the app's icon by its id so `rhymr-icon.svg` (aliased to
     // `org.gtk_rs.Rhymr.svg` in resources.xml) is the window / app icon.
     // A real macOS Dock icon still needs the `.app` bundle from
-    // `Build/bundle-mac.sh`.
+    // `scripts/bundle-mac.sh`.
     app.connect_startup(|_| {
         if let Some(display) = gtk::gdk::Display::default() {
             gtk::IconTheme::for_display(&display).add_resource_path("/org/gtk_rs/rhymr/icons");

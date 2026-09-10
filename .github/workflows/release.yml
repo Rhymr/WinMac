@@ -22,13 +22,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 0 # Build/version.sh walks the whole history
+          fetch-depth: 0 # scripts/version.sh walks the whole history
 
       - name: Compute version
         id: v
         run: |
-          echo "core=$(bash Build/version.sh)" >> "$GITHUB_OUTPUT"
-          echo "full=$(bash Build/version.sh --full)" >> "$GITHUB_OUTPUT"
+          echo "core=$(bash scripts/version.sh)" >> "$GITHUB_OUTPUT"
+          echo "full=$(bash scripts/version.sh --full)" >> "$GITHUB_OUTPUT"
 
       - name: Tag and publish source release
         env:

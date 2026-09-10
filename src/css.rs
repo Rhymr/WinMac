@@ -2,26 +2,46 @@ use crate::setting::{Settings, Theme};
 use grass::Options;
 use gtk::{CssProvider, gdk};
 use std::cell::RefCell;
-use std::fs;
+use std::path::PathBuf;
 
+/// SCSS stems under `assets/scss/`, combined into the app's stylesheet at
+/// launch by `build_css`. The build script (`scripts.rs`) mirrors this list
+/// to precompile `assets/css/`; a new stylesheet's stem goes in `CSS_FILES`
+/// here **and** in `scripts.rs`.
 const CSS_FILES: [&str; 16] = [
-    "assets/{1}/base.{1}",
-    "assets/{1}/chrome.{1}",
-    "assets/{1}/context_menu.{1}",
-    "assets/{1}/dialog.{1}",
-    "assets/{1}/dock.{1}",
-    "assets/{1}/editor.{1}",
-    "assets/{1}/empty_state.{1}",
-    "assets/{1}/file_tree.{1}",
-    "assets/{1}/git_log.{1}",
-    "assets/{1}/layout.{1}",
-    "assets/{1}/notebook.{1}",
-    "assets/{1}/rhyme_search.{1}",
-    "assets/{1}/settings.{1}",
-    "assets/{1}/splash.{1}",
-    "assets/{1}/status_bar.{1}",
-    "assets/{1}/welcome.{1}",
+    "base",
+    "chrome",
+    "context_menu",
+    "dialog",
+    "dock",
+    "editor",
+    "empty_state",
+    "file_tree",
+    "git_log",
+    "layout",
+    "notebook",
+    "rhyme_search",
+    "settings",
+    "splash",
+    "status_bar",
+    "welcome",
 ];
+
+/// Absolute path to `assets/scss/<stem>.scss`, resolved against
+/// [`crate::config::assets_dir`] so a bundled `.app` (working directory `/`)
+/// finds its stylesheets too.
+fn scss_path(stem: &str) -> PathBuf {
+    crate::config::assets_dir()
+        .join("scss")
+        .join(format!("{stem}.scss"))
+}
+
+/// Grass options shared by every compile: a load path pointing at
+/// `assets/scss/` so `@use "mixins"` resolves regardless of the working
+/// directory.
+fn scss_options() -> Options<'static> {
+    Options::default().load_path(crate::config::assets_dir().join("scss"))
+}
 
 /// Every themeable color, as (css-var-name, dark-value, light-value).
 /// The single source of truth for both palettes — `theme_css()` below is
@@ -97,19 +117,6 @@ const TOKENS: &str = r#":root {
 
 thread_local! {
     static PROVIDER: RefCell<Option<CssProvider>> = const { RefCell::new(None) };
-}
-
-pub fn compile_sass() -> Result<(), Box<dyn std::error::Error>> {
-    for css_file in CSS_FILES {
-        let scss_path = css_file.replace("{1}", "scss");
-        let css_path = css_file.replace("{1}", "css");
-
-        log::debug!("compiling {scss_path}");
-        let css_output = grass::from_path(&scss_path, &Options::default())?;
-        fs::write(css_path, css_output)?;
-    }
-
-    Ok(())
 }
 
 /// The themed default for palette entry `name`, with no user override
@@ -208,9 +215,10 @@ fn build_css(settings: &Settings) -> String {
     // (the string is already UTF-8; there's nothing for it to declare).
     let mut combined_css = String::from(TOKENS);
 
-    for css_file in CSS_FILES {
-        let scss_path = css_file.replace("{1}", "scss");
-        match grass::from_path(&scss_path, &Options::default()) {
+    let options = scss_options();
+    for stem in CSS_FILES {
+        let path = scss_path(stem);
+        match grass::from_path(&path, &options) {
             Ok(css) => {
                 let css = css
                     .strip_prefix("@charset \"UTF-8\";")
@@ -219,7 +227,7 @@ fn build_css(settings: &Settings) -> String {
                 combined_css.push_str(css);
                 combined_css.push('\n');
             }
-            Err(err) => log::error!("failed to compile {scss_path}: {err}"),
+            Err(err) => log::error!("failed to compile {}: {err}", path.display()),
         }
     }
 

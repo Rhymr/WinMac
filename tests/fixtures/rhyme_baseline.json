@@ -1,0 +1,76 @@
+{
+  "blake_tyger": [
+    [
+      "bright",
+      "eyes",
+      "fire",
+      "night",
+      "skies"
+    ]
+  ],
+  "synthetic_alternating": [
+    [
+      "light",
+      "night",
+      "outside",
+      "sky"
+    ],
+    [
+      "swore",
+      "walked"
+    ]
+  ],
+  "synthetic_couplets": [
+    [
+      "cat",
+      "hat",
+      "past",
+      "sat"
+    ]
+  ],
+  "synthetic_heteronyms": [
+    [
+      "grow",
+      "hoped",
+      "rows",
+      "sow"
+    ],
+    [
+      "near",
+      "tear"
+    ]
+  ],
+  "synthetic_multisyllable": [
+    [
+      "ever",
+      "greater",
+      "later",
+      "paid",
+      "river"
+    ],
+    [
+      "flowing",
+      "knowing"
+    ]
+  ],
+  "synthetic_no_merge_assonance": [
+    [
+      "bed",
+      "dread"
+    ],
+    [
+      "broken",
+      "woke"
+    ],
+    [
+      "else's",
+      "melody"
+    ]
+  ],
+  "taylor_twinkle": [
+    [
+      "high",
+      "sky"
+    ]
+  ]
+}

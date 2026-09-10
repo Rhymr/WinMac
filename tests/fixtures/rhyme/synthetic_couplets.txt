@@ -1,0 +1,5 @@
+# name: synthetic_couplets
+# group A: cat hat
+# group B: dog frog
+The cat sat in the hat
+The dog jumped past the frog

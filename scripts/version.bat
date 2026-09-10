@@ -1,5 +1,5 @@
 @echo off
-rem One-liner wrapper so `Build\version.bat [--full|--json]` works from cmd.exe.
+rem One-liner wrapper so `scripts\version.bat [--full|--json]` works from cmd.exe.
 rem Prefers PowerShell 7 (pwsh), falls back to Windows PowerShell.
 setlocal
 set "ARGS="

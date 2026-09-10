@@ -1,5 +1,5 @@
 //! The app's version string — derived from git history at build time by
-//! `Build/version.sh` (see CLAUDE.md § Versioning). The single source of
+//! `scripts/version.sh` (see CLAUDE.md § Versioning). The single source of
 //! truth for anything that displays a version; never hardcode `"2026.1"` or
 //! read `CARGO_PKG_VERSION` for display.
 

@@ -32,7 +32,7 @@ Cargo.lock
 # Ignore compiled css
 /assets/css/
 
-# Ignore the macOS .app bundle produced by Build/bundle-mac.sh
+# Ignore the macOS .app bundle produced by scripts/bundle-mac.sh
 /dist/
 
 # Rhymr's per-workspace config/cache (this repo is itself a workspace)

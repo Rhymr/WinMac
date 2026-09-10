@@ -19,6 +19,48 @@ pub fn workspace_dir(workspace_root: &Path) -> PathBuf {
     workspace_root.join(".rhymr")
 }
 
+/// The on-disk `assets/` tree the running app still reads at startup — the
+/// SCSS sources compiled by [`crate::css`], and the GtkSourceView colour
+/// schemes under `styles/`. Resolution order:
+///
+/// 1. `RHYMR_ASSETS_DIR`, if set — an explicit override for unusual layouts.
+/// 2. Inside a macOS `.app` bundle: `Contents/Resources/assets`, next to the
+///    executable (`scripts/bundle-mac.sh` copies the tree there). This is
+///    what makes a Finder/Dock launch work — its working directory is `/`,
+///    so a bare `assets/…` path would miss.
+/// 3. `<current dir>/assets` — the dev layout, run from the repo root
+///    (see CLAUDE.md § Build / run / check).
+pub fn assets_dir() -> PathBuf {
+    if let Some(dir) = std::env::var_os("RHYMR_ASSETS_DIR") {
+        return PathBuf::from(dir);
+    }
+    if let Some(bundled) = bundled_assets_dir() {
+        return bundled;
+    }
+    std::env::current_dir()
+        .unwrap_or_else(|_| PathBuf::from("."))
+        .join("assets")
+}
+
+/// `Contents/Resources/assets` when the executable sits at
+/// `…/<name>.app/Contents/MacOS/<bin>`, and that directory exists.
+#[cfg(target_os = "macos")]
+fn bundled_assets_dir() -> Option<PathBuf> {
+    let exe = std::env::current_exe().ok()?;
+    let macos_dir = exe.parent()?;
+    if macos_dir.file_name()? != "MacOS" {
+        return None;
+    }
+    let candidate = macos_dir.parent()?.join("Resources").join("assets");
+    candidate.is_dir().then_some(candidate)
+}
+
+/// No `.app` bundle layout off macOS — fall through to the dev path.
+#[cfg(not(target_os = "macos"))]
+fn bundled_assets_dir() -> Option<PathBuf> {
+    None
+}
+
 /// Where the Apple Notes JSON snapshot lives, per the user's
 /// [`NotesCacheScope`] setting:
 /// - `Workspace` → `<workspace>/.rhymr/apple-notes.json` (per project)

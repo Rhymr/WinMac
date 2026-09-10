@@ -52,8 +52,8 @@ people who don't.
   for chrome vs the Settings-driven monospace `--app-font-*` for the editor +
   gutter only). No hot-reload; SCSS recompiles at startup (`css::init`) and
   on the settings dialog's Apply/OK (`css::reload`). A new stylesheet's stem
-  goes in `CSS_FILES` in **both** `src/css.rs` and `build.rs`.
-- **Resources**: GResources compiled at build time via `build.rs`.
+  goes in `CSS_FILES` in **both** `src/css.rs` and `scripts.rs`.
+- **Resources**: GResources compiled at build time via `scripts.rs`.
 - **Icons**: bundled subset of JetBrains' "NetIcons" set under
   `assets/icons/{color,dark,light}/<name>-<variant>.svg` (Apache-2.0 — keep
   `assets/icons/NOTICE`; some are repurposed for actions that differ from
@@ -245,8 +245,8 @@ clearly-labeled step, not silently mixed into a feature change.
 ## Versioning
 
 One global SemVer string derived from git history, never hand-maintained.
-**`Build/version.sh`** (Unix) / **`Build/version.ps1`** (Windows, via the
-`Build/version.bat` one-liner) is the single source of truth — read that
+**`scripts/version.sh`** (Unix) / **`scripts/version.ps1`** (Windows, via the
+`scripts/version.bat` one-liner) is the single source of truth — read that
 script for the exact pre-1.0 formula (MINOR counts `feat:` commits, PATCH
 counts `fix:` since the last `feat:`, `+build.<N>.g<sha>[.dirty]` metadata).
 Never hand-edit a version string.
