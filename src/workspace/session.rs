@@ -30,12 +30,17 @@ pub struct WorkspaceSession {
     /// Left panel (project + source trees) width in px.
     #[serde(default)]
     pub left_panel_width: Option<i32>,
-    /// Rhyme Search panel height in px, when it was last open.
+    /// Bottom-dock panel height in px, when one was last open.
     #[serde(default)]
     pub rhyme_panel_height: Option<i32>,
-    /// Whether the Rhyme Search panel was open.
+    /// Whether the Rhyme Search panel was open. Superseded by `bottom_panel`
+    /// (kept so older session files still parse); no longer written.
     #[serde(default)]
     pub rhyme_panel_visible: Option<bool>,
+    /// Which bottom tool window was open last (`"rhyme"` / `"git-log"`), or
+    /// `None` when the bottom dock was closed.
+    #[serde(default)]
+    pub bottom_panel: Option<String>,
 }
 
 type SessionMap = HashMap<String, WorkspaceSession>;

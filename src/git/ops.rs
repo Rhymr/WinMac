@@ -37,6 +37,100 @@ pub enum LineChange {
     Deleted,
 }
 
+/// Where a history walk starts, for [`GitController::log`].
+pub enum LogStart {
+    /// The current `HEAD`.
+    Head,
+    /// A named branch or revision (anything `git rev-parse` accepts).
+    Branch(String),
+    /// Every ref — local + remote branches and tags (the "all branches" view).
+    AllRefs,
+}
+
+/// One row of the Git Log list: enough to render it and draw the graph edges.
+#[derive(Clone, Debug)]
+pub struct CommitSummary {
+    pub id: git2::Oid,
+    /// Abbreviated hash git considers unambiguous (usually 7 chars).
+    pub short_id: String,
+    /// First line of the message.
+    pub summary: String,
+    pub author_name: String,
+    pub author_email: String,
+    /// Author time, seconds since the Unix epoch.
+    pub time: i64,
+    /// Parents, first-parent first — one entry for a normal commit, two+ for a
+    /// merge, none for the root.
+    pub parent_ids: Vec<git2::Oid>,
+}
+
+/// A path touched by a commit, with its coarse change kind.
+#[derive(Clone, Debug)]
+pub struct ChangedFile {
+    pub path: PathBuf,
+    pub status: git2::Delta,
+}
+
+/// Everything the Git Log detail pane shows for the selected commit.
+#[derive(Clone, Debug)]
+pub struct CommitDetail {
+    pub summary: CommitSummary,
+    /// Full commit message (subject + body).
+    pub body: String,
+    pub committer_name: String,
+    pub committer_email: String,
+    /// Commit time, seconds since the Unix epoch.
+    pub commit_time: i64,
+    /// Files changed vs the first parent (vs the empty tree for a root commit),
+    /// sorted by path.
+    pub files: Vec<ChangedFile>,
+}
+
+/// Kind of ref pointing at a commit, for the coloured chips in the log.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum RefKind {
+    Head,
+    LocalBranch,
+    RemoteBranch,
+    Tag,
+}
+
+/// A ref label to chip onto a commit row in the log.
+#[derive(Clone, Debug)]
+pub struct RefLabel {
+    pub name: String,
+    pub kind: RefKind,
+}
+
+/// Build a [`CommitSummary`] from a libgit2 commit.
+fn summarize_commit(commit: &git2::Commit<'_>) -> CommitSummary {
+    let author = commit.author();
+    let id = commit.id();
+    let short_id = commit
+        .as_object()
+        .short_id()
+        .ok()
+        .and_then(|buf| buf.as_str().ok().map(str::to_string))
+        .unwrap_or_else(|| {
+            let hex = id.to_string();
+            hex[..hex.len().min(7)].to_string()
+        });
+    CommitSummary {
+        id,
+        short_id,
+        summary: commit
+            .summary()
+            .ok()
+            .flatten()
+            .unwrap_or_default()
+            .to_string(),
+        author_name: author.name().unwrap_or_default().to_string(),
+        author_email: author.email().unwrap_or_default().to_string(),
+        time: commit.time().seconds(),
+        parent_ids: commit.parent_ids().collect(),
+    }
+}
+
 /// Change type keyed by 0-based line number of `current_text`. Empty when
 /// `file_abs` isn't inside `repo_root`'s repo, there's no HEAD, or nothing
 /// changed. A file with no blob in HEAD (brand new / untracked) reports
@@ -368,6 +462,143 @@ impl GitController {
         log::info!("git push: '{branch_name}' → {remote_name}");
         Ok(format!("Pushed '{branch_name}' to {remote_name}."))
     }
+
+    /// Walk history from `start`, newest first, skipping `skip` commits and
+    /// returning at most `limit`. Paged so the Git Log panel never loads the
+    /// whole history at once. An unborn branch (no commits yet) yields an
+    /// empty vec rather than an error.
+    pub fn log(
+        &self,
+        start: LogStart,
+        limit: usize,
+        skip: usize,
+    ) -> Result<Vec<CommitSummary>, String> {
+        let repo = Repository::open(&self.repo_path).map_err(|e| e.to_string())?;
+        let mut walk = repo.revwalk().map_err(|e| e.to_string())?;
+        walk.set_sorting(git2::Sort::TIME | git2::Sort::TOPOLOGICAL)
+            .map_err(|e| e.to_string())?;
+
+        match start {
+            LogStart::Head => {
+                if repo.head().is_err() {
+                    return Ok(Vec::new());
+                }
+                walk.push_head().map_err(|e| e.to_string())?;
+            }
+            LogStart::Branch(rev) => {
+                let obj = repo.revparse_single(&rev).map_err(|e| e.to_string())?;
+                let commit_id = obj
+                    .peel_to_commit()
+                    .map(|c| c.id())
+                    .unwrap_or_else(|_| obj.id());
+                walk.push(commit_id).map_err(|e| e.to_string())?;
+            }
+            LogStart::AllRefs => {
+                if walk.push_glob("refs/heads/*").is_err() && repo.head().is_ok() {
+                    walk.push_head().map_err(|e| e.to_string())?;
+                }
+                let _ = walk.push_glob("refs/remotes/*");
+                let _ = walk.push_glob("refs/tags/*");
+            }
+        }
+
+        let mut out = Vec::with_capacity(limit.min(1024));
+        for oid in walk.skip(skip).take(limit) {
+            let oid = oid.map_err(|e| e.to_string())?;
+            let commit = repo.find_commit(oid).map_err(|e| e.to_string())?;
+            out.push(summarize_commit(&commit));
+        }
+        Ok(out)
+    }
+
+    /// Full metadata + changed-file list for one commit. The file list is the
+    /// diff of the commit against its first parent (against the empty tree for
+    /// a root commit).
+    pub fn commit_detail(&self, id: git2::Oid) -> Result<CommitDetail, String> {
+        let repo = Repository::open(&self.repo_path).map_err(|e| e.to_string())?;
+        let commit = repo.find_commit(id).map_err(|e| e.to_string())?;
+
+        let tree = commit.tree().map_err(|e| e.to_string())?;
+        let parent_tree = match commit.parent(0) {
+            Ok(parent) => Some(parent.tree().map_err(|e| e.to_string())?),
+            Err(_) => None,
+        };
+        let diff = repo
+            .diff_tree_to_tree(parent_tree.as_ref(), Some(&tree), None)
+            .map_err(|e| e.to_string())?;
+
+        let mut files: Vec<ChangedFile> = diff
+            .deltas()
+            .map(|delta| {
+                let path = delta
+                    .new_file()
+                    .path()
+                    .or_else(|| delta.old_file().path())
+                    .map(Path::to_path_buf)
+                    .unwrap_or_default();
+                ChangedFile {
+                    path,
+                    status: delta.status(),
+                }
+            })
+            .collect();
+        files.sort_by(|a, b| a.path.cmp(&b.path));
+
+        let committer = commit.committer();
+        Ok(CommitDetail {
+            body: commit.message().unwrap_or_default().to_string(),
+            committer_name: committer.name().unwrap_or_default().to_string(),
+            committer_email: committer.email().unwrap_or_default().to_string(),
+            commit_time: commit.time().seconds(),
+            files,
+            summary: summarize_commit(&commit),
+        })
+    }
+
+    /// Every ref (local + remote branches, tags, and `HEAD`) grouped by the
+    /// commit it ultimately points at, for the chips shown on log rows.
+    pub fn ref_labels(&self) -> Result<HashMap<git2::Oid, Vec<RefLabel>>, String> {
+        let repo = Repository::open(&self.repo_path).map_err(|e| e.to_string())?;
+        let mut out: HashMap<git2::Oid, Vec<RefLabel>> = HashMap::new();
+
+        let refs = repo.references().map_err(|e| e.to_string())?;
+        for reference in refs.flatten() {
+            let Some(target) = reference.target() else {
+                continue;
+            };
+            // Peel annotated tags to the commit they wrap.
+            let oid = repo
+                .find_object(target, None)
+                .and_then(|obj| obj.peel_to_commit())
+                .map(|commit| commit.id())
+                .unwrap_or(target);
+
+            let kind = if reference.is_branch() {
+                RefKind::LocalBranch
+            } else if reference.is_remote() {
+                RefKind::RemoteBranch
+            } else if reference.is_tag() {
+                RefKind::Tag
+            } else {
+                continue;
+            };
+            let name = reference.shorthand().unwrap_or_default().to_string();
+            if !name.is_empty() {
+                out.entry(oid).or_default().push(RefLabel { name, kind });
+            }
+        }
+
+        if let Ok(head) = repo.head()
+            && let Ok(commit) = head.peel_to_commit()
+        {
+            out.entry(commit.id()).or_default().push(RefLabel {
+                name: "HEAD".to_string(),
+                kind: RefKind::Head,
+            });
+        }
+
+        Ok(out)
+    }
 }
 
 /// Credential resolution shared by fetch/pull/push: SSH-agent for `git@`/
@@ -421,5 +652,59 @@ pub fn stage_all_changes(workspace_root: &Path) {
         log::warn!("git autostage: writing the index failed: {e}");
     } else {
         log::debug!("git autostage: staged all changes in {workspace_root:?}");
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A controller pointed at this crate's own checkout — always a git repo
+    /// under `cargo test` (a normal clone in CI, a linked worktree locally;
+    /// `Repository::open` resolves both).
+    fn controller() -> GitController {
+        GitController::new(Path::new(env!("CARGO_MANIFEST_DIR")))
+    }
+
+    #[test]
+    fn log_pages_and_skips() {
+        let git = controller();
+        let first = git.log(LogStart::Head, 5, 0).expect("log head");
+        assert!(!first.is_empty(), "this repo has commits");
+        assert!(first.len() <= 5);
+        assert!(first.iter().all(|c| !c.short_id.is_empty()));
+
+        if first.len() > 1 {
+            let skipped = git.log(LogStart::Head, 5, 1).expect("log skip");
+            assert_eq!(
+                skipped.first().map(|c| c.id),
+                first.get(1).map(|c| c.id),
+                "skip=1 drops exactly the newest commit"
+            );
+        }
+    }
+
+    #[test]
+    fn commit_detail_matches_its_summary() {
+        let git = controller();
+        let head = git
+            .log(LogStart::Head, 1, 0)
+            .expect("log head")
+            .pop()
+            .expect("at least one commit");
+        let detail = git.commit_detail(head.id).expect("commit detail");
+        assert_eq!(detail.summary.id, head.id);
+        assert_eq!(detail.summary.short_id, head.short_id);
+        assert!(detail.body.starts_with(&head.summary) || head.summary.is_empty());
+    }
+
+    #[test]
+    fn ref_labels_include_a_head_chip() {
+        let git = controller();
+        let labels = git.ref_labels().expect("ref labels");
+        assert!(
+            labels.values().flatten().any(|l| l.kind == RefKind::Head),
+            "a HEAD chip should point at some commit"
+        );
     }
 }

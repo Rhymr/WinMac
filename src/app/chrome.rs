@@ -222,27 +222,41 @@ pub fn left_stripe<F: Fn(bool) + 'static>(project_visible: bool, on_toggle: F) -
     stripe
 }
 
-/// The bottom stripe — horizontal toggles for bottom-docked tool windows.
-pub fn bottom_stripe<F: Fn(bool) + 'static>(rhyme_visible: bool, on_toggle: F) -> GtkBox {
+/// One button on the bottom tool-window stripe.
+pub struct BottomTool {
+    /// Bundled icon stem (see [`crate::app::icons`]).
+    pub icon: &'static str,
+    /// Visible label / tooltip.
+    pub label: &'static str,
+}
+
+/// The bottom stripe — one horizontal toggle per bottom-docked tool window.
+/// Returns the stripe plus each `ToggleButton` in `tools` order, so the
+/// caller can wire show/hide and one-at-a-time (radio) behaviour itself.
+pub fn bottom_stripe(tools: &[BottomTool]) -> (GtkBox, Vec<ToggleButton>) {
     let stripe = GtkBox::builder()
         .orientation(Orientation::Horizontal)
         .css_classes(["bottom-stripe"])
         .spacing(1)
         .build();
 
-    let content = GtkBox::new(Orientation::Horizontal, 4);
-    content.append(&img("search", 16));
-    content.append(&Label::new(Some("Rhyme Search")));
+    let buttons: Vec<ToggleButton> = tools
+        .iter()
+        .map(|tool| {
+            let content = GtkBox::new(Orientation::Horizontal, 4);
+            content.append(&img(tool.icon, 16));
+            content.append(&Label::new(Some(tool.label)));
 
-    let btn = ToggleButton::builder()
-        .css_classes(["bottom-stripe-button"])
-        .active(rhyme_visible)
-        .tooltip_text("Rhyme Search")
-        .valign(Align::Center)
-        .build();
-    btn.set_child(Some(&content));
-    btn.connect_toggled(move |b| on_toggle(b.is_active()));
+            let btn = ToggleButton::builder()
+                .css_classes(["bottom-stripe-button"])
+                .tooltip_text(tool.label)
+                .valign(Align::Center)
+                .build();
+            btn.set_child(Some(&content));
+            stripe.append(&btn);
+            btn
+        })
+        .collect();
 
-    stripe.append(&btn);
-    stripe
+    (stripe, buttons)
 }

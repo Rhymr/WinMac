@@ -449,10 +449,14 @@ fn show_message_dialog(parent: &gtk::Window, title: &str, message: &str) {
     dialog.present();
 }
 
+/// Refresh everything that reflects repo state after an in-app git write:
+/// the file tree's status colours, the status-bar branch, the toolbar Git
+/// group and the Git Log panel.
 fn refresh_file_tree(controller: &Rc<WorkspaceController>) {
     if let Some(workspace) = controller.get_workspace()
         && let Some(ref file_tree) = workspace.file_tree
     {
         file_tree.refresh();
     }
+    controller.notify_git_changed();
 }
