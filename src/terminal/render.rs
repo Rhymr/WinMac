@@ -91,10 +91,15 @@ pub fn draw(
 
     let Ok(term) = term.lock() else { return };
     let content = term.renderable_content();
+    // `display_iter` (and the cursor) use grid lines: with the viewport at
+    // the bottom, line 0 is the top visible row; scrolled up by N, the top
+    // visible row is line -N. Shift by the display offset to get a 0-based
+    // screen row.
+    let offset = content.display_offset as i32;
     let show_cursor =
         content.mode.contains(TermMode::SHOW_CURSOR) && content.cursor.shape != CursorShape::Hidden;
     let cursor_col = content.cursor.point.column.0;
-    let cursor_line = content.cursor.point.line.0;
+    let cursor_row = content.cursor.point.line.0 + offset;
     let selection = content.selection;
     let sel_bg = if dark {
         byte_rgb(0x2f, 0x65, 0xca)
@@ -105,12 +110,12 @@ pub fn draw(
     for indexed in content.display_iter {
         let cell = indexed.cell;
         let col = indexed.point.column.0;
-        let line = indexed.point.line.0;
-        if line < 0 {
+        let row = indexed.point.line.0 + offset;
+        if row < 0 {
             continue;
         }
         let x = col as f64 * m.cell_w;
-        let y = line as f64 * m.cell_h;
+        let y = f64::from(row) * m.cell_h;
 
         let selected = selection
             .as_ref()
@@ -139,9 +144,10 @@ pub fn draw(
         }
     }
 
-    if show_cursor && cursor_line >= 0 {
+    let visible_rows = f64::from(h) / m.cell_h;
+    if show_cursor && cursor_row >= 0 && f64::from(cursor_row) < visible_rows {
         let x = cursor_col as f64 * m.cell_w;
-        let y = cursor_line as f64 * m.cell_h;
+        let y = f64::from(cursor_row) * m.cell_h;
         set_src(ctx, pal.cursor);
         match content.cursor.shape {
             CursorShape::Beam => ctx.rectangle(x, y, 2.0, m.cell_h),

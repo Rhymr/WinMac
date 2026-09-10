@@ -148,9 +148,20 @@ impl TerminalPanel {
         if self.started.get() {
             return;
         }
+        // The area is usually not allocated yet on first show, so fall back
+        // to a standard 80×24; `connect_resize` corrects it once laid out.
         let m = self.metrics.get();
-        let cols = ((f64::from(self.area.width().max(1)) / m.cell_w).floor() as usize).max(2);
-        let rows = ((f64::from(self.area.height().max(1)) / m.cell_h).floor() as usize).max(1);
+        let (aw, ah) = (self.area.width(), self.area.height());
+        let cols = if aw > 1 {
+            ((f64::from(aw) / m.cell_w).floor() as usize).max(2)
+        } else {
+            80
+        };
+        let rows = if ah > 1 {
+            ((f64::from(ah) / m.cell_h).floor() as usize).max(1)
+        } else {
+            24
+        };
 
         let cwd = self
             .cwd

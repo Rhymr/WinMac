@@ -53,4 +53,8 @@ pub struct ToolWindow {
     /// The trailing action area of the panel's *own* header — the dock
     /// appends a minimise button here rather than drawing a header itself.
     pub header_actions: gtk::Box,
+    /// Fired by the dock when the window is shown (`true`) or hidden
+    /// (`false`), so a panel can start / stop work lazily — the Terminal
+    /// spawns its shell on first show. `None` for panels that don't care.
+    pub on_visibility: Option<std::rc::Rc<dyn Fn(bool)>>,
 }

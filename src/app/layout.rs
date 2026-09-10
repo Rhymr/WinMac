@@ -158,6 +158,7 @@ pub fn create_main_layout() -> (GtkBox, Rc<WorkspaceController>) {
         default_open: true,
         content: left_scroller.clone().upcast(),
         header_actions: file_tree.header_actions(),
+        on_visibility: None,
     });
     dock.register(crate::app::tool_window::ToolWindow {
         id: "rhyme-search",
@@ -168,6 +169,7 @@ pub fn create_main_layout() -> (GtkBox, Rc<WorkspaceController>) {
         default_open: false,
         content: rhyme_frame.clone().upcast(),
         header_actions: rhyme_search.header_actions(),
+        on_visibility: None,
     });
     dock.register(crate::app::tool_window::ToolWindow {
         id: "git-log",
@@ -178,6 +180,7 @@ pub fn create_main_layout() -> (GtkBox, Rc<WorkspaceController>) {
         default_open: false,
         content: git_log_frame.clone().upcast(),
         header_actions: git_log.header_actions(),
+        on_visibility: None,
     });
     dock.register(crate::app::tool_window::ToolWindow {
         id: "terminal",
@@ -188,6 +191,12 @@ pub fn create_main_layout() -> (GtkBox, Rc<WorkspaceController>) {
         default_open: false,
         content: terminal_frame.clone().upcast(),
         header_actions: terminal.header_actions(),
+        // The dock only reparents/hides the widget; the panel needs an
+        // explicit signal to spawn (and later re-focus) the shell.
+        on_visibility: Some({
+            let terminal = terminal.clone();
+            Rc::new(move |visible| terminal.set_expanded(visible))
+        }),
     });
 
     // Route the `app.*` tool-window actions through the dock.

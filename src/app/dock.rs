@@ -393,12 +393,14 @@ impl DockArea {
             for sib in siblings {
                 sib.open.set(false);
                 sib.button.set_active(false);
+                notify_visibility(&sib.tw, false);
             }
 
             reparent(&slot.tw.content, &edge.panel);
             edge.panel.set_visible(true);
             self.apply_size(edge, slot.size.get());
             slot.open.set(true);
+            notify_visibility(&slot.tw, true);
         } else {
             if slot.open.get() {
                 slot.size
@@ -409,6 +411,7 @@ impl DockArea {
                 slot.tw.content.unparent();
             }
             slot.open.set(false);
+            notify_visibility(&slot.tw, false);
         }
 
         self.updating.set(false);
@@ -509,6 +512,13 @@ fn add_drag_source(button: &ToggleButton, id: &'static str) {
         source.connect_drag_end(move |_, _, _| button.remove_css_class("dragging"));
     }
     button.add_controller(source);
+}
+
+/// Tell a tool window it was just shown (`true`) or hidden (`false`).
+fn notify_visibility(tw: &ToolWindow, visible: bool) {
+    if let Some(cb) = &tw.on_visibility {
+        cb(visible);
+    }
 }
 
 /// Make `child` the sole child of `parent`, detaching `child` from any
