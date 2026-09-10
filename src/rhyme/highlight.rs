@@ -1,6 +1,7 @@
+use super::pronounce;
 use super::score::{Syllable, Thresholds, find_rhymes, syllables_from_pronunciation};
 use crate::setting::Theme;
-use cmudict_fast::{Cmudict, Symbol};
+use cmudict_fast::Symbol;
 use gtk::TextTag;
 use gtk::prelude::*;
 use hypher::Lang;
@@ -9,7 +10,6 @@ use sourceview5::{Buffer as SourceBuffer, View as SourceView};
 use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
-use std::str::FromStr;
 use std::sync::OnceLock;
 
 /// How many lines back from the current one to compare against when
@@ -29,8 +29,6 @@ const RHYME_SCROLL_DEBOUNCE: std::time::Duration = std::time::Duration::from_mil
 /// whole-document, so colours and the legend never depend on what's
 /// on-screen.
 const PAINT_MARGIN_LINES: i32 = 64;
-
-const CMUDICT_TXT: &str = include_str!("../../assets/dictionary/cmudict.dict");
 
 /// Foreground colors cycled across rhyme groups, in the order groups first
 /// appear in the document — JetBrains-style, distinguishing rhyme groups
@@ -137,11 +135,6 @@ const STOPWORDS: &[&str] = &[
 fn stopwords() -> &'static HashSet<&'static str> {
     static SET: OnceLock<HashSet<&'static str>> = OnceLock::new();
     SET.get_or_init(|| STOPWORDS.iter().copied().collect())
-}
-
-fn cmudict() -> &'static Cmudict {
-    static DICT: OnceLock<Cmudict> = OnceLock::new();
-    DICT.get_or_init(|| Cmudict::from_str(CMUDICT_TXT).expect("bundled cmudict.dict should parse"))
 }
 
 fn symbol_base(symbol: &Symbol) -> &'static str {
@@ -358,8 +351,8 @@ fn rhyme_units(word: &str) -> Vec<RhymeUnit> {
         return Vec::new();
     }
 
-    if let Some(rule) = cmudict().get(&lower).and_then(|rules| rules.first()) {
-        let syllables = syllabify(rule.pronunciation());
+    if let Some(pron) = pronounce::resolve_first(&lower) {
+        let syllables = syllabify(&pron.phonemes);
         let spans = orthographic_syllables(&lower, syllables.len());
         return syllables
             .iter()
@@ -493,10 +486,10 @@ fn build_lines(text: &str, spans: &[WordSpan]) -> Vec<LineSyllables> {
             continue;
         }
         let lower = span.text.to_lowercase();
-        let Some(rule) = cmudict().get(&lower).and_then(|rules| rules.first()) else {
+        let Some(pron) = pronounce::resolve_first(&lower) else {
             continue;
         };
-        let syllables = syllables_from_pronunciation(rule.pronunciation());
+        let syllables = syllables_from_pronunciation(&pron.phonemes);
         if syllables.is_empty() {
             continue;
         }
@@ -789,7 +782,7 @@ fn compute_groups(text: &str, stop_at_blank_line: bool, tuning: &RhymeTuning) ->
             continue;
         }
         let lower = span.text.to_lowercase();
-        if stopwords().contains(lower.as_str()) || cmudict().get(&lower).is_some() {
+        if stopwords().contains(lower.as_str()) || pronounce::is_in_dictionary(&lower) {
             continue;
         }
         for unit in rhyme_units(&span.text) {
@@ -1277,7 +1270,7 @@ mod tests {
     /// all ~135k entries on every test run, but still broad enough to catch
     /// off-by-one bugs in the syllable/span reconciliation logic.
     fn dictionary_sample() -> Vec<&'static str> {
-        CMUDICT_TXT
+        crate::rhyme::pronounce::CMUDICT_TXT
             .lines()
             .filter_map(|line| line.split_whitespace().next())
             .step_by(7)
