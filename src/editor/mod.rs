@@ -63,6 +63,11 @@ pub struct TextEditor {
     source_view: SourceView,
     buffer: SourceBuffer,
     current_path: Rc<RefCell<Option<PathBuf>>>,
+    // True once `set_path` has been given a file with a GtkSourceView
+    // language (today: `.json` only). A code buffer suppresses the
+    // lyrics-only tooling — syllable gutter, rhyme highlighting/legend,
+    // word completion — and switches on the auto-pairing key handler.
+    is_code: Rc<Cell<bool>>,
     // Has this tab been edited since it was opened, and does that edit not
     // yet have a successful autosave behind it? Used by "Close Unmodified
     // Tabs" (see workspace::Workspace) — set on the first real edit after
@@ -313,6 +318,7 @@ impl TextEditor {
             source_view,
             buffer,
             current_path,
+            is_code: Rc::new(Cell::new(false)),
             modified,
             gutter,
             syllable_renderer: RefCell::new(None),
@@ -333,6 +339,7 @@ impl TextEditor {
         };
 
         editor.setup_context_menu();
+        editor.install_auto_pairs();
 
         // Any edit can renumber every following line, so drop the whole
         // per-line syllable cache; the next gutter redraw refills only the
@@ -468,11 +475,187 @@ impl TextEditor {
         self.source_view.add_controller(gesture);
     }
 
+    /// JetBrains-style auto-pairing for code buffers (currently `.json`
+    /// only — gated by `is_code`, so a plain lyrics buffer is untouched):
+    ///
+    /// - typing `{`, `[` or `"` inserts the matching closer and leaves the
+    ///   caret between the pair; with a selection, it wraps the selection;
+    /// - typing `}`, `]` or `"` when that exact character is already the
+    ///   next one just steps the caret over it;
+    /// - Backspace inside an empty pair deletes both characters;
+    /// - Enter between `{}` or `[]` opens an indented block.
+    ///
+    /// A capture-phase key controller so it runs before the view inserts
+    /// the character itself.
+    fn install_auto_pairs(&self) {
+        let key = gtk::EventControllerKey::new();
+        key.set_propagation_phase(PropagationPhase::Capture);
+
+        let buffer = self.buffer.clone();
+        let view = self.source_view.clone();
+        let is_code = self.is_code.clone();
+        key.connect_key_pressed(move |_, keyval, _keycode, state| {
+            let proceed = glib::Propagation::Proceed;
+            if !is_code.get() {
+                return proceed;
+            }
+            // Never shadow the app's Ctrl/Alt/Cmd accelerators.
+            if state.intersects(
+                gdk::ModifierType::CONTROL_MASK
+                    | gdk::ModifierType::ALT_MASK
+                    | gdk::ModifierType::META_MASK,
+            ) {
+                return proceed;
+            }
+            if !view.is_editable() {
+                return proceed;
+            }
+
+            let (start, end) = match buffer.selection_bounds() {
+                Some(bounds) => bounds,
+                None => {
+                    let iter = buffer.iter_at_offset(buffer.cursor_position());
+                    (iter, iter)
+                }
+            };
+            let has_selection = start != end;
+            let next_char = {
+                let c = end.char();
+                (c != '\0').then_some(c)
+            };
+            let prev_char = {
+                let mut it = start;
+                it.backward_char().then(|| it.char())
+            };
+
+            match keyval {
+                gdk::Key::BackSpace if !has_selection => {
+                    let empty_pair = matches!(
+                        (prev_char, next_char),
+                        (Some('{'), Some('}')) | (Some('['), Some(']')) | (Some('"'), Some('"'))
+                    );
+                    if !empty_pair {
+                        return proceed;
+                    }
+                    buffer.begin_user_action();
+                    let (mut a, mut b) = (start, end);
+                    a.backward_char();
+                    b.forward_char();
+                    buffer.delete(&mut a, &mut b);
+                    buffer.end_user_action();
+                    glib::Propagation::Stop
+                }
+                gdk::Key::Return | gdk::Key::KP_Enter if !has_selection => {
+                    let expand = matches!(
+                        (prev_char, next_char),
+                        (Some('{'), Some('}')) | (Some('['), Some(']'))
+                    );
+                    if !expand {
+                        return proceed;
+                    }
+                    let line_indent: String = {
+                        let mut ls = start;
+                        ls.set_line_offset(0);
+                        buffer
+                            .text(&ls, &start, false)
+                            .chars()
+                            .take_while(|c| *c == ' ' || *c == '\t')
+                            .collect()
+                    };
+                    let step = if view.is_insert_spaces_instead_of_tabs() {
+                        " ".repeat(view.tab_width().max(1) as usize)
+                    } else {
+                        "\t".to_string()
+                    };
+                    buffer.begin_user_action();
+                    let mut it = start;
+                    buffer.insert(&mut it, &format!("\n{line_indent}{step}\n{line_indent}"));
+                    it.backward_chars(line_indent.chars().count() as i32 + 1);
+                    buffer.place_cursor(&it);
+                    buffer.end_user_action();
+                    glib::Propagation::Stop
+                }
+                _ => {
+                    let Some(typed) = keyval.to_unicode() else {
+                        return proceed;
+                    };
+                    let pair = match typed {
+                        '{' => Some(('{', '}')),
+                        '[' => Some(('[', ']')),
+                        '"' => Some(('"', '"')),
+                        _ => None,
+                    };
+
+                    // Step over an existing closer instead of inserting one.
+                    if matches!(typed, '}' | ']' | '"')
+                        && !has_selection
+                        && next_char == Some(typed)
+                    {
+                        // For a quote, only treat it as "step over" when a
+                        // pair almost certainly opened it — i.e. the char
+                        // before the caret isn't itself part of a word.
+                        let stepping_over = typed != '"'
+                            || !matches!(prev_char, Some(c) if c.is_alphanumeric() || c == '\\');
+                        if stepping_over {
+                            let mut it = end;
+                            it.forward_char();
+                            buffer.place_cursor(&it);
+                            return glib::Propagation::Stop;
+                        }
+                    }
+
+                    let Some((open, close)) = pair else {
+                        return proceed;
+                    };
+
+                    // Don't open a quote pair mid-word or right after a
+                    // backslash escape — let the bare character through.
+                    if open == '"'
+                        && !has_selection
+                        && matches!(prev_char, Some(c) if c.is_alphanumeric() || c == '\\')
+                    {
+                        return proceed;
+                    }
+
+                    buffer.begin_user_action();
+                    if has_selection {
+                        let left = buffer.create_mark(None, &start, true);
+                        let right = buffer.create_mark(None, &end, false);
+                        let mut a = buffer.iter_at_mark(&left);
+                        buffer.insert(&mut a, &open.to_string());
+                        let mut b = buffer.iter_at_mark(&right);
+                        buffer.insert(&mut b, &close.to_string());
+                        let mut inner_start = buffer.iter_at_mark(&left);
+                        inner_start.forward_char();
+                        let inner_end = buffer.iter_at_mark(&right);
+                        buffer.select_range(&inner_start, &inner_end);
+                        buffer.delete_mark(&left);
+                        buffer.delete_mark(&right);
+                    } else {
+                        let mut it = start;
+                        buffer.insert(&mut it, &format!("{open}{close}"));
+                        it.backward_char();
+                        buffer.place_cursor(&it);
+                    }
+                    buffer.end_user_action();
+                    glib::Propagation::Stop
+                }
+            }
+        });
+        self.source_view.add_controller(key);
+    }
+
     /// Push `settings` onto this already-open tab: plain `SourceView` /
     /// buffer properties are set directly; the syllable gutter, VCS gutter,
     /// completion provider and rhyme highlighting are added or removed live;
     /// the sticky-line strip and autosave delay track their live copies.
+    ///
+    /// On a code buffer (`is_code` — a `.json` file) the lyrics-only
+    /// tooling stays off regardless of its setting: no syllable gutter, no
+    /// rhyme highlighting/legend, no word completion. `set_path` re-runs
+    /// this once the language is known so those detach if they were on.
     pub fn apply_settings(&self, settings: &Settings) {
+        let is_code = self.is_code.get();
         let view = &self.source_view;
         view.set_tab_width(settings.tab_width);
         view.set_indent_width(settings.tab_width as i32);
@@ -522,7 +705,10 @@ impl TextEditor {
         self.syllable_theme_dark
             .set(settings.theme == crate::setting::Theme::Dark);
         let mut renderer_slot = self.syllable_renderer.borrow_mut();
-        match (renderer_slot.is_some(), settings.show_syllable_gutter) {
+        match (
+            renderer_slot.is_some(),
+            settings.show_syllable_gutter && !is_code,
+        ) {
             (false, true) => {
                 let renderer = create_syllable_renderer(
                     &self.buffer,
@@ -589,7 +775,10 @@ impl TextEditor {
         let completion_min = settings.completion_min_prefix as usize;
         let completion_max = settings.completion_max_suggestions as usize;
         let mut provider_slot = self.word_provider.borrow_mut();
-        match (provider_slot.is_some(), settings.word_completion) {
+        match (
+            provider_slot.is_some(),
+            settings.word_completion && !is_code,
+        ) {
             (false, true) => {
                 let provider = WordCompletionProvider::new();
                 provider.set_limits(completion_min, completion_max);
@@ -614,7 +803,10 @@ impl TextEditor {
         self.rhyme_hover_on.set(settings.rhyme_hover_emphasis);
 
         let mut rhyme_slot = self.rhyme_highlight.borrow_mut();
-        match (rhyme_slot.is_some(), settings.rhyme_highlighting) {
+        match (
+            rhyme_slot.is_some(),
+            settings.rhyme_highlighting && !is_code,
+        ) {
             (false, true) => {
                 log::debug!("rhyme highlight: attaching");
                 let handle = crate::rhyme::highlight::attach(
@@ -682,8 +874,16 @@ impl TextEditor {
         // `.json` files get one (issue #26); lyrics, notes and everything
         // else stay plain text, exactly as before.
         let language = language_for_path(&path);
+        let was_code = self.is_code.replace(language.is_some());
         self.buffer.set_highlight_syntax(language.is_some());
         self.buffer.set_language(language.as_ref());
+
+        // A code buffer runs no rhyme/syllable/word-completion tooling; a
+        // plain buffer gets it back. Only re-push settings when the kind
+        // actually changed (the common lyrics→lyrics case does nothing).
+        if was_code != language.is_some() {
+            self.apply_settings(&crate::setting::Settings::load());
+        }
 
         self.current_path.replace(Some(path));
         spawn_recompute_vcs(
