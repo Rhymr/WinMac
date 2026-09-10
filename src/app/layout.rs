@@ -152,6 +152,7 @@ pub fn create_main_layout() -> (GtkBox, Rc<WorkspaceController>) {
         default_size: left_default,
         default_open: true,
         content: left_scroller.clone().upcast(),
+        header_actions: file_tree.header_actions(),
     });
     dock.register(crate::app::tool_window::ToolWindow {
         id: "rhyme-search",
@@ -161,6 +162,7 @@ pub fn create_main_layout() -> (GtkBox, Rc<WorkspaceController>) {
         default_size: bottom_default,
         default_open: false,
         content: rhyme_frame.clone().upcast(),
+        header_actions: rhyme_search.header_actions(),
     });
     dock.register(crate::app::tool_window::ToolWindow {
         id: "git-log",
@@ -170,6 +172,7 @@ pub fn create_main_layout() -> (GtkBox, Rc<WorkspaceController>) {
         default_size: bottom_default,
         default_open: false,
         content: git_log_frame.clone().upcast(),
+        header_actions: git_log.header_actions(),
     });
 
     // Route the `app.*` tool-window actions through the dock.

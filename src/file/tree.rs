@@ -63,6 +63,9 @@ pub struct FileTree {
     // rules bleed into the popover and repaint menu items with row colors.
     pub(crate) frame: Frame,
     pub(crate) file_list: ListBox,
+    // Trailing action slot in the "Project" header — the dock drops a
+    // minimise button in here (see `header_actions`).
+    header_actions: GtkBox,
     // Shared via Rc<RefCell<..>> (rather than a plain Option) so that every
     // clone of FileTree — including the one Workspace holds, made before
     // set_workspace() ever runs — observes the same value once it's set.
@@ -132,8 +135,14 @@ impl FileTree {
 
         let panel_title = Label::new(Some("Project"));
         panel_title.set_css_classes(&["file-tree-panel-title"]);
+        panel_title.set_hexpand(true);
+        panel_title.set_halign(Align::Start);
+
+        // Trailing action slot — the dock injects a minimise button here.
+        let header_actions = GtkBox::new(Orientation::Horizontal, 2);
 
         panel_header.append(&panel_title);
+        panel_header.append(&header_actions);
 
         // Create the outer container with margin
         let outer_container = GtkBox::builder()
@@ -151,6 +160,7 @@ impl FileTree {
         let file_tree = Self {
             frame,
             file_list,
+            header_actions,
             workspace: Rc::new(RefCell::new(None)),
             root_path: Rc::new(RefCell::new(None)),
             entries: Rc::new(RefCell::new(Vec::new())),
@@ -332,6 +342,12 @@ impl FileTree {
 
     pub fn get_widget(&self) -> &Frame {
         &self.frame
+    }
+
+    /// The trailing action area of the "Project" header, for the dock to
+    /// drop a minimise button into.
+    pub fn header_actions(&self) -> GtkBox {
+        self.header_actions.clone()
     }
 
     pub(crate) fn build_row(
