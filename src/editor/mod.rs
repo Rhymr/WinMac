@@ -235,12 +235,11 @@ impl TextEditor {
 
         buffer.set_highlight_matching_brackets(settings.highlight_brackets);
 
-        let scheme_manager = sourceview5::StyleSchemeManager::default();
-        scheme_manager.append_search_path("assets/styles");
-        let style_scheme = scheme_manager
-            .scheme(scheme_id(settings.theme))
-            .expect("Failed to load rhymr style scheme");
-        buffer.set_style_scheme(Some(&style_scheme));
+        if let Some(scheme) = rhymr_scheme(settings.theme) {
+            buffer.set_style_scheme(Some(&scheme));
+        } else {
+            log::error!("no rhymr style scheme found for {:?}", settings.theme);
+        }
 
         // Configure the gutter
         let gutter = ViewExt::gutter(&source_view, gtk::TextWindowType::Left);
@@ -696,9 +695,7 @@ impl TextEditor {
         // GtkSourceView style scheme (syntax/background colors, separate
         // from the app-wide CSS palette) needs switching here to follow
         // light/dark live.
-        if let Some(scheme) =
-            sourceview5::StyleSchemeManager::default().scheme(scheme_id(settings.theme))
-        {
+        if let Some(scheme) = rhymr_scheme(settings.theme) {
             self.buffer.set_style_scheme(Some(&scheme));
         }
 
@@ -1031,6 +1028,26 @@ fn scheme_id(theme: crate::setting::Theme) -> &'static str {
         crate::setting::Theme::Dark => "rhymr",
         crate::setting::Theme::Light => "rhymr-light",
     }
+}
+
+/// The Rhymr editor colour scheme for `theme`, or `None` when neither
+/// source can be read. On first use this registers both search paths on the
+/// process-wide `StyleSchemeManager` (it keeps them for later lookups):
+/// the GResources copy (`resource://…`, found no matter the working
+/// directory — so a bundled `.app` works), then the on-disk
+/// `assets/styles/` tree as a dev fallback.
+fn rhymr_scheme(theme: crate::setting::Theme) -> Option<sourceview5::StyleScheme> {
+    use std::sync::Once;
+    static REGISTER: Once = Once::new();
+
+    let manager = sourceview5::StyleSchemeManager::default();
+    REGISTER.call_once(|| {
+        manager.append_search_path("resource:///org/gtk_rs/rhymr/styles");
+        if let Some(dir) = crate::config::assets_dir().join("styles").to_str() {
+            manager.append_search_path(dir);
+        }
+    });
+    manager.scheme(scheme_id(theme))
 }
 
 impl Clone for TextEditor {

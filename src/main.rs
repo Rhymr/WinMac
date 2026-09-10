@@ -70,11 +70,9 @@ fn main() -> glib::ExitCode {
 
     log::debug!("current dir = {:?}", std::env::current_dir());
 
-    // Compile scss files into css files
-    if let Err(e) = css::compile_sass() {
-        log::error!("compile_sass failed: {e}");
-        panic!("{e}");
-    }
+    // The stylesheet is compiled from `assets/scss/` in memory by
+    // `css::init` (below, per theme); there's nothing to precompile here.
+    // `assets/css/` is a build-script artifact, not read at runtime.
 
     glib::set_application_name("Rhymr");
 
