@@ -9,7 +9,7 @@
 # Windows: no equivalent yet — a .ico embedded via a build script is the
 # path, deferred until it can be tested.
 #
-# Usage:  ./Build/bundle-mac.sh        -> dist/Rhymr.app
+# Usage:  ./scripts/bundle-mac.sh        -> dist/Rhymr.app
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -46,7 +46,7 @@ mkdir -p "${contents}/MacOS" "${contents}/Resources"
 cp "target/release/${bin_name}" "${contents}/MacOS/${bin_name}"
 cp "$(dirname "$iconset")/${app_name}.icns" "${contents}/Resources/${app_name}.icns"
 
-version="$(./Build/version.sh 2>/dev/null || echo 0.0.0)"
+version="$(./scripts/version.sh 2>/dev/null || echo 0.0.0)"
 
 cat > "${contents}/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>

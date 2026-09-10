@@ -1,11 +1,11 @@
 <#
   Single source of truth for Rhymr's SemVer string, derived from git history.
-  Windows counterpart of Build/version.sh — same formula (see CLAUDE.md
-  § Versioning). Run via Build/version.bat, or:
+  Windows counterpart of scripts/version.sh — same formula (see CLAUDE.md
+  § Versioning). Run via scripts/version.bat, or:
 
-    pwsh Build/version.ps1            # core string, e.g. 0.137.4
-    pwsh Build/version.ps1 -Full      # full string
-    pwsh Build/version.ps1 -Json
+    pwsh scripts/version.ps1            # core string, e.g. 0.137.4
+    pwsh scripts/version.ps1 -Full      # full string
+    pwsh scripts/version.ps1 -Json
 #>
 [CmdletBinding()]
 param(

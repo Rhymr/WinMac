@@ -88,7 +88,7 @@ fn main() -> glib::ExitCode {
     // name the app's icon by its id so `rhymr-icon.svg` (aliased to
     // `org.gtk_rs.Rhymr.svg` in resources.xml) is the window / app icon.
     // A real macOS Dock icon still needs the `.app` bundle from
-    // `Build/bundle-mac.sh`.
+    // `scripts/bundle-mac.sh`.
     app.connect_startup(|_| {
         if let Some(display) = gtk::gdk::Display::default() {
             gtk::IconTheme::for_display(&display).add_resource_path("/org/gtk_rs/rhymr/icons");

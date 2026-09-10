@@ -3,7 +3,7 @@ use std::fs;
 use std::path::Path;
 use std::process::Command;
 
-// Kept in sync with `CSS_FILES` in src/css.rs — build.rs precompiles these
+// Kept in sync with `CSS_FILES` in src/css.rs — scripts precompiles these
 // to assets/css/*.css (unused by the app itself, which recompiles from
 // source at runtime, but kept so the compiled output isn't stale).
 const CSS_FILES: [&str; 14] = [
@@ -23,14 +23,14 @@ const CSS_FILES: [&str; 14] = [
     "assets/{1}/welcome.{1}",
 ];
 
-/// Ask `Build/version.sh` for the git-derived version; fall back to
+/// Ask `scripts/version.sh` for the git-derived version; fall back to
 /// `CARGO_PKG_VERSION` if git or the script isn't available (e.g. a source
 /// tarball). Exposed to the crate as `RHYMR_VERSION` / `RHYMR_VERSION_FULL`
 /// (see `src/version.rs`).
 fn emit_version() {
     let run = |args: &[&str]| -> Option<String> {
         let out = Command::new("bash")
-            .arg("Build/version.sh")
+            .arg("scripts/version.sh")
             .args(args)
             .output()
             .ok()?;
@@ -48,7 +48,7 @@ fn emit_version() {
     // Re-run when the commit or working-tree state changes.
     println!("cargo:rerun-if-changed=.git/HEAD");
     println!("cargo:rerun-if-changed=.git/index");
-    println!("cargo:rerun-if-changed=Build/version.sh");
+    println!("cargo:rerun-if-changed=scripts/version.sh");
 }
 
 fn main() {

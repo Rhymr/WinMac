@@ -11,9 +11,9 @@
 #   No `-prerelease` while MAJOR is 0. RHYMR_VERSION_PRERELEASE injects one.
 #
 # Usage:
-#   Build/version.sh              -> core string, e.g. 0.137.4
-#   Build/version.sh --full       -> full string, e.g. 0.137.4+build.201.gdeadbee
-#   Build/version.sh --json       -> {"core":"…","full":"…","major":0,…}
+#   scripts/version.sh              -> core string, e.g. 0.137.4
+#   scripts/version.sh --full       -> full string, e.g. 0.137.4+build.201.gdeadbee
+#   scripts/version.sh --json       -> {"core":"…","full":"…","major":0,…}
 set -euo pipefail
 
 cd "$(git -C "$(dirname "$0")" rev-parse --show-toplevel)"

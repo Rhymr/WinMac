@@ -2,6 +2,9 @@
 name = "rhymr-rs"
 version = "2026.1.0"
 edition = "2024"
+# Build script lives at scripts.rs (with the version + bundle helpers under
+# scripts/), not the default build.rs.
+build = "scripts.rs"
 
 [dependencies]
 # GTK & GNOME ecosystem
