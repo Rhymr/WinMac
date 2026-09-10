@@ -56,6 +56,8 @@ pub struct GitLogPanel {
     repo_path: Rc<RefCell<Option<PathBuf>>>,
     commit_list: ListBox,
     detail_box: GtkBox,
+    /// Trailing action slot in the header — the dock adds a minimise button.
+    header_actions: GtkBox,
     commits: Rc<RefCell<Vec<CommitSummary>>>,
     refs: Rc<RefCell<RefMap>>,
     /// Whether a "load more" page request is already in flight.
@@ -117,6 +119,9 @@ impl GitLogPanel {
         spacer.set_hexpand(true);
         header.append(&spacer);
         header.append(&refresh_btn);
+        // Trailing action slot — the dock injects a minimise button here.
+        let header_actions = GtkBox::new(Orientation::Horizontal, 2);
+        header.append(&header_actions);
 
         let frame = Frame::builder()
             .child(&split)
@@ -130,6 +135,7 @@ impl GitLogPanel {
             repo_path: Rc::new(RefCell::new(None)),
             commit_list: commit_list.clone(),
             detail_box,
+            header_actions,
             commits: Rc::new(RefCell::new(Vec::new())),
             refs: Rc::new(RefCell::new(HashMap::new())),
             loading_more: Rc::new(Cell::new(false)),
@@ -166,6 +172,12 @@ impl GitLogPanel {
     /// The outer widget for the layout to dock.
     pub fn get_widget(&self) -> &Frame {
         &self.frame
+    }
+
+    /// The trailing action area of the header, for the dock to drop a
+    /// minimise button into.
+    pub fn header_actions(&self) -> GtkBox {
+        self.header_actions.clone()
     }
 
     /// Whether the panel body is currently hidden.

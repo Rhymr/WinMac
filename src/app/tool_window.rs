@@ -50,4 +50,7 @@ pub struct ToolWindow {
     pub default_open: bool,
     /// The panel body. Must be parent-agnostic so the dock can reparent it.
     pub content: gtk::Widget,
+    /// The trailing action area of the panel's *own* header — the dock
+    /// appends a minimise button here rather than drawing a header itself.
+    pub header_actions: gtk::Box,
 }

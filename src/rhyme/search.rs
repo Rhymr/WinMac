@@ -26,6 +26,8 @@ pub struct RhymeSearch {
     collapsed: Rc<Cell<bool>>,
     on_toggle: ToggleCallback,
     word_input: SearchEntry,
+    /// Trailing action slot in the header — the dock adds a minimise button.
+    header_actions: GtkBox,
 }
 
 impl Default for RhymeSearch {
@@ -82,16 +84,20 @@ impl RhymeSearch {
             .child(&rhyming_words_list)
             .build();
 
-        // Plain header strip — a title only. Show/hide is driven solely by
-        // the bottom stripe (see app::chrome::bottom_stripe); the panel has
-        // no second click-to-collapse layer of its own.
+        // Plain header strip — a title plus a trailing action slot the dock
+        // fills with a minimise button.
         let header = GtkBox::new(Orientation::Horizontal, 6);
         header.set_css_classes(&["rhyme-search-header"]);
 
         let title = Label::new(Some("Rhyme Search"));
         title.set_css_classes(&["rhyme-search-title"]);
+        title.set_hexpand(true);
+        title.set_halign(gtk::Align::Start);
+
+        let header_actions = GtkBox::new(Orientation::Horizontal, 2);
 
         header.append(&title);
+        header.append(&header_actions);
         container.set_visible(false);
 
         // Create a `Frame` to match the styling of `TextEditor`
@@ -173,11 +179,18 @@ impl RhymeSearch {
             collapsed,
             on_toggle,
             word_input,
+            header_actions,
         }
     }
 
     pub fn get_widget(&self) -> &Frame {
         &self.frame
+    }
+
+    /// The trailing action area of the header, for the dock to drop a
+    /// minimise button into.
+    pub fn header_actions(&self) -> GtkBox {
+        self.header_actions.clone()
     }
 
     pub fn is_collapsed(&self) -> bool {

@@ -1,13 +1,15 @@
 //! `DockArea` — the JetBrains-style tool-window manager. It owns the nested
 //! `Paned` tree around the editor, one stripe per edge (Left / Right /
-//! Bottom), a per-edge header bar, and a registry of [`ToolWindow`]s. It is
-//! responsible for showing / hiding a window, remembering each edge's size
-//! and open/closed state (persisted to `config::dock_layout_file`), and
-//! restoring that on launch.
+//! Bottom), and a registry of [`ToolWindow`]s. It shows / hides a window,
+//! remembers each window's edge, size and open/closed state (persisted to
+//! `config::dock_layout_file`) and restores that on launch, and lets a
+//! window be dragged from one edge's stripe to another.
 //!
-//! P1 scope: one window visible per edge, chosen from that edge's stripe;
-//! no drag-to-move between edges yet (a follow-up), so a window always sits
-//! on its `default_anchor`.
+//! Each tool window keeps its own header (title + a minimise button the
+//! dock injects); the dock draws no header of its own. One window is
+//! visible per edge at a time, chosen from that edge's stripe. The bottom
+//! edge spans the full width — left tool window, editor and right tool
+//! window all sit above it.
 
 pub mod state;
 
@@ -16,9 +18,12 @@ use std::collections::HashMap;
 use std::rc::Rc;
 use std::time::Duration;
 
+use gtk::gdk;
 use gtk::glib;
 use gtk::prelude::*;
-use gtk::{Align, Box as GtkBox, Button, Label, Orientation, Paned, ToggleButton};
+use gtk::{
+    Align, Box as GtkBox, Button, DragSource, DropTarget, Label, Orientation, Paned, ToggleButton,
+};
 
 use crate::app::icons::img;
 use crate::app::tool_window::{Anchor, ToolWindow};
@@ -34,6 +39,8 @@ const SAVE_DEBOUNCE: Duration = Duration::from_millis(400);
 /// One registered tool window plus its live state.
 struct Slot {
     tw: ToolWindow,
+    /// Current edge — starts at `tw.default_anchor`, changed by a drag.
+    anchor: Cell<Anchor>,
     size: Cell<i32>,
     open: Cell<bool>,
     button: ToggleButton,
@@ -41,12 +48,10 @@ struct Slot {
 
 /// The widgets making up one dock edge.
 struct Edge {
+    /// The stripe of toggle buttons (one per window anchored here).
     stripe: GtkBox,
-    header_title: Label,
-    hide_button: Button,
-    /// Where the visible window's content widget is reparented.
-    content_slot: GtkBox,
-    /// `header + content_slot`; the collapsible child of `paned`.
+    /// Collapsible child of `paned`; the active window's content is
+    /// reparented straight into it.
     panel: GtkBox,
     /// The `Paned` whose collapsible child is `panel`.
     paned: Paned,
@@ -77,30 +82,46 @@ impl DockArea {
         bottom_stripe.remove_css_class("tool-stripe");
         bottom_stripe.add_css_class("bottom-stripe");
 
-        let (left_panel, left_title, left_hide, left_slot) = dock_panel();
-        let (right_panel, right_title, right_hide, right_slot) = dock_panel();
-        let (bottom_panel, bottom_title, bottom_hide, bottom_slot) = dock_panel();
+        let left_panel = dock_panel();
+        let right_panel = dock_panel();
+        let bottom_panel = dock_panel();
         left_panel.set_visible(false);
         right_panel.set_visible(false);
         bottom_panel.set_visible(false);
 
-        let center_right = split(Orientation::Horizontal, center, &right_panel);
-        let center_bottom = split(Orientation::Vertical, &center_right, &bottom_panel);
-        center_bottom.set_vexpand(true);
-        // left | (everything else): the collapsible child is the *start*.
-        let left_main = Paned::new(Orientation::Horizontal);
-        left_main.set_start_child(Some(&left_panel));
-        left_main.set_end_child(Some(&center_bottom));
-        left_main.set_resize_start_child(false);
-        left_main.set_resize_end_child(true);
-        left_main.set_shrink_start_child(false);
-        left_main.set_shrink_end_child(false);
-        left_main.set_hexpand(true);
+        // editor | right
+        let center_right = Paned::new(Orientation::Horizontal);
+        center_right.set_start_child(Some(center));
+        center_right.set_end_child(Some(&right_panel));
+        center_right.set_resize_start_child(true);
+        center_right.set_resize_end_child(false);
+        center_right.set_shrink_start_child(false);
+        center_right.set_shrink_end_child(false);
+
+        // left | (editor | right)
+        let mid_h = Paned::new(Orientation::Horizontal);
+        mid_h.set_start_child(Some(&left_panel));
+        mid_h.set_end_child(Some(&center_right));
+        mid_h.set_resize_start_child(false);
+        mid_h.set_resize_end_child(true);
+        mid_h.set_shrink_start_child(false);
+        mid_h.set_shrink_end_child(false);
+        mid_h.set_hexpand(true);
+
+        // (left | editor | right) over bottom — bottom spans the full width
+        let main_v = Paned::new(Orientation::Vertical);
+        main_v.set_start_child(Some(&mid_h));
+        main_v.set_end_child(Some(&bottom_panel));
+        main_v.set_resize_start_child(true);
+        main_v.set_resize_end_child(false);
+        main_v.set_shrink_start_child(false);
+        main_v.set_shrink_end_child(false);
+        main_v.set_vexpand(true);
 
         let body = GtkBox::new(Orientation::Horizontal, 0);
         body.set_vexpand(true);
         body.append(&left_stripe);
-        body.append(&left_main);
+        body.append(&main_v);
         body.append(&right_stripe);
 
         let root = GtkBox::new(Orientation::Vertical, 0);
@@ -112,11 +133,8 @@ impl DockArea {
             Anchor::Left,
             Edge {
                 stripe: left_stripe,
-                header_title: left_title,
-                hide_button: left_hide,
-                content_slot: left_slot,
                 panel: left_panel,
-                paned: left_main,
+                paned: mid_h,
                 panel_is_end: false,
             },
         );
@@ -124,9 +142,6 @@ impl DockArea {
             Anchor::Right,
             Edge {
                 stripe: right_stripe,
-                header_title: right_title,
-                hide_button: right_hide,
-                content_slot: right_slot,
                 panel: right_panel,
                 paned: center_right,
                 panel_is_end: true,
@@ -136,11 +151,8 @@ impl DockArea {
             Anchor::Bottom,
             Edge {
                 stripe: bottom_stripe,
-                header_title: bottom_title,
-                hide_button: bottom_hide,
-                content_slot: bottom_slot,
                 panel: bottom_panel,
-                paned: center_bottom,
+                paned: main_v,
                 panel_is_end: true,
             },
         );
@@ -159,11 +171,34 @@ impl DockArea {
                 edge.paned
                     .connect_position_notify(move |_| dock.on_splitter_moved(anchor));
             }
+            // Each stripe is a drop target: dropping a window's id here moves
+            // that window to this edge.
+            let drop = DropTarget::new(glib::types::Type::STRING, gdk::DragAction::MOVE);
+            {
+                let stripe = edge.stripe.clone();
+                drop.connect_enter(move |_, _, _| {
+                    stripe.add_css_class("drop-zone-active");
+                    gdk::DragAction::MOVE
+                });
+            }
+            {
+                let stripe = edge.stripe.clone();
+                drop.connect_leave(move |_| stripe.remove_css_class("drop-zone-active"));
+            }
             {
                 let dock = dock.clone();
-                edge.hide_button
-                    .connect_clicked(move |_| dock.close_edge(anchor));
+                let stripe = edge.stripe.clone();
+                drop.connect_drop(move |_, value, _, _| {
+                    stripe.remove_css_class("drop-zone-active");
+                    if let Ok(id) = value.get::<String>() {
+                        dock.move_window(&id, anchor);
+                        true
+                    } else {
+                        false
+                    }
+                });
             }
+            edge.stripe.add_controller(drop);
         }
 
         dock
@@ -174,8 +209,9 @@ impl DockArea {
         &self.root
     }
 
-    /// Register a tool window: add its stripe button and record it. Call
-    /// [`DockArea::restore`] once every window is registered.
+    /// Register a tool window: add its stripe button, inject a minimise
+    /// button into its own header, and record it. Call [`DockArea::restore`]
+    /// once every window is registered.
     pub fn register(&self, tw: ToolWindow) {
         let anchor = tw.default_anchor;
         let Some(edge) = self.edges.get(&anchor) else {
@@ -198,9 +234,23 @@ impl DockArea {
                 dock.set_open(id, b.is_active());
             });
         }
+        add_drag_source(&button, id);
         edge.stripe.append(&button);
 
+        // Minimise button, in the panel's *own* header (the dock has none).
+        let hide = Button::builder()
+            .css_classes(["flat", "tool-window-hide"])
+            .tooltip_text("Hide")
+            .child(&img("hide", 14))
+            .build();
+        {
+            let dock = self.clone();
+            hide.connect_clicked(move |_| dock.set_open(id, false));
+        }
+        tw.header_actions.append(&hide);
+
         let slot = Rc::new(Slot {
+            anchor: Cell::new(anchor),
             size: Cell::new(tw.default_size.clamp(MIN_SIZE, MAX_SIZE)),
             open: Cell::new(false),
             button,
@@ -221,56 +271,96 @@ impl DockArea {
     /// Toggle a window open/closed (the `app.*` action and stripe button
     /// both route here).
     pub fn toggle(&self, id: &str) {
-        let is_open = self
-            .slots
-            .borrow()
-            .get(id)
-            .map(|s| s.open.get())
-            .unwrap_or(false);
+        let is_open = self.is_open(id);
         self.set_open(id, !is_open);
     }
 
-    /// Load the saved layout and apply it (sizes + which windows are open),
+    /// Move a window to another edge — reparents its stripe button, closes
+    /// and reopens it on the new edge if it was visible, and persists the
+    /// new anchor.
+    pub fn move_window(&self, id: &str, new_anchor: Anchor) {
+        let Some(slot) = self.slots.borrow().get(id).cloned() else {
+            return;
+        };
+        let old_anchor = slot.anchor.get();
+        if old_anchor == new_anchor {
+            return;
+        }
+        if !self.edges.contains_key(&new_anchor) {
+            return;
+        }
+
+        let was_open = slot.open.get();
+        if was_open {
+            self.set_open(id, false);
+        }
+
+        if let Some(old_edge) = self.edges.get(&old_anchor) {
+            old_edge.stripe.remove(&slot.button);
+        }
+        slot.button
+            .set_css_classes(&[stripe_button_class(new_anchor)]);
+        slot.button.set_child(Some(&stripe_button_child(
+            new_anchor,
+            slot.tw.title,
+            slot.tw.icon,
+        )));
+        if let Some(new_edge) = self.edges.get(&new_anchor) {
+            new_edge.stripe.append(&slot.button);
+        }
+        slot.anchor.set(new_anchor);
+
+        if was_open {
+            self.set_open(id, true);
+        }
+        self.persist();
+    }
+
+    /// Load the saved layout and apply it (edge + size + open state),
     /// falling back to each window's own defaults.
     pub fn restore(&self) {
         let layout = DockLayout::load();
         let ids: Vec<&'static str> = self.slots.borrow().keys().copied().collect();
         for id in ids {
-            let open = {
+            let (target_anchor, open) = {
                 let slots = self.slots.borrow();
                 let Some(slot) = slots.get(id) else { continue };
-                let (size, open) = match layout.windows.get(id) {
-                    Some(w) => (w.size.clamp(MIN_SIZE, MAX_SIZE), w.open),
-                    None => (
-                        slot.tw.default_size.clamp(MIN_SIZE, MAX_SIZE),
-                        slot.tw.default_open,
-                    ),
-                };
-                slot.size.set(size);
-                open
+                match layout.windows.get(id) {
+                    Some(w) => {
+                        slot.size.set(w.size.clamp(MIN_SIZE, MAX_SIZE));
+                        (Anchor::parse(&w.anchor, slot.tw.default_anchor), w.open)
+                    }
+                    None => {
+                        slot.size
+                            .set(slot.tw.default_size.clamp(MIN_SIZE, MAX_SIZE));
+                        (slot.tw.default_anchor, slot.tw.default_open)
+                    }
+                }
             };
+            self.move_window(id, target_anchor);
             if open {
                 self.set_open(id, true);
             }
         }
     }
 
-    /// Close everything, reset every window to its default size, reopen the
-    /// defaults — "Window → Restore Default Layout".
+    /// Close everything, reset every window to its default edge + size,
+    /// reopen the defaults — "Window → Restore Default Layout".
     pub fn restore_default_layout(&self) {
         let ids: Vec<&'static str> = self.slots.borrow().keys().copied().collect();
         for id in &ids {
             self.set_open(id, false);
         }
         for id in &ids {
-            let default_open = {
+            let (anchor, open) = {
                 let slots = self.slots.borrow();
                 let Some(slot) = slots.get(id) else { continue };
                 slot.size
                     .set(slot.tw.default_size.clamp(MIN_SIZE, MAX_SIZE));
-                slot.tw.default_open
+                (slot.tw.default_anchor, slot.tw.default_open)
             };
-            if default_open {
+            self.move_window(id, anchor);
+            if open {
                 self.set_open(id, true);
             }
         }
@@ -279,23 +369,11 @@ impl DockArea {
 
     // --- internals -------------------------------------------------------
 
-    fn close_edge(&self, anchor: Anchor) {
-        let open_id = self
-            .slots
-            .borrow()
-            .values()
-            .find(|s| s.tw.default_anchor == anchor && s.open.get())
-            .map(|s| s.tw.id);
-        if let Some(id) = open_id {
-            self.set_open(id, false);
-        }
-    }
-
     fn set_open(&self, id: &str, open: bool) {
         let Some(slot) = self.slots.borrow().get(id).cloned() else {
             return;
         };
-        let anchor = slot.tw.default_anchor;
+        let anchor = slot.anchor.get();
         let Some(edge) = self.edges.get(&anchor) else {
             return;
         };
@@ -309,7 +387,7 @@ impl DockArea {
                 .slots
                 .borrow()
                 .values()
-                .filter(|s| s.tw.default_anchor == anchor && s.tw.id != slot.tw.id && s.open.get())
+                .filter(|s| s.anchor.get() == anchor && s.tw.id != slot.tw.id && s.open.get())
                 .cloned()
                 .collect();
             for sib in siblings {
@@ -317,8 +395,7 @@ impl DockArea {
                 sib.button.set_active(false);
             }
 
-            reparent(&slot.tw.content, &edge.content_slot);
-            edge.header_title.set_text(slot.tw.title);
+            reparent(&slot.tw.content, &edge.panel);
             edge.panel.set_visible(true);
             self.apply_size(edge, slot.size.get());
             slot.open.set(true);
@@ -328,7 +405,7 @@ impl DockArea {
                     .set(self.read_size(edge).clamp(MIN_SIZE, MAX_SIZE));
             }
             edge.panel.set_visible(false);
-            if edge.content_slot.first_child().as_ref() == Some(&slot.tw.content) {
+            if edge.panel.first_child().as_ref() == Some(&slot.tw.content) {
                 slot.tw.content.unparent();
             }
             slot.open.set(false);
@@ -385,7 +462,7 @@ impl DockArea {
             .slots
             .borrow()
             .values()
-            .find(|s| s.tw.default_anchor == anchor && s.open.get())
+            .find(|s| s.anchor.get() == anchor && s.open.get())
             .cloned();
         let Some(slot) = open_slot else { return };
         slot.size
@@ -407,7 +484,7 @@ impl DockArea {
             layout.windows.insert(
                 slot.tw.id.to_string(),
                 WindowState {
-                    anchor: slot.tw.default_anchor.as_str().to_string(),
+                    anchor: slot.anchor.get().as_str().to_string(),
                     size: slot.size.get(),
                     open: slot.open.get(),
                 },
@@ -417,20 +494,21 @@ impl DockArea {
     }
 }
 
-/// A `Paned` with `start | end`, start resizable, neither shrinkable.
-fn split(
-    orientation: Orientation,
-    start: &impl IsA<gtk::Widget>,
-    end: &impl IsA<gtk::Widget>,
-) -> Paned {
-    let p = Paned::new(orientation);
-    p.set_start_child(Some(start));
-    p.set_end_child(Some(end));
-    p.set_resize_start_child(true);
-    p.set_resize_end_child(false);
-    p.set_shrink_start_child(false);
-    p.set_shrink_end_child(false);
-    p
+/// Add a `DragSource` carrying `id` to a stripe button, so it can be
+/// dragged onto another edge's stripe. Mirrors `file/tree.rs`'s DnD.
+fn add_drag_source(button: &ToggleButton, id: &'static str) {
+    let source = DragSource::new();
+    source.set_actions(gdk::DragAction::MOVE);
+    source.connect_prepare(move |_, _, _| Some(gdk::ContentProvider::for_value(&id.to_value())));
+    {
+        let button = button.clone();
+        source.connect_drag_begin(move |_, _| button.add_css_class("dragging"));
+    }
+    {
+        let button = button.clone();
+        source.connect_drag_end(move |_, _, _| button.remove_css_class("dragging"));
+    }
+    button.add_controller(source);
 }
 
 /// Make `child` the sole child of `parent`, detaching `child` from any
@@ -486,36 +564,11 @@ fn stripe_button_child(anchor: Anchor, title: &str, icon: &str) -> GtkBox {
     }
 }
 
-/// Build one edge's collapsible panel: `header (title + hide) over content`.
-/// Returns `(panel, title_label, hide_button, content_slot)`.
-fn dock_panel() -> (GtkBox, Label, Button, GtkBox) {
-    let panel = GtkBox::builder()
+/// One edge's collapsible panel — a bare box the active window's content is
+/// reparented into (the window brings its own header).
+fn dock_panel() -> GtkBox {
+    GtkBox::builder()
         .orientation(Orientation::Vertical)
         .css_classes(["dock-panel"])
-        .build();
-
-    let header = GtkBox::new(Orientation::Horizontal, 4);
-    header.add_css_class("tool-window-header");
-    let title = Label::new(None);
-    title.set_css_classes(&["tool-window-title"]);
-    title.set_halign(Align::Start);
-    let spacer = GtkBox::new(Orientation::Horizontal, 0);
-    spacer.set_hexpand(true);
-    let hide = Button::builder()
-        .css_classes(["flat", "tool-window-hide"])
-        .tooltip_text("Hide")
-        .label("\u{2715}")
-        .build();
-    header.append(&title);
-    header.append(&spacer);
-    header.append(&hide);
-
-    let content_slot = GtkBox::new(Orientation::Vertical, 0);
-    content_slot.set_vexpand(true);
-    content_slot.set_hexpand(true);
-
-    panel.append(&header);
-    panel.append(&content_slot);
-
-    (panel, title, hide, content_slot)
+        .build()
 }
