@@ -1,0 +1,27 @@
+/* Embedded Terminal tool window (src/app/terminal_panel.rs). The grid
+   itself is drawn in Rust (cairo); this only styles the frame + header.
+   Boxy, no rounded corners. */
+
+frame.terminal-container {
+    background: var(--bg-darkest);
+    border-top: 1px solid var(--border-dark);
+    margin: 0;
+}
+
+.terminal-header {
+    background-color: var(--bg-dark);
+    border-bottom: 1px solid var(--border-dark);
+    padding: 3px 4px 3px 8px;
+    min-height: 24px;
+}
+
+.terminal-title {
+    color: var(--text-not-so-dim);
+    font-weight: bold;
+    font-size: 11px;
+    background-color: transparent;
+}
+
+.terminal-view {
+    background-color: var(--bg-darkest);
+}

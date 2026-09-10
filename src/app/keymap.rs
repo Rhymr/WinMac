@@ -135,6 +135,12 @@ pub const ACTIONS: &[ActionSpec] = &[
         default_accel: "none",
     },
     ActionSpec {
+        action: "toggle-terminal",
+        label: "Terminal Tool Window",
+        group: "Window",
+        default_accel: "<Alt>F12",
+    },
+    ActionSpec {
         action: "restore-default-layout",
         label: "Restore Default Layout",
         group: "Window",

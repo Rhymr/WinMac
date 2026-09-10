@@ -12,4 +12,5 @@ pub mod platform;
 pub mod rhyme;
 pub mod setting;
 pub mod source;
+pub mod terminal;
 pub mod workspace;

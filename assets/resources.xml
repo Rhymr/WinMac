@@ -32,6 +32,7 @@
     <file compressed="true" preprocess="xml-stripblanks">icons/color/folder-unloaded-color.svg</file>
     <file compressed="true" preprocess="xml-stripblanks">icons/color/missing-folder-color.svg</file>
     <file compressed="true" preprocess="xml-stripblanks">icons/color/hide-color.svg</file>
+    <file compressed="true" preprocess="xml-stripblanks">icons/color/terminal-color.svg</file>
     <file compressed="true" preprocess="xml-stripblanks">icons/dark/new-file-dark.svg</file>
     <file compressed="true" preprocess="xml-stripblanks">icons/dark/new-folder-dark.svg</file>
     <file compressed="true" preprocess="xml-stripblanks">icons/dark/save-all-dark.svg</file>
@@ -59,6 +60,7 @@
     <file compressed="true" preprocess="xml-stripblanks">icons/dark/folder-unloaded-dark.svg</file>
     <file compressed="true" preprocess="xml-stripblanks">icons/dark/missing-folder-dark.svg</file>
     <file compressed="true" preprocess="xml-stripblanks">icons/dark/hide-dark.svg</file>
+    <file compressed="true" preprocess="xml-stripblanks">icons/dark/terminal-dark.svg</file>
     <file compressed="true" preprocess="xml-stripblanks">icons/light/new-file-light.svg</file>
     <file compressed="true" preprocess="xml-stripblanks">icons/light/new-folder-light.svg</file>
     <file compressed="true" preprocess="xml-stripblanks">icons/light/save-all-light.svg</file>
@@ -86,5 +88,6 @@
     <file compressed="true" preprocess="xml-stripblanks">icons/light/folder-unloaded-light.svg</file>
     <file compressed="true" preprocess="xml-stripblanks">icons/light/missing-folder-light.svg</file>
     <file compressed="true" preprocess="xml-stripblanks">icons/light/hide-light.svg</file>
+    <file compressed="true" preprocess="xml-stripblanks">icons/light/terminal-light.svg</file>
   </gresource>
 </gresources>

@@ -7,7 +7,7 @@ use std::process::Command;
 // `assets/scss/`. Precompiled here to `assets/css/*.css` (unused by the app
 // itself, which recompiles from source at runtime, but kept so the
 // compiled output isn't stale).
-const CSS_FILES: [&str; 16] = [
+const CSS_FILES: [&str; 17] = [
     "base",
     "chrome",
     "context_menu",
@@ -23,6 +23,7 @@ const CSS_FILES: [&str; 16] = [
     "settings",
     "splash",
     "status_bar",
+    "terminal",
     "welcome",
 ];
 
