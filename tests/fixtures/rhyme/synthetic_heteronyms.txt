@@ -1,0 +1,7 @@
+# name: synthetic_heteronyms
+# group A: tear near
+# group B: sow grow
+A single quiet falling tear
+she brushed it off as I came near
+The farmer went outside to sow
+the rows of wheat he hoped would grow

@@ -18,11 +18,11 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 
-/// Minimum acceptable micro-averaged F1 across all fixtures. Measured at
-/// 0.70 when the harness landed ("1/10" — poor recall, over-merging); the
-/// floor sits just under that and is ratcheted up as each accuracy stage
-/// lands. A drop below it fails local runs.
-const MIN_AGGREGATE_F1: f64 = 0.68;
+/// Minimum acceptable micro-averaged F1 across all fixtures. Started at 0.70
+/// when the harness landed ("1/10"); ratcheted up as each accuracy stage
+/// lands (stage 3, multi-pronunciation scoring: 0.74). A drop below it
+/// fails local runs.
+const MIN_AGGREGATE_F1: f64 = 0.72;
 
 /// `Settings::rhyme_stop_at_blank_line` default.
 const STOP_AT_BLANK_LINE: bool = true;

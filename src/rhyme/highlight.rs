@@ -437,17 +437,53 @@ fn tokenize(text: &str) -> Vec<WordSpan> {
     spans
 }
 
-/// One line's rhymeable syllables, in reading order across its
-/// non-stopword words, paired with each syllable's absolute character span
-/// in the document (parallel to `syllables`).
-struct LineSyllables {
+/// One pronunciation variant of one in-dictionary word on a line: its
+/// rhyme-eligible syllables and their absolute character spans (parallel).
+struct WordVariant {
     syllables: Vec<Syllable>,
     char_spans: Vec<(usize, usize)>,
+}
+
+/// One in-dictionary, non-stopword word on a line, with every CMUdict
+/// pronunciation kept so `score_lines` can score against the variant that
+/// actually rhymes — heteronyms ("read", "live", "bass", "tear", "wind",
+/// "lead") otherwise always resolve to whichever CMUdict lists first.
+struct LineWord {
+    variants: Vec<WordVariant>,
+}
+
+/// A line flattened for scoring: its syllable stream and the parallel
+/// absolute character span of each syllable.
+type FlatLine = (Vec<Syllable>, Vec<(usize, usize)>);
+
+/// One line's rhymeable words, in reading order. `score_lines` fixes a
+/// variant per word (once per line) and flattens to the syllable stream the
+/// Hirjee & Brown scorer reads, char spans riding along parallel.
+struct LineSyllables {
+    words: Vec<LineWord>,
     /// Whether the line's raw text is empty/whitespace-only — a stanza
     /// break the comparison window shouldn't cross (see `score_lines`).
-    /// Independent of whether `syllables` is empty, since a line of pure
-    /// stopwords is also syllable-empty but isn't a stanza boundary.
+    /// Independent of whether the line has any scorable words, since a line
+    /// of pure stopwords also has none but isn't a stanza boundary.
     is_blank: bool,
+}
+
+impl LineSyllables {
+    /// Flatten to one syllable stream plus parallel character spans, taking
+    /// variant `choice[w]` for word `w`. Words past the end of `choice`, or
+    /// an out-of-range index, fall back to variant 0 — the CMUdict-order
+    /// default, i.e. the pre-variant-selection behaviour.
+    fn flatten(&self, choice: &[usize]) -> FlatLine {
+        let mut syllables = Vec::new();
+        let mut char_spans = Vec::new();
+        for (w, word) in self.words.iter().enumerate() {
+            let picked = choice.get(w).copied().unwrap_or(0);
+            let variant = word.variants.get(picked).unwrap_or(&word.variants[0]);
+            syllables.extend(variant.syllables.iter().cloned());
+            char_spans.extend_from_slice(&variant.char_spans);
+        }
+        (syllables, char_spans)
+    }
 }
 
 /// Character offset of the start of each line (line 0 always starts at 0).
@@ -465,17 +501,16 @@ fn line_of(starts: &[usize], offset: usize) -> usize {
     starts.partition_point(|&s| s <= offset) - 1
 }
 
-/// Builds each line's syllable sequence for the Hirjee & Brown scorer. Only
-/// words the CMU dictionary knows contribute — there's no phoneme data to
-/// score an out-of-dictionary word against, so those are left to the
-/// separate exact-match fallback in `recompute`.
+/// Builds each line's words (every CMUdict pronunciation of each) for the
+/// Hirjee & Brown scorer. Only words the CMU dictionary knows contribute —
+/// there's no phoneme data to score an out-of-dictionary word against, so
+/// those are left to the separate exact-match fallback in `compute_groups`.
 fn build_lines(text: &str, spans: &[WordSpan]) -> Vec<LineSyllables> {
     let starts = line_start_offsets(text);
     let mut lines: Vec<LineSyllables> = text
         .split('\n')
         .map(|raw| LineSyllables {
-            syllables: Vec::new(),
-            char_spans: Vec::new(),
+            words: Vec::new(),
             is_blank: raw.trim().is_empty(),
         })
         .collect();
@@ -486,22 +521,35 @@ fn build_lines(text: &str, spans: &[WordSpan]) -> Vec<LineSyllables> {
             continue;
         }
         let lower = span.text.to_lowercase();
-        let Some(pron) = pronounce::resolve_first(&lower) else {
-            continue;
-        };
-        let syllables = syllables_from_pronunciation(&pron.phonemes);
-        if syllables.is_empty() {
-            continue;
-        }
-        let char_spans = orthographic_syllables(&lower, syllables.len());
-        let line = &mut lines[line_of(&starts, span.start)];
-        for (syllable, (s, e)) in syllables.into_iter().zip(char_spans) {
-            if e <= s {
+
+        let mut variants = Vec::new();
+        for pron in pronounce::resolve(&lower) {
+            let syllables = syllables_from_pronunciation(&pron.phonemes);
+            if syllables.is_empty() {
                 continue;
             }
-            line.syllables.push(syllable);
-            line.char_spans.push((span.start + s, span.start + e));
+            let char_spans = orthographic_syllables(&lower, syllables.len());
+            let mut variant = WordVariant {
+                syllables: Vec::new(),
+                char_spans: Vec::new(),
+            };
+            for (syllable, (s, e)) in syllables.into_iter().zip(char_spans) {
+                if e <= s {
+                    continue;
+                }
+                variant.syllables.push(syllable);
+                variant.char_spans.push((span.start + s, span.start + e));
+            }
+            if !variant.syllables.is_empty() {
+                variants.push(variant);
+            }
         }
+        if variants.is_empty() {
+            continue;
+        }
+        lines[line_of(&starts, span.start)]
+            .words
+            .push(LineWord { variants });
     }
 
     lines
@@ -600,6 +648,27 @@ fn stanza_bounded_window_start(
     start
 }
 
+/// The forward mirror of [`stanza_bounded_window_start`]: the last line
+/// (inclusive) that line `i` may look *ahead* to. Pass-1 variant selection
+/// needs this because a word is often disambiguated by the line that
+/// follows it — the first line of an AABB couplet has no earlier rhyme
+/// partner. Pass-2 scoring stays backward-only.
+fn stanza_bounded_window_end(
+    lines: &[LineSyllables],
+    i: usize,
+    stop_at_blank_line: bool,
+    line_window: usize,
+) -> usize {
+    let mut end = i;
+    for (k, line) in lines.iter().enumerate().skip(i + 1) {
+        if k - i > line_window || (stop_at_blank_line && line.is_blank) {
+            break;
+        }
+        end = k;
+    }
+    end
+}
+
 /// Runs Hirjee & Brown anchor-and-extend detection over every line against
 /// itself and its predecessors within `stanza_bounded_window_start`, unions
 /// the syllables on either side of every match scoring above
@@ -614,6 +683,77 @@ fn score_lines(
     stop_at_blank_line: bool,
     tuning: &RhymeTuning,
 ) -> Vec<Vec<(usize, usize)>> {
+    // Pass 1 — pick one pronunciation variant per word, once per line. A
+    // word with a single variant is fixed at 0. A heteronym is scored
+    // variant by variant against the default flattening of the earlier
+    // lines in its window and takes the strongest-rhyming one — but only if
+    // some variant clears `thresholds.anchor`, so an ambiguous word that
+    // rhymes with nothing keeps its CMUdict-order default and the output
+    // for heteronym-free text is byte-identical to before.
+    let default_flat: Vec<FlatLine> = lines.iter().map(|line| line.flatten(&[])).collect();
+
+    let mut choice: Vec<Vec<usize>> = Vec::with_capacity(lines.len());
+    for i in 0..lines.len() {
+        let window_start =
+            stanza_bounded_window_start(lines, i, stop_at_blank_line, tuning.line_window);
+        let window_end =
+            stanza_bounded_window_end(lines, i, stop_at_blank_line, tuning.line_window);
+        let mut line_choice = Vec::with_capacity(lines[i].words.len());
+        for word in &lines[i].words {
+            // Only a genuine heteronym is worth disambiguating: variants
+            // that rhyme differently, i.e. whose final syllable differs.
+            // Variants that differ only earlier — or in a medial consonant
+            // the coda split mis-attributes, e.g. "without" /wɪθ‑/ vs
+            // /wɪð‑/ — rhyme identically, so keeping the CMUdict-order
+            // default leaves heteronym-free output byte-for-byte unchanged.
+            let base_tail = word.variants[0].syllables.last();
+            let is_heteronym = word
+                .variants
+                .iter()
+                .skip(1)
+                .any(|v| v.syllables.last() != base_tail);
+            if !is_heteronym {
+                line_choice.push(0);
+                continue;
+            }
+            let mut best = (0usize, f32::NEG_INFINITY);
+            for (v, variant) in word.variants.iter().enumerate() {
+                let mut score = f32::NEG_INFINITY;
+                for (k, other) in default_flat
+                    .iter()
+                    .enumerate()
+                    .take(window_end + 1)
+                    .skip(window_start)
+                {
+                    if k == i {
+                        continue;
+                    }
+                    for span in find_rhymes(&variant.syllables, &other.0, &tuning.thresholds) {
+                        score = score.max(span.score);
+                    }
+                }
+                if score > best.1 {
+                    best = (v, score);
+                }
+            }
+            line_choice.push(if best.1 >= tuning.thresholds.anchor {
+                best.0
+            } else {
+                0
+            });
+        }
+        choice.push(line_choice);
+    }
+
+    let flat: Vec<FlatLine> = lines
+        .iter()
+        .enumerate()
+        .map(|(i, line)| line.flatten(&choice[i]))
+        .collect();
+
+    // Pass 2 — the original anchor-and-extend + union-find, over each
+    // line's chosen flattening. Syllable indices are stable across every
+    // comparison a line takes part in because its variant choice is fixed.
     let mut uf = UnionFind::new();
     let mut node_of: HashMap<(usize, usize), usize> = HashMap::new();
 
@@ -621,7 +761,7 @@ fn score_lines(
         let window_start =
             stanza_bounded_window_start(lines, i, stop_at_blank_line, tuning.line_window);
         for j in window_start..=i {
-            for span in find_rhymes(&lines[i].syllables, &lines[j].syllables, &tuning.thresholds) {
+            for span in find_rhymes(&flat[i].0, &flat[j].0, &tuning.thresholds) {
                 // Comparing a line against itself always scores a trivial
                 // full match on the identity span — not a real rhyme.
                 if i == j && span.a == span.b {
@@ -654,10 +794,7 @@ fn score_lines(
     let mut by_root: HashMap<usize, Vec<(usize, usize)>> = HashMap::new();
     for (&(line, syl), &node) in &node_of {
         let root = uf.find(node);
-        by_root
-            .entry(root)
-            .or_default()
-            .push(lines[line].char_spans[syl]);
+        by_root.entry(root).or_default().push(flat[line].1[syl]);
     }
 
     let mut groups: Vec<Vec<(usize, usize)>> = by_root
@@ -1324,7 +1461,7 @@ mod tests {
     }
 
     /// True if `span` (an absolute character range, as stored in a
-    /// `LineSyllables::char_spans` entry) falls within `word`'s own
+    /// `WordVariant::char_spans` entry) falls within `word`'s own
     /// character range — looser than an exact-offset comparison since
     /// `orthographic_syllables` trims a syllable's leading onset
     /// consonants off, so a monosyllabic word's stored span is a strict
@@ -1347,6 +1484,25 @@ mod tests {
             groups.iter().any(|g| g.iter().any(|m| falls_within(m, cat))
                 && g.iter().any(|m| falls_within(m, hat))),
             "expected \"cat\"/\"hat\" to form a rhyme group, got {groups:?}"
+        );
+    }
+
+    #[test]
+    fn score_lines_picks_the_pronunciation_variant_that_rhymes() {
+        // CMUdict lists "sow" as /saʊ/ (the animal) first and /soʊ/ (to
+        // plant) second; only the second rhymes with "grow". "sow" opens
+        // the couplet, so the variant has to be chosen from the *following*
+        // line — the forward half of the pass-1 window.
+        let text = "the farmer went outside to sow\nthe wheat he hoped so much would grow";
+        let spans = tokenize(text);
+        let lines = build_lines(text, &spans);
+        let groups = score_lines(&lines, true, &RhymeTuning::default());
+        let sow = spans.iter().find(|s| s.text == "sow").unwrap();
+        let grow = spans.iter().find(|s| s.text == "grow").unwrap();
+        assert!(
+            groups.iter().any(|g| g.iter().any(|m| falls_within(m, sow))
+                && g.iter().any(|m| falls_within(m, grow))),
+            "expected \"sow\"/\"grow\" to group once /soʊ/ is chosen, got {groups:?}"
         );
     }
 
@@ -1443,8 +1599,9 @@ mod tests {
         let lines = build_lines(text, &spans);
         assert_eq!(lines.len(), 1);
         // "the" is a stopword and "xyzzyplonk" isn't in the dictionary —
-        // only "cat"'s syllable should make it in.
-        assert_eq!(lines[0].syllables.len(), 1);
+        // only "cat" should make it in, as a single one-syllable word.
+        assert_eq!(lines[0].words.len(), 1);
+        assert_eq!(lines[0].words[0].variants[0].syllables.len(), 1);
     }
 
     #[test]

@@ -211,7 +211,7 @@ pub fn stress_score(a: StressLevel, b: StressLevel) -> f32 {
 /// A syllable reduced to the features that matter for rhyme: nucleus,
 /// stress, and coda. Onset consonants are never included — they don't
 /// participate in rhyme.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Syllable {
     pub vowel: Vowel,
     pub stress: StressLevel,
