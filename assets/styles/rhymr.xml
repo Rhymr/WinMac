@@ -26,4 +26,16 @@
   <style name="current-line-number" foreground="#a4a3a3" background="#323232" bold="true"/>
   <style name="current-line" background="#323232"/>
 
+  <!-- JSON syntax (issue #26). Only .json files get a GtkSourceView
+       language; json.lang maps its contexts onto these def:* styles.
+       Colours follow classic Darcula. -->
+  <style name="def:constant"         foreground="#9876aa"/>
+  <style name="def:string"           foreground="#6a8759"/>
+  <style name="def:special-char"     foreground="#cc7832"/>
+  <style name="def:decimal"          foreground="#6897bb"/>
+  <style name="def:floating-point"   foreground="#6897bb"/>
+  <style name="def:boolean"          foreground="#cc7832" bold="true"/>
+  <style name="def:special-constant" foreground="#cc7832" bold="true"/>
+  <style name="def:error"            foreground="#bc3f3c" bold="true"/>
+
 </style-scheme>

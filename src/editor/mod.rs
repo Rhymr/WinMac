@@ -678,6 +678,13 @@ impl TextEditor {
     /// Deliberately separate from construction/`set_text()`, so loading a
     /// tab's initial content never triggers a spurious save.
     pub fn set_path(&self, path: PathBuf) {
+        // Pick a GtkSourceView language from the extension: today only real
+        // `.json` files get one (issue #26); lyrics, notes and everything
+        // else stay plain text, exactly as before.
+        let language = language_for_path(&path);
+        self.buffer.set_highlight_syntax(language.is_some());
+        self.buffer.set_language(language.as_ref());
+
         self.current_path.replace(Some(path));
         spawn_recompute_vcs(
             &self.buffer,
@@ -799,6 +806,21 @@ fn rebuild_legend(row: &GtkBox, groups: &[crate::rhyme::highlight::RhymeGroup], 
 /// setting toggles while the group list hasn't changed).
 fn rebuild_legend_visibility(row: &GtkBox, enabled: bool) {
     row.set_visible(enabled && row.first_child().is_some());
+}
+
+/// The GtkSourceView language to syntax-highlight `path` with, or `None`
+/// to leave the buffer as plain text. Deliberately narrow: only real
+/// `.json` files in the workspace get a language (issue #26) — the bundled
+/// `json.lang` colours keys, strings, numbers, booleans and punctuation.
+/// Lyrics files, Apple Notes and every other extension stay plain so the
+/// rhyme/syllable tooling keeps the buffer to itself.
+fn language_for_path(path: &std::path::Path) -> Option<sourceview5::Language> {
+    let ext = path.extension()?.to_str()?.to_ascii_lowercase();
+    let id = match ext.as_str() {
+        "json" => "json",
+        _ => return None,
+    };
+    sourceview5::LanguageManager::default().language(id)
 }
 
 /// The GtkSourceView style scheme id (see assets/styles/*.xml) matching
