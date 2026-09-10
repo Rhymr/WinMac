@@ -741,6 +741,26 @@ struct RawGroup {
     label: String,
 }
 
+/// The rhyme grouping the app computes for `text`, as the character-span
+/// members of each group — the pure pipeline ([`compute_groups`]) with the
+/// theme, palette and buffer-painting layers stripped off. Groups come back
+/// in colour-assignment order (fallback groups first, then Hirjee & Brown
+/// scored groups), each group's spans in ascending order.
+///
+/// This is the seam the offline grouping-accuracy harness
+/// (`tests/rhyme_grouping.rs`) measures against; the app itself never calls
+/// it, going through [`attach`] / `spawn_recompute` instead.
+pub fn group_spans(
+    text: &str,
+    stop_at_blank_line: bool,
+    tuning: RhymeTuning,
+) -> Vec<Vec<(usize, usize)>> {
+    compute_groups(text, stop_at_blank_line, &tuning)
+        .into_iter()
+        .map(|group| group.spans)
+        .collect()
+}
+
 /// Pure, `Send`-safe rhyme grouping over `text` — everything the recompute
 /// does that doesn't touch a `TextBuffer`, so it can run on a worker
 /// thread. Returned spans are character offsets into `text` (0 = first
