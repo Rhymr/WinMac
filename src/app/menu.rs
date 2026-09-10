@@ -44,11 +44,15 @@ fn git(app: &Application, workspace_controller: Rc<WorkspaceController>) -> Menu
     commit_section.append(Some("Commit…"), Some("app.git-commit"));
     git_menu.insert_section(0, None, &commit_section);
 
+    let view_section = gio::Menu::new();
+    view_section.append(Some("Git Log"), Some("app.git-log"));
+    git_menu.insert_section(1, None, &view_section);
+
     let sync_section = gio::Menu::new();
     sync_section.append(Some("Push…"), Some("app.git-push"));
     sync_section.append(Some("Pull…"), Some("app.git-pull"));
     sync_section.append(Some("Fetch"), Some("app.git-fetch"));
-    git_menu.insert_section(1, None, &sync_section);
+    git_menu.insert_section(2, None, &sync_section);
 
     let controller = workspace_controller.clone();
     let app_weak = app.downgrade();
@@ -89,6 +93,11 @@ fn git(app: &Application, workspace_controller: Rc<WorkspaceController>) -> Menu
         }
     });
     app.add_action(&fetch_action);
+
+    let controller = workspace_controller.clone();
+    let git_log_action = gio::SimpleAction::new("git-log", None);
+    git_log_action.connect_activate(move |_, _| controller.toggle_git_log());
+    app.add_action(&git_log_action);
 
     git_menu
 }

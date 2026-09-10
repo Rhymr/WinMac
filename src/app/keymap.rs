@@ -116,6 +116,12 @@ pub const ACTIONS: &[ActionSpec] = &[
         group: "Version Control",
         default_accel: "<Primary>t",
     },
+    ActionSpec {
+        action: "git-log",
+        label: "Git Log",
+        group: "Version Control",
+        default_accel: "<Alt>9",
+    },
 ];
 
 /// Swap the `<Primary>` placeholder for the platform mod key.

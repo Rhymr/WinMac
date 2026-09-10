@@ -1,0 +1,161 @@
+/* Git Log — a bottom-docked JetBrains-style history tool window: a flat
+   header strip, a paged commit list on the left, the selected commit's
+   detail on the right. No card margins, no rounded corners. */
+
+frame.git-log-container {
+    background: var(--bg-darkest);
+    border-top: 1px solid var(--border-dark);
+    margin: 0;
+}
+
+/* The frame's label widget = the tool-window header strip. */
+.git-log-header {
+    background-color: var(--bg-dark);
+    border-bottom: 1px solid var(--border-dark);
+    padding: 3px 8px;
+    min-height: 24px;
+}
+
+.git-log-title {
+    color: var(--text-not-so-dim);
+    font-weight: bold;
+    font-size: 11px;
+    background-color: transparent;
+}
+
+.git-log-refresh {
+    min-width: 20px;
+    min-height: 20px;
+    padding: 0 4px;
+}
+
+/* Commit list ---------------------------------------------------------- */
+
+.git-log-commits {
+    background-color: var(--bg-darkest);
+    padding: 2px 0;
+
+    & > row {
+        padding: 1px 4px;
+        margin: 0;
+        min-height: 22px;
+        background-color: var(--bg-darkest);
+        transition: background-color var(--transition-fast);
+    }
+
+    & > row:hover {
+        background-color: var(--bg-hover);
+    }
+
+    & > row:selected,
+    & > row:selected * {
+        background-color: var(--selection-bg);
+        color: var(--selection-fg);
+    }
+}
+
+.git-log-commit {
+    background-color: transparent;
+}
+
+.git-log-rail {
+    background-color: transparent;
+    min-width: 14px;
+}
+
+.git-log-subject {
+    color: var(--text-dim);
+    background-color: transparent;
+}
+
+.git-log-author {
+    color: var(--text-muted);
+    font-size: 11px;
+    background-color: transparent;
+}
+
+.git-log-date {
+    color: var(--text-number);
+    font-size: 11px;
+    background-color: transparent;
+}
+
+/* Ref chips ---------------------------------------------------------- */
+
+.git-log-ref-chip {
+    font-size: 10px;
+    font-weight: bold;
+    padding: 0 5px;
+    margin: 0 1px;
+    color: var(--selection-fg);
+    background-color: var(--text-muted);
+}
+
+.git-log-ref-chip.ref-head {
+    background-color: var(--vcs-added);
+}
+
+.git-log-ref-chip.ref-local {
+    background-color: var(--selection-bg);
+}
+
+.git-log-ref-chip.ref-remote {
+    background-color: var(--text-renamed);
+}
+
+.git-log-ref-chip.ref-tag {
+    background-color: var(--text-modified);
+}
+
+/* Detail pane ------------------------------------------------------------ */
+
+.git-log-detail {
+    background-color: var(--bg-darkest);
+    padding: 8px 10px;
+}
+
+.git-log-detail label {
+    background-color: transparent;
+    color: var(--text-dim);
+}
+
+.git-log-detail-hash {
+    color: var(--text-muted);
+    font-family: var(--app-font-family);
+}
+
+.git-log-detail-message {
+    color: var(--text-bright);
+}
+
+.git-log-files-title {
+    color: var(--text-not-so-dim);
+    font-weight: bold;
+    margin-top: 6px;
+}
+
+.git-log-file {
+    min-height: 20px;
+    background-color: transparent;
+}
+
+.git-log-file-badge {
+    font-weight: bold;
+    font-family: var(--app-font-family);
+}
+
+.git-log-file-badge.file-added {
+    color: var(--text-new);
+}
+
+.git-log-file-badge.file-deleted {
+    color: var(--destructive-text);
+}
+
+.git-log-file-badge.file-renamed {
+    color: var(--text-renamed);
+}
+
+.git-log-file-badge.file-modified {
+    color: var(--text-modified);
+}

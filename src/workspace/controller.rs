@@ -16,6 +16,11 @@ type NavListener = RefCell<Option<Box<dyn Fn(Vec<String>)>>>;
 type GitListener = RefCell<Option<Box<dyn Fn(GitAvailability)>>>;
 type RootListener = RefCell<Option<Box<dyn Fn(Option<PathBuf>)>>>;
 type SelectionListener = RefCell<Option<Box<dyn Fn(Option<String>)>>>;
+/// Fired to toggle the Git Log tool window open/closed.
+type GitLogToggleListener = RefCell<Option<Box<dyn Fn()>>>;
+/// Fired after any in-app git write (commit / pull / fetch) so views that
+/// show repo state — the Git Log panel especially — can re-read.
+type GitChangedListener = RefCell<Option<Box<dyn Fn()>>>;
 
 /// What git actions the loaded workspace supports — drives the toolbar's
 /// Git group (see `crate::app::chrome::main_toolbar`).
@@ -39,6 +44,8 @@ pub struct WorkspaceController {
     git_listener: GitListener,
     root_listener: RootListener,
     selection_listener: SelectionListener,
+    git_log_toggle_listener: GitLogToggleListener,
+    git_changed_listener: GitChangedListener,
 }
 
 impl Default for WorkspaceController {
@@ -59,6 +66,8 @@ impl WorkspaceController {
             git_listener: RefCell::new(None),
             root_listener: RefCell::new(None),
             selection_listener: RefCell::new(None),
+            git_log_toggle_listener: RefCell::new(None),
+            git_changed_listener: RefCell::new(None),
         }
     }
 
@@ -161,6 +170,36 @@ impl WorkspaceController {
 
         if let Some(listener) = self.git_listener.borrow().as_ref() {
             listener(availability);
+        }
+    }
+
+    /// Subscribe to Git Log open/close toggles (the `app.git-log` action and
+    /// the bottom-stripe button both route through here).
+    pub fn set_git_log_toggle_listener(&self, listener: impl Fn() + 'static) {
+        self.git_log_toggle_listener
+            .replace(Some(Box::new(listener)));
+    }
+
+    /// Toggle the Git Log tool window open/closed.
+    pub fn toggle_git_log(&self) {
+        if let Some(listener) = self.git_log_toggle_listener.borrow().as_ref() {
+            listener();
+        }
+    }
+
+    /// Subscribe to "git state changed" — fired by [`Self::notify_git_changed`]
+    /// after an in-app commit / pull / fetch.
+    pub fn set_git_changed_listener(&self, listener: impl Fn() + 'static) {
+        self.git_changed_listener.replace(Some(Box::new(listener)));
+    }
+
+    /// Re-derive branch + git availability and tell the Git Log panel to
+    /// reload. Call after any in-app git write.
+    pub fn notify_git_changed(&self) {
+        self.refresh_branch();
+        self.refresh_git_availability();
+        if let Some(listener) = self.git_changed_listener.borrow().as_ref() {
+            listener();
         }
     }
 
