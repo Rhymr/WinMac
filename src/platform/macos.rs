@@ -1,10 +1,21 @@
-use crate::platform::NoteRow;
+use crate::platform::{NoteRow, ShellSpec};
+use std::path::PathBuf;
 use std::process::Command;
 
 /// ASCII unit / record separators — a note's title or plain-text body will
 /// never contain these, so no escaping is needed. Must match `notes::cache`.
 const US: char = '\u{1f}';
 const RS: char = '\u{1e}';
+
+/// The user's login shell (`$SHELL`, else `/bin/zsh`), launched with `-l`
+/// so it sources the usual profile files.
+pub fn default_shell() -> ShellSpec {
+    let shell = std::env::var_os("SHELL")
+        .map(PathBuf::from)
+        .filter(|p| p.is_absolute())
+        .unwrap_or_else(|| PathBuf::from("/bin/zsh"));
+    (shell, vec!["-l".to_string()])
+}
 
 /// Read every Apple Note as `(folder, title, body)`, grouped by the folder
 /// it lives in. Runs `osascript` synchronously — call it off the GTK main

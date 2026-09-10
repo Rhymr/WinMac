@@ -8,7 +8,7 @@ use std::path::PathBuf;
 /// launch by `build_css`. The build script (`scripts.rs`) mirrors this list
 /// to precompile `assets/css/`; a new stylesheet's stem goes in `CSS_FILES`
 /// here **and** in `scripts.rs`.
-const CSS_FILES: [&str; 16] = [
+const CSS_FILES: [&str; 17] = [
     "base",
     "chrome",
     "context_menu",
@@ -24,6 +24,7 @@ const CSS_FILES: [&str; 16] = [
     "settings",
     "splash",
     "status_bar",
+    "terminal",
     "welcome",
 ];
 

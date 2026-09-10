@@ -110,6 +110,10 @@ pub fn create_main_layout() -> (GtkBox, Rc<WorkspaceController>) {
     let git_log_frame = git_log.get_widget().clone();
     git_log.set_expanded(true);
 
+    // Terminal — a bottom-docked tool window; the shell starts on first open.
+    let terminal = crate::app::terminal_panel::TerminalPanel::new();
+    let terminal_frame = terminal.get_widget().clone();
+
     // Read-only "Apple Notes" (and future external sources) tree, stacked
     // under the project tree in the left column. Workspace-independent:
     // it's re-pointed at each project's `.rhymr/` cache via the controller.
@@ -137,6 +141,7 @@ pub fn create_main_layout() -> (GtkBox, Rc<WorkspaceController>) {
 
     rhyme_frame.set_visible(true);
     git_log_frame.set_visible(true);
+    terminal_frame.set_visible(true);
 
     // The dock manager owns the Paned tree + per-edge stripes/headers. The
     // editor notebook is the centre; Project / Rhyme Search / Git Log are
@@ -174,6 +179,16 @@ pub fn create_main_layout() -> (GtkBox, Rc<WorkspaceController>) {
         content: git_log_frame.clone().upcast(),
         header_actions: git_log.header_actions(),
     });
+    dock.register(crate::app::tool_window::ToolWindow {
+        id: "terminal",
+        title: "Terminal",
+        icon: "terminal",
+        default_anchor: crate::app::tool_window::Anchor::Bottom,
+        default_size: bottom_default,
+        default_open: false,
+        content: terminal_frame.clone().upcast(),
+        header_actions: terminal.header_actions(),
+    });
 
     // Route the `app.*` tool-window actions through the dock.
     {
@@ -203,12 +218,14 @@ pub fn create_main_layout() -> (GtkBox, Rc<WorkspaceController>) {
         workspace_controller.set_git_changed_listener(move || git_log.refresh());
     }
 
-    // Keep the source panel and Git Log pointed at the workspace root.
+    // Keep the source panel, Git Log and Terminal pointed at the root.
     {
         let sp = source_panel.clone();
         let git_log = git_log.clone();
+        let terminal = terminal.clone();
         workspace_controller.set_root_listener(move |root| {
             git_log.set_repo(root.clone());
+            terminal.set_cwd(root.clone());
             sp.set_workspace_root(root);
         });
     }

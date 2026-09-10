@@ -112,6 +112,7 @@ fn window(app: &Application, workspace_controller: Rc<WorkspaceController>) -> M
     tools.append(Some("Project"), Some("app.toggle-project"));
     tools.append(Some("Rhyme Search"), Some("app.toggle-rhyme-search"));
     tools.append(Some("Git Log"), Some("app.git-log"));
+    tools.append(Some("Terminal"), Some("app.toggle-terminal"));
     window_menu.insert_section(0, None, &tools);
 
     let layout = Menu::new();
@@ -124,6 +125,7 @@ fn window(app: &Application, workspace_controller: Rc<WorkspaceController>) -> M
     for (name, id) in [
         ("toggle-project", "project"),
         ("toggle-rhyme-search", "rhyme-search"),
+        ("toggle-terminal", "terminal"),
     ] {
         let controller = workspace_controller.clone();
         let action = gio::SimpleAction::new(name, None);

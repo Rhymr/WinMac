@@ -90,6 +90,11 @@ pub fn dock_layout_file() -> Option<PathBuf> {
     Some(user_config_dir()?.join("dock-layout.json"))
 }
 
+/// Lines of scrollback the embedded terminal keeps per session.
+pub const TERMINAL_SCROLLBACK: usize = 10_000;
+/// Bytes read from the PTY per `read()` in the terminal reader thread.
+pub const TERMINAL_READ_BUF: usize = 8_192;
+
 /// How often the "Apple Notes" tree re-reads from the Notes app
 /// (Settings → Tools → Network & Sources; default 300s). Read once when
 /// the source panel arms its refresh timer.
